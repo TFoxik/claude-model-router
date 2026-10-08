@@ -27,7 +27,19 @@ export type Health = {
   fiveHour?: number
   resetMinutes?: number
 }
-export type PromptCost = { usd: number; requests: number; agents: string[] }
+export type PromptItem = {
+  id: string
+  route: string
+  label: string
+  model: string
+  requests: number
+  input: number
+  cacheRead: number
+  cacheWrite: number
+  output: number
+  usd: number
+}
+export type PromptCost = { usd: number; requests: number; items: PromptItem[] }
 export type ActiveRoute = {
   route: string
   model: string
@@ -48,6 +60,7 @@ declare module 'claude-code' {
       lastUsage: LastUsage | null
       health: Health | null
       promptCost: PromptCost | null
+      agentLabels: Record<string, string>
     }
   }
 }

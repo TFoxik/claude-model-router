@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, Register } from 'claude-code'
 
-import type { ActiveRoute, Effort, Health, LastUsage, PromptCost, RouteSetting, RouteSpend, RouterConfig } from '../types'
+import type { ActiveRoute, Effort, Health, LastUsage, PromptCost, PromptItem, RouteSetting, RouteSpend, RouterConfig } from '../types'
 import {
   AUTO_LABELS,
   DEFAULT_CONFIG,
@@ -28,6 +28,7 @@ import {
 } from './routes'
 
 const PANE = 'model-router'
+const LAST_PANE = 'model-router-last'
 const STORE_KEY = 'config'
 
 const config = atom({ plugin: 'model-router', key: 'config' } as const, DEFAULT_CONFIG)
@@ -38,6 +39,7 @@ const active = atom({ plugin: 'model-router', key: 'active' } as const, null as 
 const draft = atom({ plugin: 'model-router', key: 'draft' } as const, null as RouterConfig | null)
 const lastUsage = atom({ plugin: 'model-router', key: 'lastUsage' } as const, null as LastUsage | null)
 const health = atom({ plugin: 'model-router', key: 'health' } as const, null as Health | null)
+const agentLabels = atom({ plugin: 'model-router', key: 'agentLabels' } as const, {} as Record<string, string>)
 const promptCost = atom({ plugin: 'model-router', key: 'promptCost' } as const, null as PromptCost | null)
 const isBandShown = atom({ plugin: 'model-router', key: 'isBandShown' } as const, true)
 
@@ -84,7 +86,7 @@ async function refreshStatus($: $) {
 
 async function renderHealth($: $, e: Args<'ui.render'>, modes: readonly string[]) {
   const hp = await read($, health)
-  const { Box, Text } = $.ui.resolve(e)
+  const { Box, Text, Button } = $.ui.resolve(e)
   if (hp === null) return null
   const level = (value: number, warn: number, bad: number) => (value >= bad ? 'error' : value >= warn ? 'warning' : undefined)
   return (
@@ -103,9 +105,15 @@ async function renderHealth($: $, e: Args<'ui.render'>, modes: readonly string[]
         · ctx{' '}
         <Text color={level(hp.ctx, 70, 90)}>{hp.ctx}%</Text>
         {hp.fiveHour === undefined ? '' : ' · 5h '}
-        {hp.fiveHour === undefined ? null : <Text color={level(hp.fiveHour, 70, 90)}>{hp.fiveHour}%</Text>} · last{' '}
-        {money(hp.last)}
+        {hp.fiveHour === undefined ? null : <Text color={level(hp.fiveHour, 70, 90)}>{hp.fiveHour}%</Text>} ·{' '}
       </Text>
+      <Button
+        key="last-cost"
+        label={`last ${money(hp.last)}`}
+        plain
+        dimColor
+        onPress={() => $.ui.open({ id: LAST_PANE, title: 'Last prompt cost' })}
+      />
     </Box>
   )
 }
@@ -215,7 +223,7 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
         {lastPrompt ? (
           <Text dimColor>
             last prompt {money(lastPrompt.usd)} · {lastPrompt.requests} request{lastPrompt.requests === 1 ? '' : 's'}
-            {lastPrompt.agents.length > 0 ? ` · ${lastPrompt.agents.length} subagent${lastPrompt.agents.length === 1 ? '' : 's'}` : ''}
+            {subagentCount(lastPrompt) > 0 ? ` · ${subagentCount(lastPrompt)} subagent${subagentCount(lastPrompt) === 1 ? '' : 's'}` : ''}
           </Text>
         ) : null}
         {now?.isHeld ? <Text color="warning">auto kept the current effort to protect the cache</Text> : null}
@@ -347,6 +355,48 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
         ))}
         <Text dimColor>estimate · prices as of {PRICES_AS_OF} · cache writes at the {ttlMinutes === 60 ? '1-hour (2× input)' : '5-minute (1.25× input)'} rate</Text>
       </Box>
+    </Box>
+  )
+}
+
+const subagentCount = (p: PromptCost) => p.items.filter(one => one.id !== one.route).length
+
+async function renderLastPane($: $, e: Args<'ui.render'>) {
+  const p = await read($, promptCost)
+  const { Box, Text } = $.ui.resolve(e)
+  if (p === null || p.items.length === 0) return <Text dimColor>No requests in this prompt yet.</Text>
+  const main = p.items.filter(one => one.id === one.route)
+  const subs = p.items.filter(one => one.id !== one.route).sort((a, b) => b.usd - a.usd)
+  const subTotal = subs.reduce((sum, one) => sum + one.usd, 0)
+  const row = (one: PromptItem) => (
+    <Box key={`i:${one.id}`} flexDirection="column">
+      <Box flexDirection="row" gap={1}>
+        <Text color={colorOf(one.route)}>{bar(one.usd, p.usd, 10)}</Text>
+        <Box width={8}>
+          <Text bold>{money(one.usd)}</Text>
+        </Box>
+        <Text color={colorOf(one.route)} wrap="truncate-end">{one.label}</Text>
+      </Box>
+      <Text dimColor>
+        {'           '}
+        {labelOf(one.model)} · {one.requests} req · in {kTokens(one.input)} · cache {kTokens(one.cacheRead)}/{kTokens(one.cacheWrite)} · out {kTokens(one.output)}
+      </Text>
+    </Box>
+  )
+  return (
+    <Box flexDirection="column" gap={1}>
+      <Box flexDirection="row" justifyContent="space-between">
+        <Text bold color="claude">Last prompt</Text>
+        <Text bold>{money(p.usd)}</Text>
+      </Box>
+      <Text dimColor>
+        {p.requests} requests · main {money(p.usd - subTotal)} · {subs.length} subagent{subs.length === 1 ? '' : 's'} {money(subTotal)}
+      </Text>
+      <Box flexDirection="column" gap={1}>
+        {main.map(row)}
+        {subs.map(row)}
+      </Box>
+      <Text dimColor>estimate · resets when you send the next prompt</Text>
     </Box>
   )
 }
@@ -495,7 +545,10 @@ export const register: Register = on => {
     const started = await next(canRewrite && model ? { ...e, model } : e)
     if (e.workflow !== undefined) mem.pendingWorkflow = Math.max(0, mem.pendingWorkflow - 1)
     const id = started.agentId
-    if (id !== undefined) await update($, agents, map => ({ ...map, [id]: route }))
+    if (id !== undefined) {
+      await update($, agents, map => ({ ...map, [id]: route }))
+      await update($, agentLabels, map => ({ ...map, [id]: `${e.subagentType} · ${e.description}` }))
+    }
     return started
   })
 
@@ -512,7 +565,7 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     if (mem.isNewPrompt) {
       mem.isNewPrompt = false
-      await update($, promptCost, () => ({ usd: 0, requests: 0, agents: [] }))
+      await update($, promptCost, () => ({ usd: 0, requests: 0, items: [] }))
     }
     const route = (await read($, isPlan)) ? 'plan' : 'main'
     const { effort } = resolve(await read($, config), route)
@@ -558,14 +611,28 @@ export const register: Register = on => {
       const usage = result.usage
       const ttl = cfg.cacheTtlMinutes ?? DEFAULT_TTL
       await update($, spend, all => ({ ...all, [key]: addSpend(all[key] ?? EMPTY_SPEND, usage, usage.model, ttl) }))
-      const agentId = e.agentId
+      const itemId = e.agentId ?? key
+      const label = e.agentId === undefined ? (key === 'plan' ? 'Main loop (plan mode)' : 'Main loop') : ((await read($, agentLabels))[e.agentId] ?? key)
+      const usd = costOf(usage, usage.model, ttl)
       await update($, promptCost, p => {
-        const was = p ?? { usd: 0, requests: 0, agents: [] }
-        return {
-          usd: was.usd + costOf(usage, usage.model, ttl),
-          requests: was.requests + 1,
-          agents: agentId === undefined || was.agents.includes(agentId) ? was.agents : [...was.agents, agentId],
+        const was = p ?? { usd: 0, requests: 0, items: [] }
+        const old: PromptItem = was.items.find(one => one.id === itemId) ?? {
+          id: itemId, route: key, label, model: usage.model, requests: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, usd: 0,
         }
+        const item: PromptItem = {
+          ...old,
+          model: usage.model,
+          requests: old.requests + 1,
+          input: old.input + usage.input_tokens,
+          cacheRead: old.cacheRead + usage.cache_read_input_tokens,
+          cacheWrite: old.cacheWrite + usage.cache_creation_input_tokens,
+          output: old.output + usage.output_tokens,
+          usd: old.usd + usd,
+        }
+        const items = was.items.some(one => one.id === itemId)
+          ? was.items.map(one => (one.id === itemId ? item : one))
+          : [...was.items, item]
+        return { usd: was.usd + usd, requests: was.requests + 1, items }
       })
       if (e.agentId === undefined) {
         await update($, lastUsage, () => ({
@@ -630,6 +697,8 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, ($, e) => renderPane($, e))
+
+  on('ui.render', { component: 'Pane', requestId: LAST_PANE }, ($, e) => renderLastPane($, e))
 
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     if (e.component !== 'SessionMode') return next(e)

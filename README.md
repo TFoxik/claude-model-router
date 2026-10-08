@@ -17,7 +17,7 @@ Answer `y` to add the marketplace, then choose a scope (user scope loads it in e
 ## What you get
 
 - **Band above the prompt**: the route the last request used, the configured plan / main / sub routes, and the session cost. Buttons open the pane or hide the band.
-- **Footer**: `cache 96% 42m · ctx 31% · 5h 38% · last $0.05`, coloured by health. `42m` is how long the prompt cache stays warm since the last main-loop request, and it turns to `cold` once that runs out. `last` is the cost of your whole last prompt: every main-loop request plus every subagent it started (for example all four `/simplify` agents and the fixes), growing live while the prompt runs.
+- **Footer**: `cache 96% 42m · ctx 31% · 5h 38% · last $0.05`, coloured by health. `42m` is how long the prompt cache stays warm since the last main-loop request, and it turns to `cold` once that runs out. `last` is the cost of your whole last prompt: every main-loop request plus every subagent it started (for example all four `/simplify` agents and the fixes), growing live while the prompt runs. Click it to open a breakdown: main loop and each subagent with its model, requests, tokens and cost.
 - **`/route` pane**: model and effort per route, presets, and a per-route spend table. Edits stay a draft until you press **Apply**. The draft shows the per-turn cost change, the one-off cache rewrite cost, the plan-mode toggle cost and the payback.
 
 ## Commands
