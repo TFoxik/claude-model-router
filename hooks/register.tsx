@@ -29,6 +29,7 @@ import {
 
 const PANE = 'model-router'
 const LAST_PANE = 'model-router-last'
+const CTX_PANE = 'model-router-ctx'
 const STORE_KEY = 'config'
 
 const config = atom({ plugin: 'model-router', key: 'config' } as const, DEFAULT_CONFIG)
@@ -102,7 +103,11 @@ async function renderHealth($: $, e: Args<'ui.render'>, modes: readonly string[]
         {hp.warmMinutes === 0 ? null : (
           <Text color={hp.warmMinutes <= 5 ? 'warning' : undefined}>{hp.warmMinutes}m</Text>
         )}{' '}
-        · ctx{' '}
+        ·{' '}
+      </Text>
+      <Button key="ctx" label="ctx" plain dimColor onPress={() => $.ui.open({ id: CTX_PANE, title: 'Context' })} />
+      <Text dimColor wrap="truncate-end">
+        {' '}
         <Text color={level(hp.ctx, 70, 90)}>{hp.ctx}%</Text>
         {hp.fiveHour === undefined ? '' : ' · 5h '}
         {hp.fiveHour === undefined ? null : <Text color={level(hp.fiveHour, 70, 90)}>{hp.fiveHour}%</Text>} ·{' '}
@@ -141,7 +146,7 @@ const GROUPS: ReadonlyArray<{ title: string; keys: readonly string[] }> = [
 
 const pad = (text: string, width: number) => (text.length >= width ? text.slice(0, width) : text + ' '.repeat(width - text.length))
 const bar = (part: number, whole: number, width: number) => {
-  const filled = whole > 0 ? Math.max(part > 0 ? 1 : 0, Math.round((part / whole) * width)) : 0
+  const filled = whole > 0 ? Math.min(width, Math.max(part > 0 ? 1 : 0, Math.round((part / whole) * width))) : 0
   return '█'.repeat(filled) + '░'.repeat(width - filled)
 }
 
@@ -397,6 +402,76 @@ async function renderLastPane($: $, e: Args<'ui.render'>) {
         {subs.map(row)}
       </Box>
       <Text dimColor>estimate · resets when you send the next prompt</Text>
+    </Box>
+  )
+}
+
+async function renderCtxPane($: $, e: Args<'ui.render'>) {
+  const { Box, Text } = $.ui.resolve(e)
+  const columns = e.component === 'Pane' ? e.props.bodyColumns : 80
+  const { context } = await $.session.usage({ breakdown: 'summary', columns })
+  const b = context.breakdown
+  if (b === undefined) return <Text dimColor>No context breakdown available yet.</Text>
+  const used = b.categories.filter(one => one.kind === 'used').sort((x, y) => y.tokens - x.tokens)
+  const deferred = b.categories.filter(one => one.kind === 'deferred')
+  const free = b.categories.find(one => one.kind === 'free')
+  const buffer = b.categories.find(one => one.kind === 'buffer')
+  const servers = new Map<string, number>()
+  for (const tool of b.mcpTools) servers.set(tool.serverName, (servers.get(tool.serverName) ?? 0) + tool.tokens)
+  const topServers = [...servers.entries()].sort((x, y) => y[1] - x[1]).slice(0, 5)
+  const topMemory = [...b.memoryFiles].sort((x, y) => y.tokens - x.tokens).slice(0, 5)
+  const untilCompact = b.autoCompactThreshold === undefined ? undefined : b.autoCompactThreshold - b.totalTokens
+  const pct = (tokens: number) => `${((tokens / b.rawMaxTokens) * 100).toFixed(1)}%`
+  const line = (key: string, name: string, tokens: number, color?: string, isDim?: boolean) => (
+    <Box key={key} flexDirection="row" gap={1}>
+      <Text color={color} dimColor={isDim}>{bar(tokens, b.rawMaxTokens, 12)}</Text>
+      <Box width={7}>
+        <Text dimColor={isDim}>{kTokens(tokens)}</Text>
+      </Box>
+      <Box width={6}>
+        <Text dimColor>{pct(tokens)}</Text>
+      </Box>
+      <Text dimColor={isDim} wrap="truncate-end">{name}</Text>
+    </Box>
+  )
+  return (
+    <Box flexDirection="column" gap={1}>
+      <Box flexDirection="row" justifyContent="space-between">
+        <Text bold color="claude">Context · {b.model}</Text>
+        <Text bold color={b.percentage >= 90 ? 'error' : b.percentage >= 70 ? 'warning' : undefined}>
+          {kTokens(b.totalTokens)} / {kTokens(b.rawMaxTokens)} ({b.percentage}%)
+        </Text>
+      </Box>
+      <Text dimColor>
+        {b.isAutoCompactEnabled && untilCompact !== undefined
+          ? `auto-compact at ${kTokens(b.autoCompactThreshold ?? 0)} · ${kTokens(Math.max(0, untilCompact))} to go · the cache restarts there, the cheapest moment to change routes`
+          : 'auto-compact off'}
+      </Text>
+      <Box flexDirection="column">
+        <Text bold dimColor>IN USE</Text>
+        {used.map(one => line(`u:${one.name}`, one.name, one.tokens, one.color))}
+        {deferred.map(one => line(`d:${one.name}`, `${one.name} (deferred, not sent)`, one.tokens, undefined, true))}
+        {free ? line('free', 'Free space', free.tokens, undefined, true) : null}
+        {buffer ? line('buffer', 'Compaction buffer', buffer.tokens, undefined, true) : null}
+      </Box>
+      {topServers.length > 0 ? (
+        <Box flexDirection="column">
+          <Text bold dimColor>MCP SERVERS</Text>
+          {topServers.map(([name, tokens]) => line(`m:${name}`, name, tokens, 'suggestion'))}
+        </Box>
+      ) : null}
+      {topMemory.length > 0 ? (
+        <Box flexDirection="column">
+          <Text bold dimColor>MEMORY FILES</Text>
+          {topMemory.map(one => line(`f:${one.path}`, `${one.type} · ${one.path.replace(/^.*\/(?=[^/]+\/[^/]+$)/, '…/')}`, one.tokens, 'planMode'))}
+        </Box>
+      ) : null}
+      {b.skills ? (
+        <Text dimColor>
+          skills listing {kTokens(b.skills.tokens)} ({b.skills.includedSkills}/{b.skills.totalSkills} listed)
+        </Text>
+      ) : null}
+      <Text dimColor>estimated locally, as /context does without counting requests</Text>
     </Box>
   )
 }
@@ -699,6 +774,8 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, ($, e) => renderPane($, e))
 
   on('ui.render', { component: 'Pane', requestId: LAST_PANE }, ($, e) => renderLastPane($, e))
+
+  on('ui.render', { component: 'Pane', requestId: CTX_PANE }, ($, e) => renderCtxPane($, e))
 
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     if (e.component !== 'SessionMode') return next(e)

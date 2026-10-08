@@ -277,10 +277,12 @@ test('footer shows cache, context and the 5h window', async ($, on) => {
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   const ui = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
   await step($, 'h1')
-  expect(await ui.find({ type: 'Text', text: 'cache 96% 60m · ctx 10% · 5h 38% · ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'cache 96% 60m · ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 10% · 5h 38% · ' })).toBeDefined()
+  expect((await ui.find({ key: 'ctx' }))?.text).toBe('ctx')
   expect((await ui.find({ key: 'last-cost' }))?.text).toBe('last $0.06')
   await clock.advance(61 * 60_000)
-  expect(await ui.find({ type: 'Text', text: 'cache cold · ctx 10% · 5h 38% · ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'cache cold · ' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -319,5 +321,49 @@ test('last is the whole prompt: main steps and its subagents, reset on the next 
   await $.turn.start({ text: 'next', turnId: 'p2' })
   await step($, 'p2')
   expect((await ui.find({ key: 'last-cost' }))?.text).toBe('last $0.0040')
+  await ui.unmount()
+})
+
+test('the context pane breaks the window down', async ($, on) => {
+  on('session.usage', () => ({
+    value: {
+      startedAt: 0,
+      rateLimits: [],
+      context: {
+        tokens: 120_000,
+        window: 1_000_000,
+        percent: 12,
+        breakdown: {
+          categories: [
+            { name: 'Messages', tokens: 80_000, color: 'claude', isDeferred: false, kind: 'used' },
+            { name: 'System tools', tokens: 30_000, color: 'subtle', isDeferred: false, kind: 'used' },
+            { name: 'MCP tools', tokens: 9000, color: 'suggestion', isDeferred: true, kind: 'deferred' },
+            { name: 'Free space', tokens: 800_000, color: 'subtle', isDeferred: false, kind: 'free' },
+          ],
+          totalTokens: 120_000,
+          maxTokens: 1_000_000,
+          rawMaxTokens: 1_000_000,
+          autocompactSource: 'model-default',
+          percentage: 12,
+          gridRows: [],
+          model: 'claude-opus-5-5',
+          memoryFiles: [{ path: '/Users/x/repo/CLAUDE.md', type: 'Project', tokens: 2000 }],
+          mcpTools: [
+            { name: 'search', serverName: 'jira', tokens: 4000 },
+            { name: 'get', serverName: 'jira', tokens: 1000 },
+          ],
+          agents: [],
+          autoCompactThreshold: 900_000,
+          isAutoCompactEnabled: true,
+          apiUsage: null,
+        },
+      },
+    } as never,
+  }))
+  const ui = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'Pane', requestId: 'model-router-ctx', props: {} as never })
+  expect(await ui.find({ type: 'Text', text: '120k / 1000k (12%)' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Messages' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'jira' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /780k to go/ })).toBeDefined()
   await ui.unmount()
 })
