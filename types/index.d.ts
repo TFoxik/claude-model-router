@@ -42,6 +42,16 @@ export type PromptItem = {
   usd: number
 }
 export type PromptCost = { usd: number; requests: number; items: PromptItem[] }
+export type PromptRecord = {
+  at: number
+  repo: string
+  label: string
+  text: string
+  usd: number
+  requests: number
+  agents: number
+  models?: Record<string, number>
+}
 export type ActiveRoute = {
   route: string
   model: string
@@ -63,6 +73,8 @@ declare module 'claude-code' {
       health: Health | null
       promptCost: PromptCost | null
       agentLabels: Record<string, string>
+      history: PromptRecord[]
+      statsScope: 'repo' | 'all'
     }
   }
 }

@@ -241,6 +241,45 @@ export function contextLevel(tokens: number, window: number, compactAt?: number)
   return toward >= 0.85 ? 'error' : toward >= 0.6 ? 'warning' : 'success'
 }
 
+export type StatsRecord = { at: number; repo: string; label: string; text: string; usd: number; requests: number; agents: number; models?: Record<string, number> }
+
+export const HISTORY_LIMIT = 2000
+
+export function commandLabel(text: string): string {
+  const first = text.trim().split(/\s+/)[0] ?? ''
+  return first.startsWith('/') && first.length > 1 ? first : 'prompt'
+}
+
+export function sameDay(a: number, b: number): boolean {
+  const x = new Date(a)
+  const y = new Date(b)
+  return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate()
+}
+
+export type CommandStats = { label: string; runs: number; total: number; avg: number; max: number; models: Record<string, number> }
+
+export function commandStats(records: readonly StatsRecord[]): CommandStats[] {
+  const by = new Map<string, CommandStats>()
+  for (const r of records) {
+    const was = by.get(r.label) ?? { label: r.label, runs: 0, total: 0, avg: 0, max: 0, models: {} }
+    const runs = was.runs + 1
+    const total = was.total + r.usd
+    const models = { ...was.models }
+    for (const [model, usd] of Object.entries(r.models ?? {})) models[model] = (models[model] ?? 0) + usd
+    by.set(r.label, { label: r.label, runs, total, avg: total / runs, max: Math.max(was.max, r.usd), models })
+  }
+  return [...by.values()].sort((a, b) => b.avg - a.avg)
+}
+
+/** `Opus 5.5 $4.10 · Sonnet 5.5 $2.00`, most expensive first. */
+export function modelMix(models: Record<string, number> | undefined, format: (usd: number) => string, limit = 3): string {
+  return Object.entries(models ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([model, usd]) => `${model} ${format(usd)}`)
+    .join(' · ')
+}
+
 export function money(usd: number): string {
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`
 }

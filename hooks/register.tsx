@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, BoxProps, ElementConstructor, EngineInterface, Register } from 'claude-code'
 
-import type { ActiveRoute, Effort, Health, LastUsage, PromptCost, PromptItem, RouteSetting, RouteSpend, RouterConfig } from '../types'
+import type { ActiveRoute, Effort, Health, LastUsage, PromptCost, PromptItem, PromptRecord, RouteSetting, RouteSpend, RouterConfig } from '../types'
 import {
   AUTO_LABELS,
   DEFAULT_CONFIG,
@@ -15,6 +15,11 @@ import {
   ROUTES,
   SUB_CONTEXT,
   addSpend,
+  HISTORY_LIMIT,
+  commandLabel,
+  commandStats,
+  modelMix,
+  sameDay,
   contextLevel,
   costOf,
   estimateChanges,
@@ -31,6 +36,7 @@ import {
 const PANE = 'model-router'
 const LAST_PANE = 'model-router-last'
 const CTX_PANE = 'model-router-ctx'
+const STATS_PANE = 'model-router-stats'
 const STORE_KEY = 'config'
 
 const config = atom({ plugin: 'model-router', key: 'config' } as const, DEFAULT_CONFIG)
@@ -42,6 +48,8 @@ const draft = atom({ plugin: 'model-router', key: 'draft' } as const, null as Ro
 const lastUsage = atom({ plugin: 'model-router', key: 'lastUsage' } as const, null as LastUsage | null)
 const health = atom({ plugin: 'model-router', key: 'health' } as const, null as Health | null)
 const agentLabels = atom({ plugin: 'model-router', key: 'agentLabels' } as const, {} as Record<string, string>)
+const history = atom({ plugin: 'model-router', key: 'history' } as const, [] as PromptRecord[])
+const statsScope = atom({ plugin: 'model-router', key: 'statsScope' } as const, 'repo' as 'repo' | 'all')
 const promptCost = atom({ plugin: 'model-router', key: 'promptCost' } as const, null as PromptCost | null)
 const isBandShown = atom({ plugin: 'model-router', key: 'isBandShown' } as const, true)
 
@@ -97,20 +105,123 @@ async function refreshStatus($: $) {
 
 const level = (value: number, warn: number, bad: number) => (value >= bad ? 'error' : value >= warn ? 'warning' : undefined)
 
-async function renderCacheFooter($: $, e: Args<'ui.render'>, modes: readonly string[]) {
-  const hp = await read($, health)
-  const { Box, Text } = $.ui.resolve(e)
-  if (hp === null) return null
-  const cacheColor = hp.cache < 50 ? 'error' : hp.cache < 80 ? 'warning' : 'success'
+function modelsOf(p: PromptCost): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const item of p.items) out[labelOf(item.model)] = (out[labelOf(item.model)] ?? 0) + item.usd
+  return out
+}
+
+async function recordPrompt($: $) {
+  const p = await read($, promptCost)
+  const meta = mem.current
+  mem.current = undefined
+  if (p === null || meta === undefined || p.usd <= 0) return
+  const rec: PromptRecord = {
+    at: meta.at,
+    repo: mem.repo,
+    label: meta.label,
+    text: meta.text,
+    usd: p.usd,
+    requests: p.requests,
+    agents: p.items.filter(one => one.id !== one.route).length,
+    models: modelsOf(p),
+  }
+  const next = await update($, history, all => [...all, rec].slice(-HISTORY_LIMIT))
+  await $.store.set('history', next)
+}
+
+async function renderStatsFooter($: $, e: Args<'ui.render'>, modes: readonly string[]) {
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const all = await read($, history)
+  const live = await read($, promptCost)
+  const now = await $.clock.now().catch(() => Date.now())
+  const today = all.filter(r => sameDay(r.at, now)).reduce((sum, r) => sum + r.usd, 0) + (live?.usd ?? 0)
   return (
     <Box flexDirection="row" flexShrink={0}>
-      <Text dimColor wrap="truncate-start">
-        {modes.length > 0 ? `${modes.join(' & ')}  ` : ''}
-        {'cache '}
-        {hp.warmMinutes === 0 ? <Text color="error">cold</Text> : <Text color={cacheColor}>{hp.cache}%</Text>}
-        {hp.warmMinutes === 0 ? null : ' '}
-        {hp.warmMinutes === 0 ? null : <Text color={hp.warmMinutes <= 5 ? 'warning' : undefined}>{hp.warmMinutes}m</Text>}
+      {modes.length > 0 ? <Text dimColor>{`${modes.join(' & ')}  `}</Text> : null}
+      <Button
+        key="stats"
+        label={`▤ today ${money(today)}`}
+        plain
+        dimColor
+        onPress={() => $.ui.open({ id: STATS_PANE, title: 'Stats' })}
+      />
+    </Box>
+  )
+}
+
+async function renderStatsPane($: $, e: Args<'ui.render'>) {
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const scope = await read($, statsScope)
+  const saved = await read($, history)
+  const live = await read($, promptCost)
+  const current = mem.current
+  const all: PromptRecord[] =
+    live && current && live.usd > 0
+      ? [...saved, { at: current.at, repo: mem.repo, label: current.label, text: current.text, usd: live.usd, requests: live.requests, agents: live.items.filter(one => one.id !== one.route).length, models: modelsOf(live) }]
+      : saved
+  const records = scope === 'repo' ? all.filter(r => r.repo === mem.repo) : all
+  const now = await $.clock.now().catch(() => Date.now())
+  const sum = (rs: readonly PromptRecord[]) => rs.reduce((acc, r) => acc + r.usd, 0)
+  const today = sum(records.filter(r => sameDay(r.at, now)))
+  const week = sum(records.filter(r => now - r.at < 7 * 86_400_000))
+  const commands = commandStats(records).slice(0, 10)
+  const priciest = [...records].sort((x, y) => y.usd - x.usd).slice(0, 8)
+  const setScope = async (next: 'repo' | 'all') => {
+    await update($, statsScope, () => next)
+    await $.store.set('statsScope', next)
+  }
+  const day = (at: number) => {
+    const d = new Date(at)
+    return `${d.getDate()}.${d.getMonth() + 1}.`
+  }
+  const row = (key: string, color: string | undefined, name: string, right: string, sub?: string) => (
+    <Box key={key} flexDirection="column">
+      <Box flexDirection="row" gap={1}>
+        <Box width={2} flexShrink={0}>
+          <Text color={color}>●</Text>
+        </Box>
+        <Box flexGrow={1} flexShrink={1}>
+          <Text wrap="truncate-end">{name}</Text>
+        </Box>
+        <Box width={8} flexShrink={0} justifyContent="flex-end">
+          <Text bold>{right}</Text>
+        </Box>
+      </Box>
+      {sub ? <Text dimColor>{`   ${sub}`}</Text> : null}
+    </Box>
+  )
+  return (
+    <Box flexDirection="column" gap={1}>
+      <Box flexDirection="row" justifyContent="space-between">
+        <Text bold color="claude">Stats · {scope === 'repo' ? mem.repo : 'all repos'}</Text>
+        <Box flexDirection="row" gap={1}>
+          <Button key="scope-repo" label="This repo" plain dimColor={scope !== 'repo'} onPress={() => setScope('repo')} />
+          <Button key="scope-all" label="All" plain dimColor={scope !== 'all'} onPress={() => setScope('all')} />
+        </Box>
+      </Box>
+      <Text dimColor>
+        today {money(today)} · 7 days {money(week)} · all {money(sum(records))} · {records.length} prompts
       </Text>
+      {records.length === 0 ? (
+        <Text dimColor>Nothing recorded yet.</Text>
+      ) : (
+        <>
+          <Box flexDirection="column">
+            <Text bold dimColor>COMMANDS · AVERAGE PER RUN</Text>
+            {commands.map(c =>
+              row(`c:${c.label}`, c.label === 'prompt' ? 'subtle' : 'suggestion', c.label, money(c.avg), [`${c.runs} run${c.runs === 1 ? '' : 's'} · total ${money(c.total)} · max ${money(c.max)}`, modelMix(c.models, money)].filter(Boolean).join('\n   ')),
+            )}
+          </Box>
+          <Box flexDirection="column">
+            <Text bold dimColor>MOST EXPENSIVE PROMPTS</Text>
+            {priciest.map((r, i) =>
+              row(`p:${i}`, r.label === 'prompt' ? 'subtle' : 'suggestion', r.label === 'prompt' ? r.text : `${r.label} ${r.text.replace(r.label, '').trim()}`.trim(), money(r.usd), [`${day(r.at)} · ${scope === 'all' ? `${r.repo} · ` : ''}${r.requests} req · ${r.agents} subagent${r.agents === 1 ? '' : 's'}`, modelMix(r.models, money)].filter(Boolean).join('\n   ')),
+            )}
+          </Box>
+        </>
+      )}
+      <Text dimColor>estimate · kept across sessions, last {HISTORY_LIMIT} prompts</Text>
     </Box>
   )
 }
@@ -669,6 +780,9 @@ const mem = {
   lastMain: undefined as { route: string; model: string; effort?: Effort } | undefined,
   isAfterCompact: false,
   isNewPrompt: true,
+  repo: 'unknown',
+  pendingLabel: 'prompt',
+  current: undefined as { label: string; text: string; at: number } | undefined,
   compactAt: undefined as number | undefined,
   compactCheckedAt: undefined as number | undefined,
   pendingWorkflow: 0,
@@ -724,6 +838,13 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const stored = (await $.store.get(STORE_KEY)) as RouterConfig | undefined
     if (stored?.routes) await update($, config, () => ({ ...DEFAULT_CONFIG, ...stored }))
+    const saved = await $.store.get('history')
+    if (Array.isArray(saved)) await update($, history, () => saved as PromptRecord[])
+    const scope = await $.store.get('statsScope')
+    if (scope === 'repo' || scope === 'all') await update($, statsScope, () => scope)
+    const repo = await $.session.repo().catch(() => null)
+    const root = repo?.root ?? (await $.session.root().catch(() => ''))
+    mem.repo = repo?.name ?? (root.split('/').pop() || 'unknown')
     const band = await $.store.get('bandShown')
     if (typeof band === 'boolean') await update($, isBandShown, () => band)
     $.ui.status(undefined)
@@ -779,18 +900,32 @@ export const register: Register = on => {
   })
 
   on('prompt.submit', ($, e, next) => {
-    if (e.turnId === undefined) mem.isNewPrompt = true
+    if (e.turnId === undefined) {
+      mem.isNewPrompt = true
+      mem.pendingLabel = commandLabel(e.text)
+    }
     return next(e)
   })
 
   on('command.run', ($, e, next) => {
-    if (e.origin.kind !== 'plugin') mem.isNewPrompt = true
+    if (e.origin.kind !== 'plugin' && e.command !== 'route') {
+      mem.isNewPrompt = true
+      mem.pendingLabel = `/${e.command}`
+    }
+    return next(e)
+  })
+
+  on('session.end', async ($, e, next) => {
+    await recordPrompt($)
     return next(e)
   })
 
   on('turn.start', async ($, e, next) => {
     if (mem.isNewPrompt) {
       mem.isNewPrompt = false
+      await recordPrompt($)
+      mem.current = { label: mem.pendingLabel, text: e.text.slice(0, 120), at: await $.clock.now().catch(() => Date.now()) }
+      mem.pendingLabel = 'prompt'
       await update($, promptCost, () => ({ usd: 0, requests: 0, items: [] }))
     }
     const route = (await read($, isPlan)) ? 'plan' : 'main'
@@ -928,9 +1063,11 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: CTX_PANE }, ($, e) => renderCtxPane($, e))
 
+  on('ui.render', { component: 'Pane', requestId: STATS_PANE }, ($, e) => renderStatsPane($, e))
+
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     if (e.component !== 'SessionMode') return next(e)
-    const tree = await renderCacheFooter($, e, e.props.modes)
+    const tree = await renderStatsFooter($, e, e.props.modes)
     return tree ?? next(e)
   })
 

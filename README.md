@@ -2,7 +2,7 @@
 
 A Claude Code mod that picks the model and effort per kind of work: plan mode, normal work, and each subagent type. It includes a cache-aware auto mode and per-route cost tracking.
 
-![Two-row band above the prompt and cache timer below it](docs/band-and-footer.svg)
+![Two-row band above the prompt and today's spend below it](docs/band-and-footer.svg)
 
 ## Install
 
@@ -23,7 +23,7 @@ Answer `y` to add the marketplace, then choose a scope (user scope loads it in e
     - `context` context used. Green until 60% of the way to auto-compaction, amber to 85%, red after. Click the word for a breakdown: categories, MCP servers, memory files, distance to auto-compact.
     - `last` cost of your whole last prompt (main loop plus every subagent it started), growing live. Click it for the per-agent breakdown.
     - `5h` / `7d` how much of the 5-hour and 7-day limits is used.
-- **Footer**: just the cache timer, `cache 96% 42m`, to glance at before you send a prompt.
+- **Footer**: `▤ today $12.30`, what you've spent today. Click it for **Stats**, kept across sessions for this repo or all repos: commands ranked by average cost per run (`/simplify`, `/code-review`, plain prompts…) and your most expensive prompts, each with the models it used and what each cost, so you learn over time which calls are costly.
 - **`/route` pane**: model and effort per route, presets, and a per-route spend table. Edits stay a draft until you press **Apply**. The draft shows the per-turn cost change, the one-off cache rewrite cost, the plan-mode toggle cost and the payback.
 
 ## Commands

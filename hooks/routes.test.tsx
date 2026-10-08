@@ -8,6 +8,8 @@ import {
   MODELS,
   PRESETS,
   SMALL_CONTEXT,
+  commandLabel,
+  commandStats,
   contextLevel,
   costOf,
   effortForLabel,
@@ -278,7 +280,7 @@ test('footer shows cache, context and the 5h window', async ($, on) => {
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   const ui = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
   await step($, 'h1')
-  expect(await ui.find({ type: 'Text', text: 'cache 96% 60m' })).toBeDefined()
+  expect((await ui.find({ key: 'stats' }))?.text).toMatch(/^▤ today \$/)
   const band = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
   expect(await band.find({ type: 'Text', text: 'cache 96% 60m  ·  ' })).toBeDefined()
   expect(await band.find({ type: 'Text', text: '  ·  5h 38%  ·  7d 12%' })).toBeDefined()
@@ -286,7 +288,9 @@ test('footer shows cache, context and the 5h window', async ($, on) => {
   expect((await band.find({ key: 'last-cost' }))?.text).toBe('last $0.06')
   await band.unmount()
   await clock.advance(61 * 60_000)
-  expect(await ui.find({ type: 'Text', text: 'cache cold' })).toBeDefined()
+  const band2 = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
+  expect(await band2.find({ type: 'Text', text: /^cache cold/ })).toBeDefined()
+  await band2.unmount()
   await ui.unmount()
 })
 
@@ -381,4 +385,48 @@ test('context colour follows distance to auto-compaction', () => {
   expect(contextLevel(900_000, 1_000_000)).toBe('error')
   expect(contextLevel(500_000, 1_000_000, 800_000)).toBe('warning')
   expect(contextLevel(700_000, 1_000_000, 800_000)).toBe('error')
+})
+
+test('commands are labelled and ranked by average cost', () => {
+  expect(commandLabel('/simplify the auth module')).toBe('/simplify')
+  expect(commandLabel('fix the typo')).toBe('prompt')
+  const stats = commandStats([
+    { at: 0, repo: 'r', label: '/simplify', text: '', usd: 2, requests: 1, agents: 4 },
+    { at: 0, repo: 'r', label: '/simplify', text: '', usd: 4, requests: 1, agents: 4 },
+    { at: 0, repo: 'r', label: 'prompt', text: '', usd: 1, requests: 1, agents: 0 },
+  ])
+  expect(stats.map(one => [one.label, one.runs, one.avg, one.max])).toEqual([
+    ['/simplify', 2, 3, 4],
+    ['prompt', 1, 1, 1],
+  ])
+})
+
+test('finished prompts are saved across sessions and shown in Stats', async ($, on) => {
+  mock.store(on)
+  const usage = { model: opus, input_tokens: 250_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 0 }
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 1000, window: 1_000_000, percent: 0 }, rateLimits: [] } }))
+  on('session.repo', () => ({ value: { root: '/x/my-app', remote: null, internal: true, name: 'my-app' } as never }))
+  on('session.root', () => ({ value: '/x/my-app' }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('session.end', () => ({}) as never)
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('prompt.submit', (_$, e) => ({ text: e.text }))
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage }
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+
+  await $.prompt.submit({ text: '/simplify hooks', origin: { kind: 'composer' } } as Args<'prompt.submit'>)
+  await $.turn.start({ text: '/simplify hooks', turnId: 'a' })
+  await step($, 'a')
+  await $.prompt.submit({ text: 'fix typo', origin: { kind: 'composer' } } as Args<'prompt.submit'>)
+  await $.turn.start({ text: 'fix typo', turnId: 'b' })
+
+  const ui = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'Pane', requestId: 'model-router-stats', props: {} as never })
+  expect(await ui.find({ type: 'Text', text: 'Stats · my-app' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '/simplify' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /1 run · total \$1\.00/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Opus 5\.5 \$1\.00/ })).toBeDefined()
+  await ui.unmount()
 })
