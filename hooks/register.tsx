@@ -855,8 +855,8 @@ export const register: Register = on => {
     $.clock.every(60_000, () => void refreshStatus($))
     await $.command.register({
       name: 'route',
-      description: 'Model router: open the pane, or `preset <name>`, `set <route> <model> [effort]`, `on`, `off`, `band on|off`',
-      argumentHint: '[preset <name> | set <route> <model> [effort] | on | off | band on|off]',
+      description: 'Model router: open the pane, or `stats`, `context`, `last`, `preset <name>`, `set <route> <model> [effort]`, `on`, `off`, `band on|off`',
+      argumentHint: '[stats | context | last | preset <name> | set <route> <model> [effort] | on | off | band on|off]',
     })
     return next(e)
   })
@@ -1029,6 +1029,18 @@ export const register: Register = on => {
       await $.ui.open({ id: PANE, title: 'Model router' })
       return { text: 'Model router pane opened.' }
     }
+    if (verb === 'stats') {
+      await $.ui.open({ id: STATS_PANE, title: 'Stats' })
+      return { text: 'Stats pane opened.' }
+    }
+    if (verb === 'context') {
+      await $.ui.open({ id: CTX_PANE, title: 'Context' })
+      return { text: 'Context pane opened.' }
+    }
+    if (verb === 'last') {
+      await $.ui.open({ id: LAST_PANE, title: 'Last prompt cost' })
+      return { text: 'Last prompt cost pane opened.' }
+    }
     if (verb === 'ttl') {
       const minutes = Number(rest[0])
       if (minutes !== 5 && minutes !== 60) return { text: 'Usage: /route ttl 5|60 (prompt-cache lifetime in minutes)' }
@@ -1059,7 +1071,7 @@ export const register: Register = on => {
       await setConfig($, c => ({ ...c, preset: 'custom', routes: { ...c.routes, [route]: setting } }))
       return { text: `${route} → ${setting.model} · ${setting.effort}.` }
     }
-    return { text: 'Usage: /route [preset <name> | set <route> <model> [effort] | on | off | band on|off]' }
+    return { text: 'Usage: /route [stats | context | last | preset <name> | set <route> <model> [effort] | on | off | band on|off | ttl 5|60]' }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, ($, e) => renderPane($, e))

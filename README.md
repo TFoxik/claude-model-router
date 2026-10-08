@@ -31,6 +31,7 @@ Answer `y` to add the marketplace, then choose a scope (user scope loads it in e
 | Command | Effect |
 |---|---|
 | `/route` | Open the pane |
+| `/route stats` / `context` / `last` | Open the Stats, Context or Last prompt cost pane (handy in the terminal) |
 | `/route preset mine\|balanced\|frugal\|max` | Apply a preset |
 | `/route set <route> <model> [effort]` | Set one route now, for example `/route set sub:Explore haiku low` |
 | `/route on` / `/route off` | Enable or disable routing |
