@@ -8,6 +8,7 @@ import {
   MODELS,
   PRESETS,
   SMALL_CONTEXT,
+  contextLevel,
   costOf,
   effortForLabel,
   estimateChanges,
@@ -255,7 +256,7 @@ test('footer shows cache, context and the 5h window', async ($, on) => {
     value: {
       startedAt: 0,
       context: { tokens: 100_000, window: 1_000_000, percent: 10 },
-      rateLimits: [{ kind: 'five_hour', percentUsed: 38.4, resetsAt: '2026-10-08T12:10:00Z' }],
+      rateLimits: [{ kind: 'five_hour', percentUsed: 38.4, resetsAt: '2026-10-08T12:10:00Z' }, { kind: 'seven_day', percentUsed: 12 }],
     },
   }))
   on('ui.render', { component: 'SessionMode' }, ($, e) => {
@@ -277,12 +278,15 @@ test('footer shows cache, context and the 5h window', async ($, on) => {
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   const ui = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
   await step($, 'h1')
-  expect(await ui.find({ type: 'Text', text: 'cache 96% 60m · ' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: ' 10% · 5h 38% · ' })).toBeDefined()
-  expect((await ui.find({ key: 'ctx' }))?.text).toBe('ctx')
-  expect((await ui.find({ key: 'last-cost' }))?.text).toBe('last $0.06')
+  expect(await ui.find({ type: 'Text', text: 'cache 96% 60m' })).toBeDefined()
+  const band = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
+  expect(await band.find({ type: 'Text', text: 'cache 96% 60m  ·  ' })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: '  ·  5h 38%  ·  7d 12%' })).toBeDefined()
+  expect((await band.find({ key: 'ctx' }))?.text).toBe('context')
+  expect((await band.find({ key: 'last-cost' }))?.text).toBe('last $0.06')
+  await band.unmount()
   await clock.advance(61 * 60_000)
-  expect(await ui.find({ type: 'Text', text: 'cache cold · ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'cache cold' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -300,7 +304,7 @@ test('last is the whole prompt: main steps and its subagents, reset on the next 
   on('turn.step', async function* (_$, e) {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage }
   })
-  const ui = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
+  const ui = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
 
   await $.prompt.submit({ text: '/simplify', origin: { kind: 'composer' } } as Args<'prompt.submit'>)
   await $.turn.start({ text: 'simplify', turnId: 'p1' })
@@ -360,10 +364,21 @@ test('the context pane breaks the window down', async ($, on) => {
       },
     } as never,
   }))
-  const ui = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'Pane', requestId: 'model-router-ctx', props: {} as never })
-  expect(await ui.find({ type: 'Text', text: '120k / 1000k (12%)' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: 'Messages' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: 'jira' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /780k to go/ })).toBeDefined()
-  await ui.unmount()
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ plugin: 'model-router', surface, component: 'Pane', requestId: 'model-router-ctx', props: {} as never })
+    expect(await ui.find({ type: 'Text', text: '120k / 1000k · 12%' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Messages' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'jira' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /780k to go/ })).toBeDefined()
+    expect(await ui.find({ type: surface === 'desktop' ? 'Svg' : 'Text', text: surface === 'desktop' ? undefined : /█/ })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+test('context colour follows distance to auto-compaction', () => {
+  expect(contextLevel(500_000, 1_000_000)).toBe('success')
+  expect(contextLevel(700_000, 1_000_000)).toBe('warning')
+  expect(contextLevel(900_000, 1_000_000)).toBe('error')
+  expect(contextLevel(500_000, 1_000_000, 800_000)).toBe('warning')
+  expect(contextLevel(700_000, 1_000_000, 800_000)).toBe('error')
 })

@@ -46,7 +46,7 @@ const r = (model: RouteSetting['model'], effort: RouteEffort): RouteSetting => (
 
 export const PRESETS: Record<string, { label: string; routes: Record<string, RouteSetting> }> = {
   mine: {
-    label: 'Mine (plan Opus high, subagents Sonnet high)',
+    label: 'Mine',
     routes: {
       main: r('opus', 'medium'),
       plan: r('opus', 'high'),
@@ -230,6 +230,15 @@ export function parseSetting(model: string | undefined, effort: string | undefin
   if (e !== 'inherit' && e !== 'auto' && !EFFORTS.includes(e as Effort))
     return `Unknown effort "${effort}". Use ${EFFORTS.join(', ')}, auto or inherit.`
   return { model: m as RouteSetting['model'], effort: e as RouteEffort }
+}
+
+/**
+ * Colour for context use, measured against where auto-compaction fires when
+ * known (else the whole window): green below 60%, amber to 85%, red after.
+ */
+export function contextLevel(tokens: number, window: number, compactAt?: number): 'success' | 'warning' | 'error' {
+  const toward = tokens / (compactAt && compactAt > 0 ? compactAt : window)
+  return toward >= 0.85 ? 'error' : toward >= 0.6 ? 'warning' : 'success'
 }
 
 export function money(usd: number): string {

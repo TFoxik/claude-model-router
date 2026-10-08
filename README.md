@@ -2,7 +2,7 @@
 
 A Claude Code mod that picks the model and effort per kind of work: plan mode, normal work, and each subagent type. It includes a cache-aware auto mode and per-route cost tracking.
 
-![Band above the prompt and health footer below it](docs/band-and-footer.svg)
+![Two-row band above the prompt and cache timer below it](docs/band-and-footer.svg)
 
 ## Install
 
@@ -16,8 +16,14 @@ Answer `y` to add the marketplace, then choose a scope (user scope loads it in e
 
 ## What you get
 
-- **Band above the prompt**: the route the last request used, the configured plan / main / sub routes, and the session cost. Buttons open the pane or hide the band.
-- **Footer**: `cache 96% 42m · ctx 31% · 5h 38% · last $0.05`, coloured by health. Click `ctx` for a context breakdown (categories, MCP servers, memory files, distance to auto-compact). `42m` is how long the prompt cache stays warm since the last main-loop request, and it turns to `cold` once that runs out. `last` is the cost of your whole last prompt: every main-loop request plus every subagent it started (for example all four `/simplify` agents and the fixes), growing live while the prompt runs. Click it to open a breakdown: main loop and each subagent with its model, requests, tokens and cost.
+- **Band above the prompt**, two rows:
+  - Routing: the route the last request used, the configured plan / main / sub routes, the session's estimated total, and **Routes** / **Hide** buttons.
+  - Health: `cache 96% 42m  ·  context 31%  ·  last $0.05  ·  5h 38%  ·  7d 12%`, coloured by health.
+    - `cache` prompt-cache hit rate of the last main-loop request, and minutes until the cache goes `cold`.
+    - `context` context used. Green until 60% of the way to auto-compaction, amber to 85%, red after. Click the word for a breakdown: categories, MCP servers, memory files, distance to auto-compact.
+    - `last` cost of your whole last prompt (main loop plus every subagent it started), growing live. Click it for the per-agent breakdown.
+    - `5h` / `7d` how much of the 5-hour and 7-day limits is used.
+- **Footer**: just the cache timer, `cache 96% 42m`, to glance at before you send a prompt.
 - **`/route` pane**: model and effort per route, presets, and a per-route spend table. Edits stay a draft until you press **Apply**. The draft shows the per-turn cost change, the one-off cache rewrite cost, the plan-mode toggle cost and the payback.
 
 ## Commands

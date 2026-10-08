@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Args, EngineInterface, Register } from 'claude-code'
+import type { Args, BoxProps, ElementConstructor, EngineInterface, Register } from 'claude-code'
 
 import type { ActiveRoute, Effort, Health, LastUsage, PromptCost, PromptItem, RouteSetting, RouteSpend, RouterConfig } from '../types'
 import {
@@ -15,6 +15,7 @@ import {
   ROUTES,
   SUB_CONTEXT,
   addSpend,
+  contextLevel,
   costOf,
   estimateChanges,
   modeSwitchCost,
@@ -69,48 +70,70 @@ async function refreshStatus($: $) {
   const tokens = context.tokens ?? last.input + last.cacheRead + last.cacheWrite
   const prompt = last.input + last.cacheRead + last.cacheWrite
   const five = rateLimits.find(one => one.kind === 'five_hour')
+  const seven = rateLimits.find(one => one.kind === 'seven_day')
   const now = await $.clock.now().catch(() => Date.now())
   const ttl = (await read($, config)).cacheTtlMinutes ?? 60
   const warmMinutes = Math.max(0, Math.ceil((last.at + ttl * 60_000 - now) / 60_000))
   const resetMs = five?.resetsAt ? Date.parse(five.resetsAt) - now : undefined
+  if (mem.compactCheckedAt === undefined || now - mem.compactCheckedAt > 10 * 60_000) {
+    const { context: detailed } = await $.session.usage({ breakdown: 'summary' })
+    const b = detailed.breakdown
+    mem.compactAt = b?.isAutoCompactEnabled ? b.autoCompactThreshold : undefined
+    mem.compactCheckedAt = now
+  }
   const next: Health = {
     cache: prompt > 0 ? Math.round((last.cacheRead / prompt) * 100) : 0,
     warmMinutes,
     ctx: context.percent ?? Math.round((tokens / context.window) * 100),
+    ctxLevel: contextLevel(tokens, context.window, mem.compactAt),
     last: (await read($, promptCost))?.usd ?? last.usd,
     toggle: modeSwitchCost(await read($, config), tokens, last.model),
     ...(five ? { fiveHour: Math.round(five.percentUsed) } : {}),
     ...(resetMs !== undefined && resetMs > 0 ? { resetMinutes: Math.round(resetMs / 60_000) } : {}),
+    ...(seven ? { sevenDay: Math.round(seven.percentUsed) } : {}),
   }
   await update($, health, () => next)
 }
 
-async function renderHealth($: $, e: Args<'ui.render'>, modes: readonly string[]) {
+const level = (value: number, warn: number, bad: number) => (value >= bad ? 'error' : value >= warn ? 'warning' : undefined)
+
+async function renderCacheFooter($: $, e: Args<'ui.render'>, modes: readonly string[]) {
+  const hp = await read($, health)
+  const { Box, Text } = $.ui.resolve(e)
+  if (hp === null) return null
+  const cacheColor = hp.cache < 50 ? 'error' : hp.cache < 80 ? 'warning' : 'success'
+  return (
+    <Box flexDirection="row" flexShrink={0}>
+      <Text dimColor wrap="truncate-start">
+        {modes.length > 0 ? `${modes.join(' & ')}  ` : ''}
+        {'cache '}
+        {hp.warmMinutes === 0 ? <Text color="error">cold</Text> : <Text color={cacheColor}>{hp.cache}%</Text>}
+        {hp.warmMinutes === 0 ? null : ' '}
+        {hp.warmMinutes === 0 ? null : <Text color={hp.warmMinutes <= 5 ? 'warning' : undefined}>{hp.warmMinutes}m</Text>}
+      </Text>
+    </Box>
+  )
+}
+
+async function renderHealthRow($: $, e: Args<'ui.render'>) {
   const hp = await read($, health)
   const { Box, Text, Button } = $.ui.resolve(e)
   if (hp === null) return null
-  const level = (value: number, warn: number, bad: number) => (value >= bad ? 'error' : value >= warn ? 'warning' : undefined)
+  const cacheColor = hp.cache < 50 ? 'error' : hp.cache < 80 ? 'warning' : 'success'
   return (
-    <Box flexDirection="row" flexShrink={0}>
-      <Text dimColor wrap="truncate-end">
-        {modes.length > 0 ? `${modes.join(' & ')} · ` : ''}cache{' '}
-        {hp.warmMinutes === 0 ? (
-          <Text color="error">cold</Text>
-        ) : (
-          <Text color={hp.cache < 50 ? 'error' : hp.cache < 80 ? 'warning' : 'success'}>{hp.cache}%</Text>
-        )}
+    <Box flexDirection="row">
+      <Text dimColor>
+        {'cache '}
+        {hp.warmMinutes === 0 ? <Text color="error">cold</Text> : <Text color={cacheColor}>{hp.cache}%</Text>}
         {hp.warmMinutes === 0 ? null : ' '}
-        {hp.warmMinutes === 0 ? null : (
-          <Text color={hp.warmMinutes <= 5 ? 'warning' : undefined}>{hp.warmMinutes}m</Text>
-        )}{' '}
-        ·{' '}
+        {hp.warmMinutes === 0 ? null : <Text color={hp.warmMinutes <= 5 ? 'warning' : undefined}>{hp.warmMinutes}m</Text>}
+        {'  ·  '}
       </Text>
-      <Button key="ctx" label="ctx" plain dimColor onPress={() => $.ui.open({ id: CTX_PANE, title: 'Context' })} />
-      <Text dimColor wrap="truncate-end">
+      <Button key="ctx" label="context" plain dimColor onPress={() => $.ui.open({ id: CTX_PANE, title: 'Context' })} />
+      <Text dimColor>
         {' '}
-        <Text color={level(hp.ctx, 70, 90)}>{hp.ctx}%</Text>
-        {hp.fiveHour === undefined ? '' : ' · 5h '}
-        {hp.fiveHour === undefined ? null : <Text color={level(hp.fiveHour, 70, 90)}>{hp.fiveHour}%</Text>} ·{' '}
+        <Text color={hp.ctxLevel}>{hp.ctx}%</Text>
+        {'  ·  '}
       </Text>
       <Button
         key="last-cost"
@@ -119,14 +142,36 @@ async function renderHealth($: $, e: Args<'ui.render'>, modes: readonly string[]
         dimColor
         onPress={() => $.ui.open({ id: LAST_PANE, title: 'Last prompt cost' })}
       />
+      {hp.fiveHour === undefined && hp.sevenDay === undefined ? null : (
+        <Text dimColor>
+          {hp.fiveHour === undefined ? '' : '  ·  5h '}
+          {hp.fiveHour === undefined ? null : <Text color={level(hp.fiveHour, 70, 90)}>{hp.fiveHour}%</Text>}
+          {hp.sevenDay === undefined ? '' : '  ·  7d '}
+          {hp.sevenDay === undefined ? null : <Text color={level(hp.sevenDay, 70, 90)}>{hp.sevenDay}%</Text>}
+        </Text>
+      )}
     </Box>
   )
 }
 
 const MODEL_OPTIONS = [
   { value: 'inherit', label: 'inherit' },
-  ...Object.entries(MODELS).map(([value, m]) => ({ value, label: m.label })),
+  ...Object.entries(MODELS).map(([value, m]) => ({ value, label: m.label.replace(/ [\d.]+$/, '') })),
 ]
+
+const MODEL_W = 11
+const EFFORT_W = 10
+
+const PANE_LABEL: Record<string, string> = {
+  plan: 'Plan mode',
+  main: 'Normal work',
+  'sub:*': 'Default',
+  'sub:Explore': 'Explore',
+  'sub:Plan': 'Plan agent',
+  'sub:general-purpose': 'General',
+  workflow: 'Workflow',
+  teammate: 'Teammates',
+}
 
 const effortOptions = (canAuto: boolean) => [
   { value: 'inherit', label: 'inherit' },
@@ -145,9 +190,48 @@ const GROUPS: ReadonlyArray<{ title: string; keys: readonly string[] }> = [
 ]
 
 const pad = (text: string, width: number) => (text.length >= width ? text.slice(0, width) : text + ' '.repeat(width - text.length))
-const bar = (part: number, whole: number, width: number) => {
-  const filled = whole > 0 ? Math.min(width, Math.max(part > 0 ? 1 : 0, Math.round((part / whole) * width))) : 0
-  return '█'.repeat(filled) + '░'.repeat(width - filled)
+// Theme keys as hex, for the one place a theme key cannot go: an SVG drawn as an image.
+const HEX: Record<string, string> = {
+  claude: '#d97757',
+  planMode: '#5fb36b',
+  suggestion: '#6ea8e0',
+  success: '#5fb36b',
+  warning: '#e0b24f',
+  error: '#e06c6c',
+  permission: '#9a8fe0',
+  autoAccept: '#b48ee0',
+  remember: '#6ea8e0',
+  merged: '#a87fd6',
+  ide: '#4fa3b8',
+  bashBorder: '#e07fb0',
+}
+const hexOf = (key: string | undefined) => (key && key.startsWith('#') ? key : HEX[key ?? ''] ?? '#9a9893')
+
+type Segment = { tokens: number; color?: string }
+
+/** One horizontal bar of segments, as an SVG for surfaces that draw them. */
+function stackedSvg(segments: readonly Segment[], whole: number): string {
+  const w = 600
+  let x = 0
+  const rects = segments
+    .filter(one => one.tokens > 0)
+    .map(one => {
+      const width = Math.max(1, (one.tokens / whole) * w)
+      const rect = `<rect x="${x.toFixed(1)}" y="0" width="${width.toFixed(1)}" height="14" fill="${hexOf(one.color)}"/>`
+      x += width
+      return rect
+    })
+    .join('')
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} 14" width="${w}" height="14"><rect width="${w}" height="14" rx="3" fill="#8b8a86" fill-opacity="0.18"/>${rects}</svg>`
+}
+
+/** The same bar as coloured block characters, for the monospace terminal. */
+function stackedCells(segments: readonly Segment[], whole: number, width: number): Array<{ text: string; color?: string }> {
+  const out = segments
+    .filter(one => one.tokens > 0)
+    .map(one => ({ text: '█'.repeat(Math.max(1, Math.round((one.tokens / whole) * width))), color: one.color }))
+  const used = out.reduce((sum, one) => sum + one.text.length, 0)
+  return used < width ? [...out, { text: '░'.repeat(width - used), color: undefined }] : out
 }
 
 export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
@@ -209,9 +293,16 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
 
   return (
     <Box flexDirection="column" gap={1}>
-      <Box flexDirection="row" justifyContent="space-between">
+      <Box flexDirection="row" justifyContent="space-between" alignItems="center">
         <Text bold color="claude">⚙ Model Router</Text>
-        <Text color={cfg.isEnabled ? 'success' : 'subtle'}>{cfg.isEnabled ? '● on' : '○ off'}</Text>
+        <Box flexDirection="row" gap={1} alignItems="center">
+          <Text color={cfg.isEnabled ? 'success' : 'subtle'}>{cfg.isEnabled ? '● on' : '○ off'}</Text>
+          <Button
+            key="toggle"
+            label={cfg.isEnabled ? 'Turn off' : 'Turn on'}
+            onPress={() => setConfig($, c => ({ ...c, isEnabled: !c.isEnabled }))}
+          />
+        </Box>
       </Box>
 
       <Box flexDirection="column" borderStyle="round" borderColor={nowColor} paddingX={1}>
@@ -234,15 +325,13 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
         {now?.isHeld ? <Text color="warning">auto kept the current effort to protect the cache</Text> : null}
       </Box>
 
-      <Box flexDirection="row" gap={1}>
-        <Button
-          key="toggle"
-          label={cfg.isEnabled ? 'Turn off' : 'Turn on'}
-          onPress={() => setConfig($, c => ({ ...c, isEnabled: !c.isEnabled }))}
-        />
+      <Box flexDirection="row" gap={1} alignItems="center">
+        <Box flexGrow={1} flexShrink={1}>
+          <Text bold dimColor>PRESET</Text>
+        </Box>
+        <Box width={MODEL_W + EFFORT_W + 1} flexShrink={0}>
         <Select
           key="preset"
-          label="Preset "
           options={presetOptions}
           value={shown.preset}
           onSelect={value => {
@@ -250,6 +339,7 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
             if (preset) void editDraft(c => ({ ...c, preset: value, routes: { ...preset.routes } }))
           }}
         />
+        </Box>
       </Box>
 
       <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
@@ -266,23 +356,27 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
                   <Text color={changed.has(key) ? 'warning' : isLive ? colorOf(key) : 'subtle'}>
                     {changed.has(key) ? '●' : isLive ? '▸' : ' '}
                   </Text>
-                  <Box width={22}>
-                    <Text color={isChild ? undefined : colorOf(key)} bold={!isChild}>
-                      {isChild ? `└ ${row.label}` : row.label}
+                  <Box flexGrow={1} flexShrink={1}>
+                    <Text color={isChild ? undefined : colorOf(key)} bold={!isChild} wrap="truncate-end">
+                      {isChild ? `└ ${PANE_LABEL[key] ?? row.label}` : (PANE_LABEL[key] ?? row.label)}
                     </Text>
                   </Box>
-                  <Select
-                    key={`m:${key}`}
-                    options={MODEL_OPTIONS}
-                    value={setting.model}
-                    onSelect={value => void setRoute(key, { model: value as RouteSetting['model'] })}
-                  />
-                  <Select
-                    key={`e:${key}`}
-                    options={effortOptions(row.canAuto)}
-                    value={setting.effort}
-                    onSelect={value => void setRoute(key, { effort: value as RouteSetting['effort'] })}
-                  />
+                  <Box width={MODEL_W} flexShrink={0}>
+                    <Select
+                      key={`m:${key}`}
+                      options={MODEL_OPTIONS}
+                      value={setting.model}
+                      onSelect={value => void setRoute(key, { model: value as RouteSetting['model'] })}
+                    />
+                  </Box>
+                  <Box width={EFFORT_W} flexShrink={0}>
+                    <Select
+                      key={`e:${key}`}
+                      options={effortOptions(row.canAuto)}
+                      value={setting.effort}
+                      onSelect={value => void setRoute(key, { effort: value as RouteSetting['effort'] })}
+                    />
+                  </Box>
                 </Box>
               )
             })}
@@ -299,17 +393,20 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
             ● Draft — {changes.length} change{changes.length === 1 ? '' : 's'}, not applied
           </Text>
           {changes.map(one => (
-            <Box key={`c:${one.route}`} flexDirection="row" gap={1}>
-              <Text color={colorOf(one.route)}>{pad(one.route, 20)}</Text>
-              <Text dimColor>{one.from}</Text>
-              <Text>→ {one.to}</Text>
-              <Text color={one.perTurnDelta <= 0 ? 'success' : 'error'}>
-                {signed(one.perTurnDelta)}/{one.route === 'main' || one.route === 'plan' ? 'turn' : 'run'}
+            <Box key={`c:${one.route}`} flexDirection="column" marginBottom={1}>
+              <Box flexDirection="row" justifyContent="space-between">
+                <Text color={colorOf(one.route)}>{PANE_LABEL[one.route] ?? one.route}</Text>
+                <Text color={one.perTurnDelta <= 0 ? 'success' : 'error'}>
+                  {signed(one.perTurnDelta)}/{one.route === 'main' || one.route === 'plan' ? 'turn' : 'run'}
+                </Text>
+              </Box>
+              <Text>
+                <Text dimColor>{one.from}</Text> → {one.to}
               </Text>
               {one.switchCost > 0 ? <Text color="warning">cache {money(one.switchCost)} now</Text> : null}
             </Box>
           ))}
-          <Box flexDirection="row" gap={2} marginTop={1}>
+          <Box flexDirection="column">
             <Text>
               up-front <Text bold color={upFront > 0 ? 'warning' : 'success'}>{money(upFront)}</Text>
             </Text>
@@ -348,11 +445,23 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
         </Box>
         {spendRows.length === 0 && <Text dimColor>No requests yet.</Text>}
         {spendRows.map(([route, one]) => (
-          <Box key={`s:${route}`} flexDirection="row" gap={1}>
-            <Text color={colorOf(route)}>{pad(route, 20)}</Text>
-            <Text color={colorOf(route)}>{bar(one.usd, total, 12)}</Text>
-            <Text>{pad(money(one.usd), 8)}</Text>
+          <Box key={`s:${route}`} flexDirection="column" marginBottom={1}>
+            <Box flexDirection="row" gap={1}>
+              <Box width={2} flexShrink={0}>
+                <Text color={colorOf(route)}>●</Text>
+              </Box>
+              <Box flexGrow={1} flexShrink={1}>
+                <Text color={colorOf(route)} wrap="truncate-end">{PANE_LABEL[route] ?? route}</Text>
+              </Box>
+              <Box width={7} flexShrink={0} justifyContent="flex-end">
+                <Text bold>{money(one.usd)}</Text>
+              </Box>
+              <Box width={5} flexShrink={0} justifyContent="flex-end">
+                <Text dimColor>{total > 0 ? `${Math.round((one.usd / total) * 100)}%` : ''}</Text>
+              </Box>
+            </Box>
             <Text dimColor>
+              {'   '}
               {one.requests} req · in {kTokens(one.input)} · cache {kTokens(one.cacheRead)}/{kTokens(one.cacheWrite)} · out{' '}
               {kTokens(one.output)}
             </Text>
@@ -376,14 +485,21 @@ async function renderLastPane($: $, e: Args<'ui.render'>) {
   const row = (one: PromptItem) => (
     <Box key={`i:${one.id}`} flexDirection="column">
       <Box flexDirection="row" gap={1}>
-        <Text color={colorOf(one.route)}>{bar(one.usd, p.usd, 10)}</Text>
-        <Box width={8}>
+        <Box width={2} flexShrink={0}>
+          <Text color={colorOf(one.route)}>●</Text>
+        </Box>
+        <Box flexGrow={1} flexShrink={1}>
+          <Text color={colorOf(one.route)} wrap="truncate-end">{one.label}</Text>
+        </Box>
+        <Box width={7} flexShrink={0} justifyContent="flex-end">
           <Text bold>{money(one.usd)}</Text>
         </Box>
-        <Text color={colorOf(one.route)} wrap="truncate-end">{one.label}</Text>
+        <Box width={5} flexShrink={0} justifyContent="flex-end">
+          <Text dimColor>{p.usd > 0 ? `${Math.round((one.usd / p.usd) * 100)}%` : ''}</Text>
+        </Box>
       </Box>
       <Text dimColor>
-        {'           '}
+        {'   '}
         {labelOf(one.model)} · {one.requests} req · in {kTokens(one.input)} · cache {kTokens(one.cacheRead)}/{kTokens(one.cacheWrite)} · out {kTokens(one.output)}
       </Text>
     </Box>
@@ -407,8 +523,14 @@ async function renderLastPane($: $, e: Args<'ui.render'>) {
 }
 
 async function renderCtxPane($: $, e: Args<'ui.render'>) {
-  const { Box, Text } = $.ui.resolve(e)
-  const columns = e.component === 'Pane' ? e.props.bodyColumns : 80
+  if (e.surface === 'mobile') {
+    const { Text } = $.ui.resolve(e)
+    return <Text dimColor>Open the context breakdown from a terminal or desktop.</Text>
+  }
+  const els = $.ui.resolve(e)
+  const { Box, Text } = els
+  const Svg = 'Svg' in els ? els.Svg : undefined
+  const columns = (e.component === 'Pane' ? e.props.bodyColumns : undefined) || 80
   const { context } = await $.session.usage({ breakdown: 'summary', columns })
   const b = context.breakdown
   if (b === undefined) return <Text dimColor>No context breakdown available yet.</Text>
@@ -422,35 +544,56 @@ async function renderCtxPane($: $, e: Args<'ui.render'>) {
   const topMemory = [...b.memoryFiles].sort((x, y) => y.tokens - x.tokens).slice(0, 5)
   const untilCompact = b.autoCompactThreshold === undefined ? undefined : b.autoCompactThreshold - b.totalTokens
   const pct = (tokens: number) => `${((tokens / b.rawMaxTokens) * 100).toFixed(1)}%`
+  const isTerminal = e.surface === 'terminal'
+  const width = Math.max(10, columns - 2)
+  const segments: Segment[] = used.map(one => ({ tokens: one.tokens, color: one.color }))
   const line = (key: string, name: string, tokens: number, color?: string, isDim?: boolean) => (
     <Box key={key} flexDirection="row" gap={1}>
-      <Text color={color} dimColor={isDim}>{bar(tokens, b.rawMaxTokens, 12)}</Text>
-      <Box width={7}>
+      <Box width={2} flexShrink={0}>
+        <Text color={color} dimColor={isDim}>●</Text>
+      </Box>
+      <Box width={6} flexShrink={0} justifyContent="flex-end">
         <Text dimColor={isDim}>{kTokens(tokens)}</Text>
       </Box>
-      <Box width={6}>
+      <Box width={6} flexShrink={0} justifyContent="flex-end">
         <Text dimColor>{pct(tokens)}</Text>
       </Box>
-      <Text dimColor={isDim} wrap="truncate-end">{name}</Text>
+      <Box flexGrow={1} flexShrink={1}>
+        <Text dimColor={isDim} wrap="truncate-end">{name}</Text>
+      </Box>
     </Box>
   )
   return (
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="row" justifyContent="space-between">
-        <Text bold color="claude">Context · {b.model}</Text>
-        <Text bold color={b.percentage >= 90 ? 'error' : b.percentage >= 70 ? 'warning' : undefined}>
-          {kTokens(b.totalTokens)} / {kTokens(b.rawMaxTokens)} ({b.percentage}%)
+        <Text bold color="claude">Context</Text>
+        <Text bold color={contextLevel(b.totalTokens, b.rawMaxTokens, b.isAutoCompactEnabled ? b.autoCompactThreshold : undefined)}>
+          {kTokens(b.totalTokens)} / {kTokens(b.rawMaxTokens)} · {b.percentage}%
         </Text>
       </Box>
+      {isTerminal || Svg === undefined ? (
+        <Text>
+          {stackedCells(segments, b.rawMaxTokens, width).map((one, i) => (
+            <Text key={`c:${i}`} color={one.color} dimColor={one.color === undefined}>
+              {one.text}
+            </Text>
+          ))}
+        </Text>
+      ) : (
+        <Svg source={stackedSvg(segments, b.rawMaxTokens)} alt={`${b.percentage}% of the context window in use`} />
+      )}
       <Text dimColor>
         {b.isAutoCompactEnabled && untilCompact !== undefined
-          ? `auto-compact at ${kTokens(b.autoCompactThreshold ?? 0)} · ${kTokens(Math.max(0, untilCompact))} to go · the cache restarts there, the cheapest moment to change routes`
+          ? `auto-compact at ${kTokens(b.autoCompactThreshold ?? 0)} · ${kTokens(Math.max(0, untilCompact))} to go`
           : 'auto-compact off'}
       </Text>
       <Box flexDirection="column">
         <Text bold dimColor>IN USE</Text>
         {used.map(one => line(`u:${one.name}`, one.name, one.tokens, one.color))}
-        {deferred.map(one => line(`d:${one.name}`, `${one.name} (deferred, not sent)`, one.tokens, undefined, true))}
+      </Box>
+      <Box flexDirection="column">
+        <Text bold dimColor>NOT SENT</Text>
+        {deferred.map(one => line(`d:${one.name}`, one.name.replace(/ \(deferred\)$/, ''), one.tokens, undefined, true))}
         {free ? line('free', 'Free space', free.tokens, undefined, true) : null}
         {buffer ? line('buffer', 'Compaction buffer', buffer.tokens, undefined, true) : null}
       </Box>
@@ -463,15 +606,13 @@ async function renderCtxPane($: $, e: Args<'ui.render'>) {
       {topMemory.length > 0 ? (
         <Box flexDirection="column">
           <Text bold dimColor>MEMORY FILES</Text>
-          {topMemory.map(one => line(`f:${one.path}`, `${one.type} · ${one.path.replace(/^.*\/(?=[^/]+\/[^/]+$)/, '…/')}`, one.tokens, 'planMode'))}
+          {topMemory.map(one => line(`f:${one.path}`, `${one.type} · ${one.path.split('/').slice(-2).join('/')}`, one.tokens, 'planMode'))}
         </Box>
       ) : null}
-      {b.skills ? (
-        <Text dimColor>
-          skills listing {kTokens(b.skills.tokens)} ({b.skills.includedSkills}/{b.skills.totalSkills} listed)
-        </Text>
-      ) : null}
-      <Text dimColor>estimated locally, as /context does without counting requests</Text>
+      <Text dimColor>
+        {b.skills ? `skills listing ${kTokens(b.skills.tokens)} (${b.skills.includedSkills}/${b.skills.totalSkills}) · ` : ''}
+        {b.model} · estimated locally, as /context does
+      </Text>
     </Box>
   )
 }
@@ -492,18 +633,26 @@ async function renderBand($: $, e: Args<'ui.render'>) {
     : now
       ? `▸ ${now.route} · ${labelOf(now.model)}${now.effort ? ` ${now.effort}` : ''}${now.isHeld ? ' (held)' : ''}`
       : '▸ waiting for first request'
+  const healthRow = await renderHealthRow($, e)
   return (
-    <Box flexDirection="row" gap={1}>
-      <Text bold={cfg.isEnabled} dimColor={!cfg.isEnabled} color={cfg.isEnabled && now ? colorOf(now.route) : undefined}>
-        {head}
-      </Text>
-      <Text dimColor>
-        │ <Text color="planMode">plan</Text> {shortRoute(cfg, 'plan')} · <Text color="claude">main</Text> {shortRoute(cfg, 'main')} ·{' '}
-        <Text color="suggestion">sub</Text> {shortRoute(cfg, 'sub:*')} · {money(total)}
-      </Text>
-      {pending ? <Text color="warning">● draft</Text> : null}
-      <Button key="band-open" label="Routes" plain onPress={() => $.ui.open({ id: PANE, title: 'Model router' })} />
-      <Button key="band-hide" label="Hide" plain onPress={() => setBand($, false)} />
+    <Box flexDirection="row" justifyContent="space-between" gap={1}>
+      <Box flexDirection="column" flexShrink={1}>
+        <Box flexDirection="row" gap={1}>
+          <Text bold={cfg.isEnabled} dimColor={!cfg.isEnabled} color={cfg.isEnabled && now ? colorOf(now.route) : undefined}>
+            {head}
+          </Text>
+          <Text dimColor wrap="truncate-end">
+            │ <Text color="planMode">plan</Text> {shortRoute(cfg, 'plan')} · <Text color="claude">main</Text> {shortRoute(cfg, 'main')} ·{' '}
+            <Text color="suggestion">sub</Text> {shortRoute(cfg, 'sub:*')} · {money(total)}
+          </Text>
+          {pending ? <Text color="warning">● draft</Text> : null}
+        </Box>
+        {healthRow}
+      </Box>
+      <Box flexDirection="column" alignItems="flex-end" flexShrink={0}>
+        <Button key="band-open" label="Routes" plain onPress={() => $.ui.open({ id: PANE, title: 'Model router' })} />
+        <Button key="band-hide" label="Hide" plain onPress={() => setBand($, false)} />
+      </Box>
     </Box>
   )
 }
@@ -520,6 +669,8 @@ const mem = {
   lastMain: undefined as { route: string; model: string; effort?: Effort } | undefined,
   isAfterCompact: false,
   isNewPrompt: true,
+  compactAt: undefined as number | undefined,
+  compactCheckedAt: undefined as number | undefined,
   pendingWorkflow: 0,
 }
 
@@ -779,7 +930,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     if (e.component !== 'SessionMode') return next(e)
-    const tree = await renderHealth($, e, e.props.modes)
+    const tree = await renderCacheFooter($, e, e.props.modes)
     return tree ?? next(e)
   })
 

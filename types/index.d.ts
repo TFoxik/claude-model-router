@@ -22,10 +22,12 @@ export type Health = {
   cache: number
   warmMinutes: number
   ctx: number
+  ctxLevel: 'success' | 'warning' | 'error'
   last: number
   toggle: number
   fiveHour?: number
   resetMinutes?: number
+  sevenDay?: number
 }
 export type PromptItem = {
   id: string
