@@ -7,6 +7,7 @@ export type RouterConfig = {
   isEnabled: boolean
   preset: string
   routes: Record<string, RouteSetting>
+  cacheTtlMinutes?: number
 }
 export type RouteSpend = {
   requests: number
@@ -16,15 +17,17 @@ export type RouteSpend = {
   output: number
   usd: number
 }
-export type LastUsage = { model: string; input: number; cacheRead: number; cacheWrite: number; usd: number }
+export type LastUsage = { model: string; input: number; cacheRead: number; cacheWrite: number; usd: number; at: number }
 export type Health = {
   cache: number
+  warmMinutes: number
   ctx: number
   last: number
   toggle: number
   fiveHour?: number
   resetMinutes?: number
 }
+export type PromptCost = { usd: number; requests: number; agents: string[] }
 export type ActiveRoute = {
   route: string
   model: string
@@ -44,6 +47,7 @@ declare module 'claude-code' {
       draft: RouterConfig | null
       lastUsage: LastUsage | null
       health: Health | null
+      promptCost: PromptCost | null
     }
   }
 }

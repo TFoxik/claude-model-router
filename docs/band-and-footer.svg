@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="176" viewBox="0 0 820 176" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">
+  <rect width="820" height="176" rx="12" fill="#1f1e1d"/>
+  <rect x="12" y="14" width="796" height="40" rx="8" fill="#2a2927"/>
+  <text x="28" y="39" font-size="12"><tspan fill="#d97757" font-weight="700">▸ main · Opus 5.5 medium</tspan><tspan fill="#8b8a86">  │ </tspan><tspan fill="#5fb36b">plan</tspan><tspan fill="#8b8a86"> Opus high · </tspan><tspan fill="#d97757">main</tspan><tspan fill="#8b8a86"> Opus medium · </tspan><tspan fill="#6ea8e0">sub</tspan><tspan fill="#8b8a86"> Sonnet high · $3.68</tspan></text>
+  <text x="712" y="39" fill="#d6d4cf">Routes</text>
+  <text x="766" y="39" fill="#d6d4cf">Hide</text>
+  <rect x="12" y="66" width="796" height="44" rx="10" fill="#262624" stroke="#4a4946"/>
+  <text x="28" y="93" fill="#8b8a86">Ask Claude to do something…</text>
+  <text x="28" y="146" fill="#8b8a86">+  Auto</text>
+  <text x="300" y="146"><tspan fill="#8b8a86">cache </tspan><tspan fill="#5fb36b">96%</tspan><tspan fill="#8b8a86"> 42m · ctx </tspan><tspan fill="#8b8a86">31%</tspan><tspan fill="#8b8a86"> · 5h </tspan><tspan fill="#e0b24f">74%</tspan><tspan fill="#8b8a86"> · last $0.05</tspan></text>
+  <text x="704" y="146" fill="#d6d4cf">Opus 5.5</text>
+  <text x="776" y="146" fill="#d6d4cf">High</text>
+</svg>

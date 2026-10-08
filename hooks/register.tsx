@@ -1,10 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, Register } from 'claude-code'
 
-import type { ActiveRoute, Effort, Health, LastUsage, RouteSetting, RouteSpend, RouterConfig } from '../types'
+import type { ActiveRoute, Effort, Health, LastUsage, PromptCost, RouteSetting, RouteSpend, RouterConfig } from '../types'
 import {
   AUTO_LABELS,
   DEFAULT_CONFIG,
+  DEFAULT_TTL,
   EFFORTS,
   EMPTY_SPEND,
   FORK,
@@ -37,6 +38,7 @@ const active = atom({ plugin: 'model-router', key: 'active' } as const, null as 
 const draft = atom({ plugin: 'model-router', key: 'draft' } as const, null as RouterConfig | null)
 const lastUsage = atom({ plugin: 'model-router', key: 'lastUsage' } as const, null as LastUsage | null)
 const health = atom({ plugin: 'model-router', key: 'health' } as const, null as Health | null)
+const promptCost = atom({ plugin: 'model-router', key: 'promptCost' } as const, null as PromptCost | null)
 const isBandShown = atom({ plugin: 'model-router', key: 'isBandShown' } as const, true)
 
 type $ = EngineInterface
@@ -64,11 +66,15 @@ async function refreshStatus($: $) {
   const tokens = context.tokens ?? last.input + last.cacheRead + last.cacheWrite
   const prompt = last.input + last.cacheRead + last.cacheWrite
   const five = rateLimits.find(one => one.kind === 'five_hour')
-  const resetMs = five?.resetsAt ? Date.parse(five.resetsAt) - (await $.clock.now()) : undefined
+  const now = await $.clock.now().catch(() => Date.now())
+  const ttl = (await read($, config)).cacheTtlMinutes ?? 60
+  const warmMinutes = Math.max(0, Math.ceil((last.at + ttl * 60_000 - now) / 60_000))
+  const resetMs = five?.resetsAt ? Date.parse(five.resetsAt) - now : undefined
   const next: Health = {
     cache: prompt > 0 ? Math.round((last.cacheRead / prompt) * 100) : 0,
+    warmMinutes,
     ctx: context.percent ?? Math.round((tokens / context.window) * 100),
-    last: last.usd,
+    last: (await read($, promptCost))?.usd ?? last.usd,
     toggle: modeSwitchCost(await read($, config), tokens, last.model),
     ...(five ? { fiveHour: Math.round(five.percentUsed) } : {}),
     ...(resetMs !== undefined && resetMs > 0 ? { resetMinutes: Math.round(resetMs / 60_000) } : {}),
@@ -85,7 +91,16 @@ async function renderHealth($: $, e: Args<'ui.render'>, modes: readonly string[]
     <Box flexDirection="row" flexShrink={0}>
       <Text dimColor wrap="truncate-end">
         {modes.length > 0 ? `${modes.join(' & ')} · ` : ''}cache{' '}
-        <Text color={hp.cache < 50 ? 'error' : hp.cache < 80 ? 'warning' : 'success'}>{hp.cache}%</Text> · ctx{' '}
+        {hp.warmMinutes === 0 ? (
+          <Text color="error">cold</Text>
+        ) : (
+          <Text color={hp.cache < 50 ? 'error' : hp.cache < 80 ? 'warning' : 'success'}>{hp.cache}%</Text>
+        )}
+        {hp.warmMinutes === 0 ? null : ' '}
+        {hp.warmMinutes === 0 ? null : (
+          <Text color={hp.warmMinutes <= 5 ? 'warning' : undefined}>{hp.warmMinutes}m</Text>
+        )}{' '}
+        · ctx{' '}
         <Text color={level(hp.ctx, 70, 90)}>{hp.ctx}%</Text>
         {hp.fiveHour === undefined ? '' : ' · 5h '}
         {hp.fiveHour === undefined ? null : <Text color={level(hp.fiveHour, 70, 90)}>{hp.fiveHour}%</Text>} · last{' '}
@@ -142,11 +157,13 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
   const { Box, Text, Button, Select } = $.ui.resolve(e)
 
   const pending = await read($, draft)
+  const lastPrompt = await read($, promptCost)
   const shown = pending ?? cfg
   const contextTokens = (await $.session.usage()).context.tokens ?? 0
   const sessionModel = now?.model ?? (await $.session.model())
   const liveRoute = isPlanning ? 'plan' : 'main'
-  const changes = pending ? estimateChanges(cfg, pending, { contextTokens, liveRoute, sessionModel }) : []
+  const ttlMinutes = cfg.cacheTtlMinutes ?? DEFAULT_TTL
+  const changes = pending ? estimateChanges(cfg, pending, { contextTokens, liveRoute, sessionModel, ttlMinutes }) : []
   const changed = new Set(changes.map(one => one.route))
   const upFront = changes.reduce((sum, one) => sum + one.switchCost, 0)
   const toggleNow = modeSwitchCost(cfg, contextTokens, sessionModel)
@@ -195,6 +212,12 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
           plan mode {isPlanning ? 'on' : 'off'} · context {kTokens(contextTokens)} tokens
           {toggleNow > 0 ? ` · plan toggle ≈ ${money(toggleNow)}` : ' · plan toggle keeps cache'}
         </Text>
+        {lastPrompt ? (
+          <Text dimColor>
+            last prompt {money(lastPrompt.usd)} · {lastPrompt.requests} request{lastPrompt.requests === 1 ? '' : 's'}
+            {lastPrompt.agents.length > 0 ? ` · ${lastPrompt.agents.length} subagent${lastPrompt.agents.length === 1 ? '' : 's'}` : ''}
+          </Text>
+        ) : null}
         {now?.isHeld ? <Text color="warning">auto kept the current effort to protect the cache</Text> : null}
       </Box>
 
@@ -322,7 +345,7 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
             </Text>
           </Box>
         ))}
-        <Text dimColor>estimate · prices as of {PRICES_AS_OF} · cache writes at the 5-minute rate</Text>
+        <Text dimColor>estimate · prices as of {PRICES_AS_OF} · cache writes at the {ttlMinutes === 60 ? '1-hour (2× input)' : '5-minute (1.25× input)'} rate</Text>
       </Box>
     </Box>
   )
@@ -371,6 +394,7 @@ const mem = {
   decisions: new Map<string, Decision>(),
   lastMain: undefined as { route: string; model: string; effort?: Effort } | undefined,
   isAfterCompact: false,
+  isNewPrompt: true,
   pendingWorkflow: 0,
 }
 
@@ -405,7 +429,8 @@ async function decideMain(
     const contextTokens = (await $.session.usage()).context.tokens ?? 0
     const from = { model: last.model, effort: last.effort }
     const to = { model: toModel, effort: toEffort }
-    if (!shouldSwitch({ contextTokens, isAfterCompact: mem.isAfterCompact, from, to })) {
+    const ttlMinutes = (await read($, config)).cacheTtlMinutes ?? DEFAULT_TTL
+    if (!shouldSwitch({ contextTokens, isAfterCompact: mem.isAfterCompact, from, to, ttlMinutes })) {
       toEffort = last.effort
       isHeld = true
     }
@@ -427,6 +452,7 @@ export const register: Register = on => {
     if (typeof band === 'boolean') await update($, isBandShown, () => band)
     $.ui.status(undefined)
     await refreshStatus($)
+    $.clock.every(30_000, () => void refreshStatus($))
     await $.command.register({
       name: 'route',
       description: 'Model router: open the pane, or `preset <name>`, `set <route> <model> [effort]`, `on`, `off`, `band on|off`',
@@ -473,7 +499,21 @@ export const register: Register = on => {
     return started
   })
 
+  on('prompt.submit', ($, e, next) => {
+    if (e.turnId === undefined) mem.isNewPrompt = true
+    return next(e)
+  })
+
+  on('command.run', ($, e, next) => {
+    if (e.origin.kind !== 'plugin') mem.isNewPrompt = true
+    return next(e)
+  })
+
   on('turn.start', async ($, e, next) => {
+    if (mem.isNewPrompt) {
+      mem.isNewPrompt = false
+      await update($, promptCost, () => ({ usd: 0, requests: 0, agents: [] }))
+    }
     const route = (await read($, isPlan)) ? 'plan' : 'main'
     const { effort } = resolve(await read($, config), route)
     if (effort === 'auto' && e.text.trim() !== '') {
@@ -513,16 +553,28 @@ export const register: Register = on => {
     const result = yield* next(isChanged ? { ...e, model, ...(effort ? { effort } : {}) } : e)
 
     const key = route ?? 'sub:?'
+    const stepAt = await $.clock.now().catch(() => Date.now())
     if (result.usage) {
       const usage = result.usage
-      await update($, spend, all => ({ ...all, [key]: addSpend(all[key] ?? EMPTY_SPEND, usage, usage.model) }))
+      const ttl = cfg.cacheTtlMinutes ?? DEFAULT_TTL
+      await update($, spend, all => ({ ...all, [key]: addSpend(all[key] ?? EMPTY_SPEND, usage, usage.model, ttl) }))
+      const agentId = e.agentId
+      await update($, promptCost, p => {
+        const was = p ?? { usd: 0, requests: 0, agents: [] }
+        return {
+          usd: was.usd + costOf(usage, usage.model, ttl),
+          requests: was.requests + 1,
+          agents: agentId === undefined || was.agents.includes(agentId) ? was.agents : [...was.agents, agentId],
+        }
+      })
       if (e.agentId === undefined) {
         await update($, lastUsage, () => ({
           model: usage.model,
           input: usage.input_tokens,
           cacheRead: usage.cache_read_input_tokens,
           cacheWrite: usage.cache_creation_input_tokens,
-          usd: costOf(usage, usage.model),
+          usd: costOf(usage, usage.model, ttl),
+          at: stepAt,
         }))
       }
     }
@@ -533,8 +585,8 @@ export const register: Register = on => {
       }
       mem.lastMain = { route: key, model, effort }
       await update($, active, () => ({ route: key, model, effort, isHeld }))
-      await refreshStatus($)
     }
+    await refreshStatus($)
     return result
   })
 
@@ -543,6 +595,12 @@ export const register: Register = on => {
     if (verb === undefined) {
       await $.ui.open({ id: PANE, title: 'Model router' })
       return { text: 'Model router pane opened.' }
+    }
+    if (verb === 'ttl') {
+      const minutes = Number(rest[0])
+      if (minutes !== 5 && minutes !== 60) return { text: 'Usage: /route ttl 5|60 (prompt-cache lifetime in minutes)' }
+      await setConfig($, c => ({ ...c, cacheTtlMinutes: minutes }))
+      return { text: `Cache lifetime set to ${minutes} minutes.` }
     }
     if (verb === 'band') {
       const isShown = rest[0] !== 'off'

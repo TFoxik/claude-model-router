@@ -73,7 +73,9 @@ test('switch guard: upgrades go, small or freshly compacted contexts go, big dow
   expect(shouldSwitch({ contextTokens: SMALL_CONTEXT - 1, isAfterCompact: false, from, to: down })).toBe(true)
   expect(shouldSwitch({ contextTokens: 500_000, isAfterCompact: true, from, to: down })).toBe(true)
   expect(shouldSwitch({ contextTokens: 500_000, isAfterCompact: false, from, to: down })).toBe(false)
-  expect(shouldSwitch({ contextTokens: 25_000, isAfterCompact: false, from, to: down })).toBe(true)
+  expect(shouldSwitch({ contextTokens: 25_000, isAfterCompact: false, from, to: down })).toBe(false)
+  expect(shouldSwitch({ contextTokens: 25_000, isAfterCompact: false, from: { model: opus, effort: 'xhigh' }, to: down })).toBe(true)
+  expect(shouldSwitch({ contextTokens: 25_000, isAfterCompact: false, from, to: down, ttlMinutes: 5 })).toBe(true)
 })
 
 test('cost uses the model the API reports', () => {
@@ -219,12 +221,13 @@ test('estimates: only the live main-loop route pays a cache rewrite up front', (
   const rows = estimateChanges(DEFAULT_CONFIG, next, { contextTokens: 100_000, liveRoute: 'main', sessionModel: opus })
   const main = rows.find(one => one.route === 'main')!
   const sub = rows.find(one => one.route === 'sub:*')!
-  expect(Math.abs(main.switchCost - 0.23)).toBeLessThan(1e-9)
+  expect(Math.abs(main.switchCost - 0.38)).toBeLessThan(1e-9)
   expect(main.perTurnDelta).toBeLessThan(0)
   expect(sub.switchCost).toBe(0)
   expect(sub.perTurnDelta).toBeLessThan(0)
   expect(rows.some(one => one.route === 'plan')).toBe(false)
-  expect(Math.abs(modeSwitchCost(DEFAULT_CONFIG, 100_000, opus) - 0.48)).toBeLessThan(1e-9)
+  expect(Math.abs(modeSwitchCost(DEFAULT_CONFIG, 100_000, opus) - 0.78)).toBeLessThan(1e-9)
+  expect(Math.abs(modeSwitchCost({ ...DEFAULT_CONFIG, cacheTtlMinutes: 5 }, 100_000, opus) - 0.48)).toBeLessThan(1e-9)
 })
 
 test('pane edits stay a draft until Apply', async ($, on) => {
@@ -247,7 +250,7 @@ test('pane edits stay a draft until Apply', async ($, on) => {
 
 test('footer shows cache, context and the 5h window', async ($, on) => {
   mock.store(on)
-  mock.clock(on, { now: Date.parse('2026-10-08T10:00:00Z') })
+  const clock = mock.clock(on, { now: Date.parse('2026-10-08T10:00:00Z') })
   on('session.usage', () => ({
     value: {
       startedAt: 0,
@@ -259,6 +262,8 @@ test('footer shows cache, context and the 5h window', async ($, on) => {
     const { Text } = $.ui.resolve(e)
     return <Text key="engine-modes">engine</Text>
   })
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('turn.step', async function* (_$, e) {
     return {
       turnId: e.turnId,
@@ -269,8 +274,43 @@ test('footer shows cache, context and the 5h window', async ($, on) => {
       usage: { model: opus, input_tokens: 1000, cache_read_input_tokens: 96_000, cache_creation_input_tokens: 3000, output_tokens: 500 },
     }
   })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   const ui = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
   await step($, 'h1')
-  expect(await ui.find({ type: 'Text', text: 'cache 96% · ctx 10% · 5h 38% · last $0.05' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'cache 96% 60m · ctx 10% · 5h 38% · last $0.06' })).toBeDefined()
+  await clock.advance(61 * 60_000)
+  expect(await ui.find({ type: 'Text', text: 'cache cold · ctx 10% · 5h 38% · last $0.06' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('last is the whole prompt: main steps and its subagents, reset on the next prompt', async ($, on) => {
+  mock.store(on)
+  const usage = { model: opus, input_tokens: 1000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 0 }
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 1000, window: 1_000_000, percent: 0 }, rateLimits: [] } }))
+  on('ui.render', { component: 'SessionMode' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text key="engine-modes">engine</Text>
+  })
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('prompt.submit', (_$, e) => ({ text: e.text }))
+  on('agent.spawn', (_$, e) => ({ model: e.model ?? opus, agentId: 'sub-1' }))
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage }
+  })
+  const ui = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
+
+  await $.prompt.submit({ text: '/simplify', origin: { kind: 'composer' } } as Args<'prompt.submit'>)
+  await $.turn.start({ text: 'simplify', turnId: 'p1' })
+  await step($, 'p1')
+  await $.agent.spawn({ tool_use_id: 'tu', prompt: 'p', description: 'd', subagentType: 'general-purpose', provider: { plugin: 'engine', tier: 'core' }, parentModel: opus, background: false, fork: false } as Args<'agent.spawn'>)
+  await step($, 's1', 'sub-1')
+  await step($, 's1', 'sub-1')
+  await step($, 'p1')
+  expect(await ui.find({ type: 'Text', text: /last \$0\.02$/ })).toBeDefined()
+
+  await $.prompt.submit({ text: 'next', origin: { kind: 'composer' } } as Args<'prompt.submit'>)
+  await $.turn.start({ text: 'next', turnId: 'p2' })
+  await step($, 'p2')
+  expect(await ui.find({ type: 'Text', text: /last \$0\.0040$/ })).toBeDefined()
   await ui.unmount()
 })

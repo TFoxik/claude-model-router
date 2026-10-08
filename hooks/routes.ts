@@ -15,15 +15,14 @@ type ModelInfo = {
   input: number
   output: number
   cacheRead: number
-  cacheWrite: number
 }
 
-// USD per million tokens; cache writes at the 5-minute TTL rate (1.25x input).
+// USD per million tokens. Cache writes are priced from input by TTL: see writePrice.
 export const MODELS: Record<ModelKey, ModelInfo> = {
-  fable: { id: 'claude-fable-5-1', label: 'Fable 5.1', input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
-  opus: { id: 'claude-opus-5-5', label: 'Opus 5.5', input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
-  sonnet: { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
-  haiku: { id: 'claude-haiku-5-5', label: 'Haiku 5.5', input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+  fable: { id: 'claude-fable-5-1', label: 'Fable 5.1', input: 10, output: 50, cacheRead: 0.25 },
+  opus: { id: 'claude-opus-5-5', label: 'Opus 5.5', input: 4, output: 20, cacheRead: 0.2 },
+  sonnet: { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', input: 2, output: 10, cacheRead: 0.2 },
+  haiku: { id: 'claude-haiku-5-5', label: 'Haiku 5.5', input: 0.1, output: 0.5, cacheRead: 0.01 },
 }
 
 export const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -90,6 +89,7 @@ export const DEFAULT_CONFIG: RouterConfig = {
   isEnabled: true,
   preset: 'mine',
   routes: PRESETS.mine!.routes,
+  cacheTtlMinutes: 60,
 }
 
 export function parentOf(route: string): string | undefined {
@@ -145,7 +145,14 @@ export type Usage = {
   cache_creation_input_tokens: number
 }
 
-export function costOf(usage: Usage, modelId: string): number {
+export const DEFAULT_TTL = 60
+
+/** Cache writes cost 2x input with the 1-hour TTL Claude Code uses, 1.25x with the 5-minute one. */
+export function writePrice(p: ModelInfo, ttlMinutes = DEFAULT_TTL): number {
+  return p.input * (ttlMinutes >= 60 ? 2 : 1.25)
+}
+
+export function costOf(usage: Usage, modelId: string, ttlMinutes = DEFAULT_TTL): number {
   const key = modelKeyOf(modelId)
   if (key === undefined) return 0
   const p = MODELS[key]
@@ -153,21 +160,21 @@ export function costOf(usage: Usage, modelId: string): number {
     (usage.input_tokens * p.input +
       usage.output_tokens * p.output +
       usage.cache_read_input_tokens * p.cacheRead +
-      usage.cache_creation_input_tokens * p.cacheWrite) /
+      usage.cache_creation_input_tokens * writePrice(p, ttlMinutes)) /
     1e6
   )
 }
 
 export const EMPTY_SPEND: RouteSpend = { requests: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, usd: 0 }
 
-export function addSpend(spend: RouteSpend, usage: Usage, modelId: string): RouteSpend {
+export function addSpend(spend: RouteSpend, usage: Usage, modelId: string, ttlMinutes = DEFAULT_TTL): RouteSpend {
   return {
     requests: spend.requests + 1,
     input: spend.input + usage.input_tokens,
     cacheRead: spend.cacheRead + usage.cache_read_input_tokens,
     cacheWrite: spend.cacheWrite + usage.cache_creation_input_tokens,
     output: spend.output + usage.output_tokens,
-    usd: spend.usd + costOf(usage, modelId),
+    usd: spend.usd + costOf(usage, modelId, ttlMinutes),
   }
 }
 
@@ -191,6 +198,7 @@ export type SwitchFacts = {
   isAfterCompact: boolean
   from: { model: string; effort?: Effort }
   to: { model: string; effort?: Effort }
+  ttlMinutes?: number
 }
 
 /**
@@ -210,7 +218,7 @@ export function shouldSwitch(f: SwitchFacts): boolean {
   const toOut = TURN_OUTPUT[f.to.effort ?? 'medium'] * to.output
   if (toOut >= fromOut) return true
   const saving = (fromOut - toOut) / 1e6
-  const switchCost = (f.contextTokens * (to.cacheWrite - to.cacheRead)) / 1e6
+  const switchCost = (f.contextTokens * (writePrice(to, f.ttlMinutes) - to.cacheRead)) / 1e6
   return saving > switchCost
 }
 
@@ -252,11 +260,11 @@ function turnCost(r: Resolved, fallbackModel: string, context: number): number {
   return (TURN_OUTPUT[effort] * p.output + context * p.cacheRead) / 1e6
 }
 
-function rewriteCost(r: Resolved, fallbackModel: string, context: number): number {
+function rewriteCost(r: Resolved, fallbackModel: string, context: number, ttlMinutes: number): number {
   const key = modelKeyOf(r.model ?? fallbackModel)
   if (key === undefined) return 0
   const p = MODELS[key]
-  return (context * (p.cacheWrite - p.cacheRead)) / 1e6
+  return (context * (writePrice(p, ttlMinutes) - p.cacheRead)) / 1e6
 }
 
 const same = (a: Resolved, b: Resolved) => a.model === b.model && a.effort === b.effort
@@ -269,7 +277,7 @@ const same = (a: Resolved, b: Resolved) => a.model === b.model && a.effort === b
 export function estimateChanges(
   current: RouterConfig,
   next: RouterConfig,
-  facts: { contextTokens: number; liveRoute: 'main' | 'plan'; sessionModel: string },
+  facts: { contextTokens: number; liveRoute: 'main' | 'plan'; sessionModel: string; ttlMinutes?: number },
 ): ChangeRow[] {
   const rows: ChangeRow[] = []
   for (const { key } of ROUTES) {
@@ -282,7 +290,7 @@ export function estimateChanges(
       route: key,
       from: describe(a),
       to: describe(b),
-      switchCost: key === facts.liveRoute ? rewriteCost(b, facts.sessionModel, facts.contextTokens) : 0,
+      switchCost: key === facts.liveRoute ? rewriteCost(b, facts.sessionModel, facts.contextTokens, facts.ttlMinutes ?? DEFAULT_TTL) : 0,
       perTurnDelta: turnCost(b, facts.sessionModel, context) - turnCost(a, facts.sessionModel, context),
     })
   }
@@ -293,5 +301,5 @@ export function estimateChanges(
 export function modeSwitchCost(config: RouterConfig, contextTokens: number, sessionModel: string): number {
   const plan = resolve(config, 'plan')
   const main = resolve(config, 'main')
-  return same(plan, main) ? 0 : rewriteCost(plan, sessionModel, contextTokens)
+  return same(plan, main) ? 0 : rewriteCost(plan, sessionModel, contextTokens, config.cacheTtlMinutes ?? DEFAULT_TTL)
 }
