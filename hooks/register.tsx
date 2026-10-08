@@ -1,0 +1,586 @@
+import { atom, read, update } from 'claude-code'
+import type { Args, EngineInterface, Register } from 'claude-code'
+
+import type { ActiveRoute, Effort, Health, LastUsage, RouteSetting, RouteSpend, RouterConfig } from '../types'
+import {
+  AUTO_LABELS,
+  DEFAULT_CONFIG,
+  EFFORTS,
+  EMPTY_SPEND,
+  FORK,
+  MODELS,
+  PRESETS,
+  PRICES_AS_OF,
+  ROUTES,
+  SUB_CONTEXT,
+  addSpend,
+  costOf,
+  estimateChanges,
+  modeSwitchCost,
+  effortForLabel,
+  labelOf,
+  money,
+  parseSetting,
+  resolve,
+  routeForSpawn,
+  shouldSwitch,
+} from './routes'
+
+const PANE = 'model-router'
+const STORE_KEY = 'config'
+
+const config = atom({ plugin: 'model-router', key: 'config' } as const, DEFAULT_CONFIG)
+const spend = atom({ plugin: 'model-router', key: 'spend' } as const, {} as Record<string, RouteSpend>)
+const isPlan = atom({ plugin: 'model-router', key: 'isPlan' } as const, false)
+const agents = atom({ plugin: 'model-router', key: 'agents' } as const, {} as Record<string, string>)
+const active = atom({ plugin: 'model-router', key: 'active' } as const, null as ActiveRoute | null)
+const draft = atom({ plugin: 'model-router', key: 'draft' } as const, null as RouterConfig | null)
+const lastUsage = atom({ plugin: 'model-router', key: 'lastUsage' } as const, null as LastUsage | null)
+const health = atom({ plugin: 'model-router', key: 'health' } as const, null as Health | null)
+const isBandShown = atom({ plugin: 'model-router', key: 'isBandShown' } as const, true)
+
+type $ = EngineInterface
+
+export async function setConfig(
+  $: $,
+  fn: (c: RouterConfig) => RouterConfig,
+): Promise<RouterConfig> {
+  const next = await update($, config, fn)
+  await $.store.set(STORE_KEY, next)
+  await refreshStatus($)
+  return next
+}
+
+const shortRoute = (cfg: RouterConfig, route: string) => {
+  const r = resolve(cfg, route)
+  const model = r.model ? labelOf(r.model).replace(/ [\d.]+$/, '') : 'inherit'
+  return `${model}${r.effort ? ` ${r.effort}` : ''}`
+}
+
+async function refreshStatus($: $) {
+  const last = await read($, lastUsage)
+  if (last === null) return
+  const { context, rateLimits } = await $.session.usage()
+  const tokens = context.tokens ?? last.input + last.cacheRead + last.cacheWrite
+  const prompt = last.input + last.cacheRead + last.cacheWrite
+  const five = rateLimits.find(one => one.kind === 'five_hour')
+  const resetMs = five?.resetsAt ? Date.parse(five.resetsAt) - (await $.clock.now()) : undefined
+  const next: Health = {
+    cache: prompt > 0 ? Math.round((last.cacheRead / prompt) * 100) : 0,
+    ctx: context.percent ?? Math.round((tokens / context.window) * 100),
+    last: last.usd,
+    toggle: modeSwitchCost(await read($, config), tokens, last.model),
+    ...(five ? { fiveHour: Math.round(five.percentUsed) } : {}),
+    ...(resetMs !== undefined && resetMs > 0 ? { resetMinutes: Math.round(resetMs / 60_000) } : {}),
+  }
+  await update($, health, () => next)
+}
+
+async function renderHealth($: $, e: Args<'ui.render'>, modes: readonly string[]) {
+  const hp = await read($, health)
+  const { Box, Text } = $.ui.resolve(e)
+  if (hp === null) return null
+  const level = (value: number, warn: number, bad: number) => (value >= bad ? 'error' : value >= warn ? 'warning' : undefined)
+  return (
+    <Box flexDirection="row" flexShrink={0}>
+      <Text dimColor wrap="truncate-end">
+        {modes.length > 0 ? `${modes.join(' & ')} · ` : ''}cache{' '}
+        <Text color={hp.cache < 50 ? 'error' : hp.cache < 80 ? 'warning' : 'success'}>{hp.cache}%</Text> · ctx{' '}
+        <Text color={level(hp.ctx, 70, 90)}>{hp.ctx}%</Text>
+        {hp.fiveHour === undefined ? '' : ' · 5h '}
+        {hp.fiveHour === undefined ? null : <Text color={level(hp.fiveHour, 70, 90)}>{hp.fiveHour}%</Text>} · last{' '}
+        {money(hp.last)}
+      </Text>
+    </Box>
+  )
+}
+
+const MODEL_OPTIONS = [
+  { value: 'inherit', label: 'inherit' },
+  ...Object.entries(MODELS).map(([value, m]) => ({ value, label: m.label })),
+]
+
+const effortOptions = (canAuto: boolean) => [
+  { value: 'inherit', label: 'inherit' },
+  ...(canAuto ? [{ value: 'auto', label: 'auto' }] : []),
+  ...EFFORTS.map(value => ({ value, label: value })),
+]
+
+const kTokens = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n))
+
+const ROUTE_COLOR: Record<string, string> = { plan: 'planMode', main: 'claude' }
+const colorOf = (route: string) => ROUTE_COLOR[route] ?? 'suggestion'
+
+const GROUPS: ReadonlyArray<{ title: string; keys: readonly string[] }> = [
+  { title: 'Main loop', keys: ['plan', 'main'] },
+  { title: 'Subagents', keys: ['sub:*', 'sub:Explore', 'sub:Plan', 'sub:general-purpose', 'workflow', 'teammate'] },
+]
+
+const pad = (text: string, width: number) => (text.length >= width ? text.slice(0, width) : text + ' '.repeat(width - text.length))
+const bar = (part: number, whole: number, width: number) => {
+  const filled = whole > 0 ? Math.max(part > 0 ? 1 : 0, Math.round((part / whole) * width)) : 0
+  return '█'.repeat(filled) + '░'.repeat(width - filled)
+}
+
+export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
+  const cfg = await read($, config)
+  const costs = await read($, spend)
+  const now = await read($, active)
+  const isPlanning = await read($, isPlan)
+
+  if (e.surface === 'mobile') {
+    const { Box, Text } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        <Text color={now ? colorOf(now.route) : undefined} bold>
+          {now ? `▸ ${now.route} · ${labelOf(now.model)} · ${now.effort ?? ''}` : '▸ waiting'}
+        </Text>
+        <Text dimColor>Edit routes with /route set, or from a terminal or desktop.</Text>
+      </Box>
+    )
+  }
+  const { Box, Text, Button, Select } = $.ui.resolve(e)
+
+  const pending = await read($, draft)
+  const shown = pending ?? cfg
+  const contextTokens = (await $.session.usage()).context.tokens ?? 0
+  const sessionModel = now?.model ?? (await $.session.model())
+  const liveRoute = isPlanning ? 'plan' : 'main'
+  const changes = pending ? estimateChanges(cfg, pending, { contextTokens, liveRoute, sessionModel }) : []
+  const changed = new Set(changes.map(one => one.route))
+  const upFront = changes.reduce((sum, one) => sum + one.switchCost, 0)
+  const toggleNow = modeSwitchCost(cfg, contextTokens, sessionModel)
+  const toggleAfter = pending ? modeSwitchCost(pending, contextTokens, sessionModel) : toggleNow
+  const livePerTurn = changes.filter(one => one.route === liveRoute).reduce((sum, one) => sum + one.perTurnDelta, 0)
+  const payback = upFront > 0 && livePerTurn < 0 ? Math.ceil(upFront / -livePerTurn) : undefined
+
+  const editDraft = async (fn: (c: RouterConfig) => RouterConfig) => {
+    await update($, draft, d => {
+      const next = fn(d ?? cfg)
+      return JSON.stringify(next) === JSON.stringify(cfg) ? null : next
+    })
+    await refreshStatus($)
+  }
+  const setRoute = (route: string, patch: Partial<RouteSetting>) =>
+    editDraft(c => {
+      const was = c.routes[route] ?? { model: 'inherit', effort: 'inherit' }
+      return { ...c, preset: 'custom', routes: { ...c.routes, [route]: { ...was, ...patch } } }
+    })
+  const signed = (usd: number) => `${usd >= 0 ? '+' : '−'}${money(Math.abs(usd))}`
+
+  const presetOptions = [
+    ...Object.entries(PRESETS).map(([value, p]) => ({ value, label: p.label })),
+    ...(PRESETS[shown.preset] ? [] : [{ value: shown.preset, label: 'Custom' }]),
+  ]
+
+  const spendRows = Object.entries(costs).sort((a, b) => b[1].usd - a[1].usd)
+  const total = spendRows.reduce((sum, [, one]) => sum + one.usd, 0)
+  const nowColor = now ? colorOf(now.route) : 'subtle'
+
+  return (
+    <Box flexDirection="column" gap={1}>
+      <Box flexDirection="row" justifyContent="space-between">
+        <Text bold color="claude">⚙ Model Router</Text>
+        <Text color={cfg.isEnabled ? 'success' : 'subtle'}>{cfg.isEnabled ? '● on' : '○ off'}</Text>
+      </Box>
+
+      <Box flexDirection="column" borderStyle="round" borderColor={nowColor} paddingX={1}>
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text bold color={nowColor}>
+            {now ? `▸ ${now.route}  ${labelOf(now.model)} · ${now.effort ?? 'default'}` : '▸ waiting for the first request'}
+          </Text>
+          <Text dimColor>{money(total)}</Text>
+        </Box>
+        <Text dimColor>
+          plan mode {isPlanning ? 'on' : 'off'} · context {kTokens(contextTokens)} tokens
+          {toggleNow > 0 ? ` · plan toggle ≈ ${money(toggleNow)}` : ' · plan toggle keeps cache'}
+        </Text>
+        {now?.isHeld ? <Text color="warning">auto kept the current effort to protect the cache</Text> : null}
+      </Box>
+
+      <Box flexDirection="row" gap={1}>
+        <Button
+          key="toggle"
+          label={cfg.isEnabled ? 'Turn off' : 'Turn on'}
+          onPress={() => setConfig($, c => ({ ...c, isEnabled: !c.isEnabled }))}
+        />
+        <Select
+          key="preset"
+          label="Preset "
+          options={presetOptions}
+          value={shown.preset}
+          onSelect={value => {
+            const preset = PRESETS[value]
+            if (preset) void editDraft(c => ({ ...c, preset: value, routes: { ...preset.routes } }))
+          }}
+        />
+      </Box>
+
+      <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
+        {GROUPS.map(group => (
+          <Box key={`g:${group.title}`} flexDirection="column" marginBottom={1}>
+            <Text bold dimColor>{group.title.toUpperCase()}</Text>
+            {group.keys.map(key => {
+              const row = ROUTES.find(one => one.key === key)!
+              const setting = shown.routes[key] ?? { model: 'inherit', effort: 'inherit' }
+              const isChild = key !== 'sub:*' && group.title === 'Subagents'
+              const isLive = now?.route === key
+              return (
+                <Box key={`row:${key}`} flexDirection="row" gap={1}>
+                  <Text color={changed.has(key) ? 'warning' : isLive ? colorOf(key) : 'subtle'}>
+                    {changed.has(key) ? '●' : isLive ? '▸' : ' '}
+                  </Text>
+                  <Box width={22}>
+                    <Text color={isChild ? undefined : colorOf(key)} bold={!isChild}>
+                      {isChild ? `└ ${row.label}` : row.label}
+                    </Text>
+                  </Box>
+                  <Select
+                    key={`m:${key}`}
+                    options={MODEL_OPTIONS}
+                    value={setting.model}
+                    onSelect={value => void setRoute(key, { model: value as RouteSetting['model'] })}
+                  />
+                  <Select
+                    key={`e:${key}`}
+                    options={effortOptions(row.canAuto)}
+                    value={setting.effort}
+                    onSelect={value => void setRoute(key, { effort: value as RouteSetting['effort'] })}
+                  />
+                </Box>
+              )
+            })}
+          </Box>
+        ))}
+        <Text dimColor>inherit → falls back to the row above, then the session · forks always use the parent's model</Text>
+      </Box>
+
+      {pending === null ? (
+        <Text dimColor>Changes above are a draft until you press Apply.</Text>
+      ) : (
+        <Box flexDirection="column" borderStyle="round" borderColor="warning" paddingX={1}>
+          <Text bold color="warning">
+            ● Draft — {changes.length} change{changes.length === 1 ? '' : 's'}, not applied
+          </Text>
+          {changes.map(one => (
+            <Box key={`c:${one.route}`} flexDirection="row" gap={1}>
+              <Text color={colorOf(one.route)}>{pad(one.route, 20)}</Text>
+              <Text dimColor>{one.from}</Text>
+              <Text>→ {one.to}</Text>
+              <Text color={one.perTurnDelta <= 0 ? 'success' : 'error'}>
+                {signed(one.perTurnDelta)}/{one.route === 'main' || one.route === 'plan' ? 'turn' : 'run'}
+              </Text>
+              {one.switchCost > 0 ? <Text color="warning">cache {money(one.switchCost)} now</Text> : null}
+            </Box>
+          ))}
+          <Box flexDirection="row" gap={2} marginTop={1}>
+            <Text>
+              up-front <Text bold color={upFront > 0 ? 'warning' : 'success'}>{money(upFront)}</Text>
+            </Text>
+            <Text>
+              plan toggle {money(toggleNow)} → <Text bold>{money(toggleAfter)}</Text>
+            </Text>
+            {payback !== undefined ? <Text color="success">pays back in ~{payback} turns</Text> : null}
+          </Box>
+          <Text dimColor>rough: medium-length turns, {kTokens(SUB_CONTEXT)}-token subagent context</Text>
+          <Box flexDirection="row" gap={1} marginTop={1}>
+            <Button
+              key="apply"
+              label="Apply"
+              variant="primary"
+              onPress={async () => {
+                await update($, draft, () => null)
+                await setConfig($, () => pending)
+              }}
+            />
+            <Button
+              key="discard"
+              label="Discard"
+              onPress={async () => {
+                await update($, draft, () => null)
+                await refreshStatus($)
+              }}
+            />
+          </Box>
+        </Box>
+      )}
+
+      <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text bold dimColor>SPEND THIS SESSION</Text>
+          <Text bold>{money(total)}</Text>
+        </Box>
+        {spendRows.length === 0 && <Text dimColor>No requests yet.</Text>}
+        {spendRows.map(([route, one]) => (
+          <Box key={`s:${route}`} flexDirection="row" gap={1}>
+            <Text color={colorOf(route)}>{pad(route, 20)}</Text>
+            <Text color={colorOf(route)}>{bar(one.usd, total, 12)}</Text>
+            <Text>{pad(money(one.usd), 8)}</Text>
+            <Text dimColor>
+              {one.requests} req · in {kTokens(one.input)} · cache {kTokens(one.cacheRead)}/{kTokens(one.cacheWrite)} · out{' '}
+              {kTokens(one.output)}
+            </Text>
+          </Box>
+        ))}
+        <Text dimColor>estimate · prices as of {PRICES_AS_OF} · cache writes at the 5-minute rate</Text>
+      </Box>
+    </Box>
+  )
+}
+
+async function setBand($: $, isShown: boolean) {
+  await update($, isBandShown, () => isShown)
+  await $.store.set('bandShown', isShown)
+}
+
+async function renderBand($: $, e: Args<'ui.render'>) {
+  const cfg = await read($, config)
+  const now = await read($, active)
+  const pending = await read($, draft)
+  const total = Object.values(await read($, spend)).reduce((sum, one) => sum + one.usd, 0)
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const head = !cfg.isEnabled
+    ? 'router off'
+    : now
+      ? `▸ ${now.route} · ${labelOf(now.model)}${now.effort ? ` ${now.effort}` : ''}${now.isHeld ? ' (held)' : ''}`
+      : '▸ waiting for first request'
+  return (
+    <Box flexDirection="row" gap={1}>
+      <Text bold={cfg.isEnabled} dimColor={!cfg.isEnabled} color={cfg.isEnabled && now ? colorOf(now.route) : undefined}>
+        {head}
+      </Text>
+      <Text dimColor>
+        │ <Text color="planMode">plan</Text> {shortRoute(cfg, 'plan')} · <Text color="claude">main</Text> {shortRoute(cfg, 'main')} ·{' '}
+        <Text color="suggestion">sub</Text> {shortRoute(cfg, 'sub:*')} · {money(total)}
+      </Text>
+      {pending ? <Text color="warning">● draft</Text> : null}
+      <Button key="band-open" label="Routes" plain onPress={() => $.ui.open({ id: PANE, title: 'Model router' })} />
+      <Button key="band-hide" label="Hide" plain onPress={() => setBand($, false)} />
+    </Box>
+  )
+}
+
+const asEffort = (effort: unknown): Effort | undefined =>
+  typeof effort === 'string' ? (effort as Effort) : undefined
+
+type Decision = { model: string; effort?: Effort; isHeld: boolean }
+
+// Per-load memory: a hot reload starts it over, which only costs one unguarded turn.
+const mem = {
+  autoEffort: new Map<string, Effort>(),
+  decisions: new Map<string, Decision>(),
+  lastMain: undefined as { route: string; model: string; effort?: Effort } | undefined,
+  isAfterCompact: false,
+  pendingWorkflow: 0,
+}
+
+async function routeOfAgent($: $, agentId: string): Promise<string | undefined> {
+  const known = (await read($, agents))[agentId]
+  if (known !== undefined) return known
+  const listed = (await $.agent.list()).find(one => one.id === agentId)
+  if (listed !== undefined) {
+    if (listed.teammateId !== undefined) return 'teammate'
+    return listed.type === FORK ? FORK : `sub:${listed.type}`
+  }
+  return mem.pendingWorkflow > 0 ? 'workflow' : undefined
+}
+
+async function decideMain(
+  $: $,
+  turnId: string,
+  index: number,
+  route: string,
+  model: string,
+  effort?: Effort,
+): Promise<Decision> {
+  const known = mem.decisions.get(turnId)
+  if (known !== undefined && index > 0) return known
+  const want = resolve(await read($, config), route)
+  const toModel = want.model ?? model
+  let toEffort: Effort | undefined =
+    want.effort === 'auto' ? (mem.autoEffort.get(turnId) ?? mem.lastMain?.effort ?? 'medium') : (want.effort ?? effort)
+  let isHeld = false
+  const last = mem.lastMain
+  if (want.effort === 'auto' && last !== undefined && last.route === route) {
+    const contextTokens = (await $.session.usage()).context.tokens ?? 0
+    const from = { model: last.model, effort: last.effort }
+    const to = { model: toModel, effort: toEffort }
+    if (!shouldSwitch({ contextTokens, isAfterCompact: mem.isAfterCompact, from, to })) {
+      toEffort = last.effort
+      isHeld = true
+    }
+  }
+  mem.isAfterCompact = false
+  mem.autoEffort.delete(turnId)
+  const decision = { model: toModel, effort: toEffort, isHeld }
+  mem.decisions.clear()
+  mem.decisions.set(turnId, decision)
+  return decision
+}
+
+export const register: Register = on => {
+
+  on('session.start', async ($, e, next) => {
+    const stored = (await $.store.get(STORE_KEY)) as RouterConfig | undefined
+    if (stored?.routes) await update($, config, () => ({ ...DEFAULT_CONFIG, ...stored }))
+    const band = await $.store.get('bandShown')
+    if (typeof band === 'boolean') await update($, isBandShown, () => band)
+    $.ui.status(undefined)
+    await refreshStatus($)
+    await $.command.register({
+      name: 'route',
+      description: 'Model router: open the pane, or `preset <name>`, `set <route> <model> [effort]`, `on`, `off`, `band on|off`',
+      argumentHint: '[preset <name> | set <route> <model> [effort] | on | off | band on|off]',
+    })
+    return next(e)
+  })
+
+  on('prompt.attachment', async ($, e, next) => {
+    if (e.agentId === undefined) {
+      if (e.type === 'plan_mode' || e.type === 'plan_mode_reentry') await update($, isPlan, () => true)
+      if (e.type === 'plan_mode_exit') await update($, isPlan, () => false)
+    }
+    return next(e)
+  })
+
+  on('tool.call', { tool: 'EnterPlanMode' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (e.agentId === undefined && ran.deny === undefined && !ran.isError) await update($, isPlan, () => true)
+    return ran
+  })
+
+  on('tool.call', { tool: 'ExitPlanMode' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (e.agentId === undefined && ran.deny === undefined && !ran.isError) await update($, isPlan, () => false)
+    return ran
+  })
+
+  on('session.compact', async ($, e, next) => {
+    const done = await next(e)
+    if (e.agentId === undefined) mem.isAfterCompact = true
+    return done
+  })
+
+  on('agent.spawn', async ($, e, next) => {
+    const route = routeForSpawn(e)
+    const { model } = resolve(await read($, config), route)
+    const canRewrite = route !== FORK && e.workflow === undefined
+    if (e.workflow !== undefined) mem.pendingWorkflow += 1
+    const started = await next(canRewrite && model ? { ...e, model } : e)
+    if (e.workflow !== undefined) mem.pendingWorkflow = Math.max(0, mem.pendingWorkflow - 1)
+    const id = started.agentId
+    if (id !== undefined) await update($, agents, map => ({ ...map, [id]: route }))
+    return started
+  })
+
+  on('turn.start', async ($, e, next) => {
+    const route = (await read($, isPlan)) ? 'plan' : 'main'
+    const { effort } = resolve(await read($, config), route)
+    if (effort === 'auto' && e.text.trim() !== '') {
+      const label = await $.model
+        .classify(e.text.slice(0, 4000), AUTO_LABELS, { model: 'haiku' })
+        .catch(() => undefined)
+      mem.autoEffort.set(e.turnId, effortForLabel(label, e.text))
+    }
+    return next(e)
+  })
+
+  on('turn.step', async function* ($, e, next) {
+    const cfg = await read($, config)
+    let route: string | undefined
+    let model = e.model
+    let effort = asEffort(e.effort)
+    let isHeld = false
+
+    if (e.agentId === undefined) {
+      route = (await read($, isPlan)) ? 'plan' : 'main'
+      if (cfg.isEnabled) {
+        const decision = await decideMain($, e.turnId, e.index, route, e.model, effort)
+        model = decision.model
+        effort = decision.effort
+        isHeld = decision.isHeld
+      }
+    } else {
+      route = await routeOfAgent($, e.agentId)
+      if (route !== undefined && route !== FORK) {
+        const want = resolve(cfg, route)
+        model = want.model ?? e.model
+        if (want.effort !== undefined && want.effort !== 'auto') effort = want.effort
+      }
+    }
+
+    const isChanged = model !== e.model || effort !== asEffort(e.effort)
+    const result = yield* next(isChanged ? { ...e, model, ...(effort ? { effort } : {}) } : e)
+
+    const key = route ?? 'sub:?'
+    if (result.usage) {
+      const usage = result.usage
+      await update($, spend, all => ({ ...all, [key]: addSpend(all[key] ?? EMPTY_SPEND, usage, usage.model) }))
+      if (e.agentId === undefined) {
+        await update($, lastUsage, () => ({
+          model: usage.model,
+          input: usage.input_tokens,
+          cacheRead: usage.cache_read_input_tokens,
+          cacheWrite: usage.cache_creation_input_tokens,
+          usd: costOf(usage, usage.model),
+        }))
+      }
+    }
+
+    if (e.agentId === undefined) {
+      if (mem.lastMain !== undefined && mem.lastMain.route !== key && cfg.isEnabled) {
+        $.ui.toast(`Route ${key}: ${labelOf(model)}${effort ? ` ${effort}` : ''}`)
+      }
+      mem.lastMain = { route: key, model, effort }
+      await update($, active, () => ({ route: key, model, effort, isHeld }))
+      await refreshStatus($)
+    }
+    return result
+  })
+
+  on('command.run', { command: 'route' }, async ($, e) => {
+    const [verb, ...rest] = e.args.trim().split(/\s+/).filter(Boolean)
+    if (verb === undefined) {
+      await $.ui.open({ id: PANE, title: 'Model router' })
+      return { text: 'Model router pane opened.' }
+    }
+    if (verb === 'band') {
+      const isShown = rest[0] !== 'off'
+      await setBand($, isShown)
+      return { text: `Model router band ${isShown ? 'shown' : 'hidden'}.` }
+    }
+    if (verb === 'on' || verb === 'off') {
+      await setConfig($, c => ({ ...c, isEnabled: verb === 'on' }))
+      return { text: `Model router ${verb === 'on' ? 'enabled' : 'disabled'}.` }
+    }
+    if (verb === 'preset') {
+      const name = rest[0] ?? ''
+      const preset = PRESETS[name]
+      if (preset === undefined) return { text: `Presets: ${Object.keys(PRESETS).join(', ')}.` }
+      await setConfig($, c => ({ ...c, preset: name, routes: { ...preset.routes } }))
+      return { text: `Preset ${name}: ${preset.label}.` }
+    }
+    if (verb === 'set') {
+      const [route, model, effort] = rest
+      if (route === undefined) return { text: `Routes: ${ROUTES.map(one => one.key).join(', ')}, or sub:<agent-type>.` }
+      const setting = parseSetting(model, effort)
+      if (typeof setting === 'string') return { text: setting }
+      await setConfig($, c => ({ ...c, preset: 'custom', routes: { ...c.routes, [route]: setting } }))
+      return { text: `${route} → ${setting.model} · ${setting.effort}.` }
+    }
+    return { text: 'Usage: /route [preset <name> | set <route> <model> [effort] | on | off | band on|off]' }
+  })
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, ($, e) => renderPane($, e))
+
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    if (e.component !== 'SessionMode') return next(e)
+    const tree = await renderHealth($, e, e.props.modes)
+    return tree ?? next(e)
+  })
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey || !(await read($, isBandShown))) return next(e)
+    return renderBand($, e)
+  })
+}

@@ -1,0 +1,13 @@
+{
+  "name": "claude-model-router",
+  "description": "Per-work-type model and effort routing for Claude Code",
+  "owner": {
+    "name": "TFoxik"
+  },
+  "plugins": [
+    {
+      "name": "model-router",
+      "source": "./"
+    }
+  ]
+}
