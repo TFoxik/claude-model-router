@@ -427,6 +427,6 @@ test('finished prompts are saved across sessions and shown in Stats', async ($, 
   expect(await ui.find({ type: 'Text', text: 'Stats · my-app' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '/simplify' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /1 run · total \$1\.00/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Opus 5\.5 \$1\.00/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Opus 5\.5 medium \$1\.00/ })).toBeDefined()
   await ui.unmount()
 })

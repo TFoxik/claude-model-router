@@ -34,6 +34,7 @@ export type PromptItem = {
   route: string
   label: string
   model: string
+  effort?: string
   requests: number
   input: number
   cacheRead: number

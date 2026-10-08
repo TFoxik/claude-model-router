@@ -107,7 +107,10 @@ const level = (value: number, warn: number, bad: number) => (value >= bad ? 'err
 
 function modelsOf(p: PromptCost): Record<string, number> {
   const out: Record<string, number> = {}
-  for (const item of p.items) out[labelOf(item.model)] = (out[labelOf(item.model)] ?? 0) + item.usd
+  for (const item of p.items) {
+    const key = `${labelOf(item.model)}${item.effort ? ` ${item.effort}` : ''}`
+    out[key] = (out[key] ?? 0) + item.usd
+  }
   return out
 }
 
@@ -611,7 +614,7 @@ async function renderLastPane($: $, e: Args<'ui.render'>) {
       </Box>
       <Text dimColor>
         {'   '}
-        {labelOf(one.model)} · {one.requests} req · in {kTokens(one.input)} · cache {kTokens(one.cacheRead)}/{kTokens(one.cacheWrite)} · out {kTokens(one.output)}
+        {labelOf(one.model)}{one.effort ? ` ${one.effort}` : ''} · {one.requests} req · in {kTokens(one.input)} · cache {kTokens(one.cacheRead)}/{kTokens(one.cacheWrite)} · out {kTokens(one.output)}
       </Text>
     </Box>
   )
@@ -975,6 +978,7 @@ export const register: Register = on => {
       const itemId = e.agentId ?? key
       const label = e.agentId === undefined ? (key === 'plan' ? 'Main loop (plan mode)' : 'Main loop') : ((await read($, agentLabels))[e.agentId] ?? key)
       const usd = costOf(usage, usage.model, ttl)
+      const stepEffort = typeof effort === 'string' ? effort : undefined
       await update($, promptCost, p => {
         const was = p ?? { usd: 0, requests: 0, items: [] }
         const old: PromptItem = was.items.find(one => one.id === itemId) ?? {
@@ -983,6 +987,7 @@ export const register: Register = on => {
         const item: PromptItem = {
           ...old,
           model: usage.model,
+          ...(stepEffort ? { effort: stepEffort } : {}),
           requests: old.requests + 1,
           input: old.input + usage.input_tokens,
           cacheRead: old.cacheRead + usage.cache_read_input_tokens,
