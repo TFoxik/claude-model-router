@@ -852,7 +852,7 @@ export const register: Register = on => {
     if (typeof band === 'boolean') await update($, isBandShown, () => band)
     $.ui.status(undefined)
     await refreshStatus($)
-    $.clock.every(30_000, () => void refreshStatus($))
+    $.clock.every(60_000, () => void refreshStatus($))
     await $.command.register({
       name: 'route',
       description: 'Model router: open the pane, or `preset <name>`, `set <route> <model> [effort]`, `on`, `off`, `band on|off`',
