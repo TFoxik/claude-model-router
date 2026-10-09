@@ -11,8 +11,15 @@ import {
   commandLabel,
   commandStats,
   contextLevel,
+  addStep,
   costOf,
   effortForLabel,
+  parseSetting,
+  presetOf,
+  printable,
+  sanitizeConfig,
+  sanitizeHistory,
+  todayUsd,
   fmtAge,
   rewriteCause,
   rewriteOf,
@@ -225,7 +232,7 @@ test('the band above the prompt draws and hides', async ($, on) => {
 
 test('estimates: only the live main-loop route pays a cache rewrite up front', () => {
   const next = { ...DEFAULT_CONFIG, routes: { ...DEFAULT_CONFIG.routes, main: { model: 'sonnet', effort: 'low' }, 'sub:*': { model: 'haiku', effort: 'low' } } } as typeof DEFAULT_CONFIG
-  const rows = estimateChanges(DEFAULT_CONFIG, next, { contextTokens: 100_000, liveRoute: 'main', sessionModel: opus })
+  const rows = estimateChanges(DEFAULT_CONFIG, next, { contextTokens: 100_000, liveRoute: 'main', sessionModel: opus, ttlMinutes: 60 })
   const main = rows.find(one => one.route === 'main')!
   const sub = rows.find(one => one.route === 'sub:*')!
   expect(Math.abs(main.switchCost - 0.38)).toBeLessThan(1e-9)
@@ -548,4 +555,63 @@ test('cache rewrites are tallied by cause and shown in Last and Stats', async ($
   expect(await stats.find({ type: 'Text', text: / · 2 cache rewrites \$1\.56/ })).toBeDefined()
   expect(await stats.find({ type: 'Text', text: / · route switch rewrite of 100k tokens, \$0\.78/ })).toBeDefined()
   await stats.unmount()
+})
+
+test('stored config is kept only where this version understands it', () => {
+  expect(sanitizeConfig(null)).toEqual(DEFAULT_CONFIG)
+  const cfg = sanitizeConfig({
+    isEnabled: false,
+    routes: { main: { model: 'sonnet', effort: 'low' }, plan: { model: 'gpt', effort: 'low' }, 'sub:x': { model: 'haiku', effort: 'bogus' }, nope: { model: 'opus', effort: 'low' } },
+    cacheTtlMinutes: 7,
+    coldGuard: 'maybe',
+  })
+  expect(cfg).toEqual({ ...DEFAULT_CONFIG, isEnabled: false, routes: { main: { model: 'sonnet', effort: 'low' } } })
+  expect(sanitizeConfig({ routes: { main: { model: 'constructor', effort: 'low' } } }).routes).toEqual(DEFAULT_CONFIG.routes)
+  const good = { at: 1, repo: 'r', label: 'prompt', text: 't', usd: 1, requests: 1, agents: 0 }
+  expect(sanitizeHistory([good, null, { ...good, text: 3 }, 'x'])).toEqual([good])
+  expect(sanitizeHistory({})).toEqual([])
+})
+
+test('route, model, effort and preset names are checked as own keys', () => {
+  expect(parseSetting('main', 'constructor', 'low')).toMatch(/Unknown model/)
+  expect(parseSetting('Explore', 'haiku', 'low')).toMatch(/Unknown route/)
+  expect(parseSetting('sub:Explore', 'haiku', 'auto')).toMatch(/main and plan only/)
+  expect(parseSetting('sub:my-agent', 'haiku', 'low')).toEqual({ model: 'haiku', effort: 'low' })
+  expect(parseSetting('plan', 'opus', 'auto')).toEqual({ model: 'opus', effort: 'auto' })
+  expect([presetOf('constructor'), presetOf('__proto__')]).toEqual([undefined, undefined])
+  expect(presetOf('max')?.label).toBe('Max quality')
+  expect(printable('a\u001b[31mb\nc')).toBe('a [31mb c')
+})
+
+test('a step adds to its item once, in place', () => {
+  const usage = { model: opus, input_tokens: 1_000_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 0 }
+  const one = addStep({ usd: 0, requests: 0, items: [] }, { id: 'main', route: 'main', label: 'Main loop', effort: 'high', usage, ttlMinutes: 60 })
+  const two = addStep(one, { id: 'main', route: 'main', label: 'Main loop', usage, ttlMinutes: 60 })
+  expect(two.items).toHaveLength(1)
+  expect(two.items[0]).toMatchObject({ requests: 2, input: 2_000_000, usd: 8, effort: 'high' })
+  expect([two.usd, two.requests]).toEqual([8, 2])
+})
+
+test('today sums only the tail of time-ordered history', () => {
+  const day = 86_400_000
+  const records = [0, day, 2 * day, 2 * day + 1000].map((at, i) => ({ at: T0 - 2 * day + at, repo: 'r', label: 'prompt', text: '', usd: i + 1, requests: 1, agents: 0 }))
+  expect(todayUsd(records, T0 + 1000)).toBe(7)
+})
+
+test('only a person can change routes; anyone can open a pane; stats clear empties history', async ($, on) => {
+  mock.store(on, { history: [{ at: T0, repo: 'unknown', label: 'prompt', text: 'x', usd: 1, requests: 1, agents: 0 }] })
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  on('ui.open', () => ({ value: undefined }) as never)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const run = (args: string, kind: string) => $.command.run({ command: 'route', args, origin: { kind } } as unknown as Args<'command.run'>)
+  expect((await run('off', 'peer')).text).toMatch(/only runs when you type it/)
+  expect((await run('stats', 'peer')).text).toBe('Stats pane opened.')
+  const mountStats = () => $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'Pane', requestId: 'model-router-stats', props: {} as never })
+  const before = await mountStats()
+  expect(await before.find({ type: 'Text', text: / · 1 prompt$/ })).toBeDefined()
+  await before.unmount()
+  expect((await run('stats clear', 'composer')).text).toBe('Prompt history cleared.')
+  const after = await mountStats()
+  expect(await after.find({ type: 'Text', text: 'Nothing recorded yet.' })).toBeDefined()
+  await after.unmount()
 })

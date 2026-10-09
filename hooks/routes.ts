@@ -1,5 +1,9 @@
 import type {
+  ColdGuard,
   Effort,
+  PromptCost,
+  PromptItem,
+  PromptRecord,
   Rewrite,
   ModelKey,
   RouteEffort,
@@ -28,18 +32,27 @@ export const MODELS: Record<ModelKey, ModelInfo> = {
 
 export const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
-export type RouteRow = { key: string; label: string; parent?: string; canAuto: boolean }
+type RouteRow = { key: string; label: string; parent?: string }
 
+/** In pane order: the main loop first, then the subagent default and its overrides. */
 export const ROUTES: readonly RouteRow[] = [
-  { key: 'main', label: 'Normal work', canAuto: true },
-  { key: 'plan', label: 'Plan mode', parent: 'main', canAuto: true },
-  { key: 'sub:*', label: 'Subagents (default)', canAuto: false },
-  { key: 'sub:Explore', label: 'Explore agent', parent: 'sub:*', canAuto: false },
-  { key: 'sub:Plan', label: 'Plan agent', parent: 'sub:*', canAuto: false },
-  { key: 'sub:general-purpose', label: 'General-purpose agent', parent: 'sub:*', canAuto: false },
-  { key: 'workflow', label: 'Workflow agents', parent: 'sub:*', canAuto: false },
-  { key: 'teammate', label: 'Teammates', parent: 'sub:*', canAuto: false },
+  { key: 'plan', label: 'Plan mode', parent: 'main' },
+  { key: 'main', label: 'Normal work' },
+  { key: 'sub:*', label: 'Default' },
+  { key: 'sub:Explore', label: 'Explore', parent: 'sub:*' },
+  { key: 'sub:Plan', label: 'Plan agent', parent: 'sub:*' },
+  { key: 'sub:general-purpose', label: 'General', parent: 'sub:*' },
+  { key: 'workflow', label: 'Workflow', parent: 'sub:*' },
+  { key: 'teammate', label: 'Teammates', parent: 'sub:*' },
 ]
+
+/** The main loop's routes: only these carry a cache across turns, so only they take `auto`. */
+export const isLoopRoute = (route: string) => route === 'main' || route === 'plan'
+
+export const routeLabel = (route: string) => ROUTES.find(one => one.key === route)?.label ?? route
+
+/** A route `/route set` may write: a known one, or `sub:<agent-type>`. */
+export const isRouteKey = (route: string) => ROUTES.some(one => one.key === route) || /^sub:[\w.:-]{1,64}$/.test(route)
 
 export const FORK = 'fork'
 
@@ -94,13 +107,54 @@ export const DEFAULT_CONFIG: RouterConfig = {
   coldGuard: 'refuse',
 }
 
-export function parentOf(route: string): string | undefined {
+export const presetOf = (name: string) => (Object.hasOwn(PRESETS, name) ? PRESETS[name] : undefined)
+
+const isModel = (m: unknown): m is RouteSetting['model'] => m === 'inherit' || (typeof m === 'string' && Object.hasOwn(MODELS, m))
+const isEffort = (e: unknown): e is RouteEffort =>
+  e === 'inherit' || e === 'auto' || (typeof e === 'string' && EFFORTS.includes(e as Effort))
+const GUARDS: readonly ColdGuard[] = ['refuse', 'warn', 'off']
+
+/**
+ * The stored config, keeping only what this version understands; a route the
+ * engine would reject (an unknown model or effort) is dropped, not sent.
+ */
+export function sanitizeConfig(stored: unknown): RouterConfig {
+  if (typeof stored !== 'object' || stored === null) return DEFAULT_CONFIG
+  const s = stored as Partial<Record<keyof RouterConfig, unknown>>
+  const routes: Record<string, RouteSetting> = {}
+  if (typeof s.routes === 'object' && s.routes !== null) {
+    for (const [key, one] of Object.entries(s.routes)) {
+      const setting = one as Partial<RouteSetting> | null
+      if (isRouteKey(key) && isModel(setting?.model) && isEffort(setting?.effort)) routes[key] = { model: setting.model, effort: setting.effort }
+    }
+  }
+  return {
+    isEnabled: typeof s.isEnabled === 'boolean' ? s.isEnabled : DEFAULT_CONFIG.isEnabled,
+    preset: typeof s.preset === 'string' ? s.preset : DEFAULT_CONFIG.preset,
+    routes: Object.keys(routes).length > 0 ? routes : DEFAULT_CONFIG.routes,
+    cacheTtlMinutes: s.cacheTtlMinutes === 5 || s.cacheTtlMinutes === 60 ? s.cacheTtlMinutes : DEFAULT_CONFIG.cacheTtlMinutes,
+    coldGuard: GUARDS.includes(s.coldGuard as ColdGuard) ? (s.coldGuard as ColdGuard) : DEFAULT_CONFIG.coldGuard,
+  }
+}
+
+const isRecord = (r: unknown): r is PromptRecord => {
+  const x = r as PromptRecord | null
+  return typeof x === 'object' && x !== null && typeof x.at === 'number' && typeof x.repo === 'string' && typeof x.label === 'string' &&
+    typeof x.text === 'string' && typeof x.usd === 'number' && typeof x.requests === 'number' && typeof x.agents === 'number'
+}
+
+export const sanitizeHistory = (stored: unknown): PromptRecord[] => (Array.isArray(stored) ? stored.filter(isRecord).slice(-HISTORY_LIMIT) : [])
+
+/** Terminal control characters stripped from text the panes show but didn't write. */
+export const printable = (text: string) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+
+function parentOf(route: string): string | undefined {
   const row = ROUTES.find(one => one.key === route)
   if (row) return row.parent
   return route.startsWith('sub:') ? 'sub:*' : undefined
 }
 
-export type Resolved = { model?: string; effort?: Effort | 'auto' }
+type Resolved = { model?: string; effort?: Effort | 'auto' }
 
 /** Walks the route's fallback chain; a field left `inherit` everywhere stays undefined. */
 export function resolve(config: RouterConfig, route: string): Resolved {
@@ -117,7 +171,7 @@ export function resolve(config: RouterConfig, route: string): Resolved {
   return { model, effort }
 }
 
-export type SpawnFacts = {
+type SpawnFacts = {
   subagentType: string
   fork: boolean
   isTeammate?: true
@@ -140,6 +194,12 @@ export function labelOf(id: string): string {
   return key ? MODELS[key].label : id
 }
 
+/** `Opus` for `Opus 5.5`: the label without its version. */
+export const shortLabel = (label: string) => label.replace(/ [\d.]+$/, '')
+
+/** `Opus 5.5 high`, or just the model when the effort is unset. */
+export const routeText = (model: string, effort?: string) => `${labelOf(model)}${effort ? ` ${effort}` : ''}`
+
 export type Usage = {
   input_tokens: number
   output_tokens: number
@@ -147,10 +207,10 @@ export type Usage = {
   cache_creation_input_tokens: number
 }
 
-export const DEFAULT_TTL = 60
+const DEFAULT_TTL = 60
 
 /** Cache writes cost 2x input with the 1-hour TTL Claude Code uses, 1.25x with the 5-minute one. */
-export function writePrice(p: ModelInfo, ttlMinutes = DEFAULT_TTL): number {
+function writePrice(p: ModelInfo, ttlMinutes = DEFAULT_TTL): number {
   return p.input * (ttlMinutes >= 60 ? 2 : 1.25)
 }
 
@@ -166,8 +226,6 @@ export function costOf(usage: Usage, modelId: string, ttlMinutes = DEFAULT_TTL):
     1e6
   )
 }
-
-export const ttlOf = (config: RouterConfig) => config.cacheTtlMinutes ?? DEFAULT_TTL
 
 /** How long ago the cache expired; negative while it is still warm. */
 export const coldForMs = (lastAt: number, now: number, ttlMinutes: number) => now - lastAt - ttlMinutes * 60_000
@@ -185,7 +243,7 @@ export function rewritePrice(modelId: string, tokens: number, ttlMinutes = DEFAU
 /** Below this the rewrite costs cents, so the guard stays out of the way. */
 export const GUARD_MIN_TOKENS = 50_000
 
-export type RewriteFacts = {
+type RewriteFacts = {
   isAfterCompact: boolean
   prevAt?: number
   now: number
@@ -221,6 +279,8 @@ export function fmtAge(ms: number): string {
 
 export const EMPTY_SPEND: RouteSpend = { requests: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, usd: 0 }
 
+export const EMPTY_PROMPT: PromptCost = { usd: 0, requests: 0, items: [] }
+
 export function addSpend(spend: RouteSpend, usage: Usage, modelId: string, ttlMinutes = DEFAULT_TTL): RouteSpend {
   return {
     requests: spend.requests + 1,
@@ -231,6 +291,37 @@ export function addSpend(spend: RouteSpend, usage: Usage, modelId: string, ttlMi
     usd: spend.usd + costOf(usage, modelId, ttlMinutes),
   }
 }
+
+type StepFacts = { id: string; route: string; label: string; effort?: Effort; usage: Usage & { model: string }; ttlMinutes: number; rewrite?: Rewrite }
+
+/** The prompt's cost with one more request added to the item it belongs to. */
+export function addStep(p: PromptCost, s: StepFacts): PromptCost {
+  const at = p.items.findIndex(one => one.id === s.id)
+  const old: PromptItem = at >= 0 ? p.items[at]! : { id: s.id, route: s.route, label: s.label, model: s.usage.model, ...EMPTY_SPEND }
+  const item: PromptItem = { ...old, ...addSpend(old, s.usage, s.usage.model, s.ttlMinutes), model: s.usage.model, ...(s.effort ? { effort: s.effort } : {}) }
+  const items = at >= 0 ? p.items.with(at, item) : [...p.items, item]
+  return {
+    usd: p.usd + item.usd - old.usd,
+    requests: p.requests + 1,
+    items,
+    rewrites: s.rewrite ? [...(p.rewrites ?? []), s.rewrite] : p.rewrites,
+  }
+}
+
+export const subagentCount = (p: PromptCost) => p.items.filter(one => one.id !== one.route).length
+
+export function modelsOf(p: PromptCost): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const item of p.items) {
+    const key = routeText(item.model, item.effort)
+    out[key] = (out[key] ?? 0) + item.usd
+  }
+  return out
+}
+
+export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+export const sumUsd = (xs: readonly { usd: number }[]) => xs.reduce((acc, one) => acc + one.usd, 0)
 
 export const AUTO_LABELS = ['trivial', 'standard', 'hard'] as const
 
@@ -243,11 +334,11 @@ export function effortForLabel(label: string | undefined, text: string): Effort 
 }
 
 // Rough output tokens a main turn spends per effort level; only used to weigh a downgrade.
-export const TURN_OUTPUT: Record<Effort, number> = { low: 1500, medium: 4000, high: 9000, xhigh: 16000, max: 30000 }
+const TURN_OUTPUT: Record<Effort, number> = { low: 1500, medium: 4000, high: 9000, xhigh: 16000, max: 30000 }
 
 export const SMALL_CONTEXT = 20_000
 
-export type SwitchFacts = {
+type SwitchFacts = {
   contextTokens: number
   isAfterCompact: boolean
   from: { model: string; effort?: Effort }
@@ -275,14 +366,14 @@ export function shouldSwitch(f: SwitchFacts): boolean {
   return saving > rewritePrice(f.to.model, f.contextTokens, f.ttlMinutes).premium
 }
 
-export function parseSetting(model: string | undefined, effort: string | undefined): RouteSetting | string {
+export function parseSetting(route: string, model: string | undefined, effort: string | undefined): RouteSetting | string {
   const m = (model ?? '').toLowerCase()
   const e = (effort ?? 'inherit').toLowerCase()
-  const isModel = m === 'inherit' || m in MODELS
-  if (!isModel) return `Unknown model "${model}". Use ${Object.keys(MODELS).join(', ')} or inherit.`
-  if (e !== 'inherit' && e !== 'auto' && !EFFORTS.includes(e as Effort))
-    return `Unknown effort "${effort}". Use ${EFFORTS.join(', ')}, auto or inherit.`
-  return { model: m as RouteSetting['model'], effort: e as RouteEffort }
+  if (!isRouteKey(route)) return `Unknown route "${route}". Use ${ROUTES.map(one => one.key).join(', ')}, or sub:<agent-type>.`
+  if (!isModel(m)) return `Unknown model "${model}". Use ${Object.keys(MODELS).join(', ')} or inherit.`
+  if (!isEffort(e)) return `Unknown effort "${effort}". Use ${EFFORTS.join(', ')}, auto or inherit.`
+  if (e === 'auto' && !isLoopRoute(route)) return 'auto effort is for main and plan only; subagents start fresh, so pick a level.'
+  return { model: m, effort: e }
 }
 
 /**
@@ -293,8 +384,6 @@ export function contextLevel(tokens: number, window: number, compactAt?: number)
   const toward = tokens / (compactAt && compactAt > 0 ? compactAt : window)
   return toward >= 0.85 ? 'error' : toward >= 0.6 ? 'warning' : 'success'
 }
-
-export type StatsRecord = { at: number; repo: string; label: string; text: string; usd: number; requests: number; agents: number; models?: Record<string, number> }
 
 export const HISTORY_LIMIT = 2000
 
@@ -309,9 +398,16 @@ export function sameDay(a: number, b: number): boolean {
   return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate()
 }
 
-export type CommandStats = { label: string; runs: number; total: number; avg: number; max: number; models: Record<string, number> }
+/** Today's spend; records are kept in time order, so only today's tail is read. */
+export function todayUsd(records: readonly PromptRecord[], now: number): number {
+  let usd = 0
+  for (let i = records.length - 1; i >= 0 && sameDay(records[i]!.at, now); i--) usd += records[i]!.usd
+  return usd
+}
 
-export function commandStats(records: readonly StatsRecord[]): CommandStats[] {
+type CommandStats = { label: string; runs: number; total: number; avg: number; max: number; models: Record<string, number> }
+
+export function commandStats(records: readonly PromptRecord[]): CommandStats[] {
   const by = new Map<string, CommandStats>()
   for (const r of records) {
     const was = by.get(r.label) ?? { label: r.label, runs: 0, total: 0, avg: 0, max: 0, models: {} }
@@ -339,7 +435,7 @@ export function money(usd: number): string {
 
 export const SUB_CONTEXT = 30_000
 
-export type ChangeRow = {
+type ChangeRow = {
   route: string
   from: string
   to: string
@@ -375,20 +471,19 @@ const same = (a: Resolved, b: Resolved) => a.model === b.model && a.effort === b
 export function estimateChanges(
   current: RouterConfig,
   next: RouterConfig,
-  facts: { contextTokens: number; liveRoute: 'main' | 'plan'; sessionModel: string; ttlMinutes?: number },
+  facts: { contextTokens: number; liveRoute: 'main' | 'plan'; sessionModel: string; ttlMinutes: number },
 ): ChangeRow[] {
   const rows: ChangeRow[] = []
   for (const { key } of ROUTES) {
     const a = resolve(current, key)
     const b = resolve(next, key)
     if (same(a, b)) continue
-    const isMain = key === 'main' || key === 'plan'
-    const context = isMain ? facts.contextTokens : SUB_CONTEXT
+    const context = isLoopRoute(key) ? facts.contextTokens : SUB_CONTEXT
     rows.push({
       route: key,
       from: describe(a),
       to: describe(b),
-      switchCost: key === facts.liveRoute ? rewriteCost(b, facts.sessionModel, facts.contextTokens, facts.ttlMinutes ?? DEFAULT_TTL) : 0,
+      switchCost: key === facts.liveRoute ? rewriteCost(b, facts.sessionModel, facts.contextTokens, facts.ttlMinutes) : 0,
       perTurnDelta: turnCost(b, facts.sessionModel, context) - turnCost(a, facts.sessionModel, context),
     })
   }
@@ -399,5 +494,5 @@ export function estimateChanges(
 export function modeSwitchCost(config: RouterConfig, contextTokens: number, sessionModel: string): number {
   const plan = resolve(config, 'plan')
   const main = resolve(config, 'main')
-  return same(plan, main) ? 0 : rewriteCost(plan, sessionModel, contextTokens, ttlOf(config))
+  return same(plan, main) ? 0 : rewriteCost(plan, sessionModel, contextTokens, config.cacheTtlMinutes)
 }

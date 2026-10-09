@@ -7,8 +7,8 @@ export type RouterConfig = {
   isEnabled: boolean
   preset: string
   routes: Record<string, RouteSetting>
-  cacheTtlMinutes?: number
-  coldGuard?: ColdGuard
+  cacheTtlMinutes: number
+  coldGuard: ColdGuard
 }
 export type ColdGuard = 'refuse' | 'warn' | 'off'
 export type Rewrite = { cause: 'cold' | 'switch'; tokens: number; usd: number }
@@ -27,24 +27,16 @@ export type Health = {
   ctx: number
   ctxLevel: 'success' | 'warning' | 'error'
   last: number
-  toggle: number
   coldUsd?: number
   fiveHour?: number
-  resetMinutes?: number
   sevenDay?: number
 }
-export type PromptItem = {
+export type PromptItem = RouteSpend & {
   id: string
   route: string
   label: string
   model: string
-  effort?: string
-  requests: number
-  input: number
-  cacheRead: number
-  cacheWrite: number
-  output: number
-  usd: number
+  effort?: Effort
 }
 export type PromptCost = { usd: number; requests: number; items: PromptItem[]; rewrites?: Rewrite[] }
 export type PromptRecord = {
@@ -61,7 +53,7 @@ export type PromptRecord = {
 export type ActiveRoute = {
   route: string
   model: string
-  effort?: string
+  effort?: Effort
   isHeld: boolean
 }
 
@@ -71,14 +63,12 @@ declare module 'claude-code' {
       config: RouterConfig
       spend: Record<string, RouteSpend>
       isPlan: boolean
-      agents: Record<string, string>
       active: ActiveRoute | null
       isBandShown: boolean
       draft: RouterConfig | null
       lastUsage: LastUsage | null
       health: Health | null
       promptCost: PromptCost | null
-      agentLabels: Record<string, string>
       history: PromptRecord[]
       statsScope: 'repo' | 'all'
     }

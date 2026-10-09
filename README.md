@@ -34,6 +34,7 @@ Answer `y` to add the marketplace, then choose a scope (user scope loads it in e
 |---|---|
 | `/route` | Open the pane |
 | `/route stats` / `context` / `last` | Open the Stats, Context or Last prompt cost pane (handy in the terminal) |
+| `/route stats clear` | Delete the saved prompt history |
 | `/route preset mine\|balanced\|frugal\|max` | Apply a preset |
 | `/route set <route> <model> [effort]` | Set one route now, for example `/route set sub:Explore haiku low` |
 | `/route on` / `/route off` | Enable or disable routing |
@@ -51,6 +52,15 @@ Models: `opus`, `sonnet`, `haiku`, `fable`, `inherit`. Efforts: `low` through `m
 - Forks always inherit the parent's model.
 - The guard prices a cold send from the band's clock, not a server check. It doesn't keep the cache warm while you're away; [cache-tax](https://github.com/karanb192/cache-tax) does that with idle pings. With both installed, two guards fire on every cold send, so run `/route guard off` to leave it to cache-tax.
 - Prices are hard-coded in `hooks/routes.ts` (as of 2026-10-06). Cache writes are priced by the `/route ttl` setting: 2× input for the 1-hour cache (default), 1.25× for the 5-minute one. The costs shown are estimates.
+
+## What it sees and keeps
+
+- **Enabled on install**, with the `mine` preset: it sets the model and effort of every main-loop request and every subagent it can route. `/route off` stops that.
+- **Model IDs are the Anthropic API's** (`claude-opus-5-5` and so on). On a provider that names models differently, turn routing off or set routes to `inherit`.
+- **Prompt history** (Stats) is saved in this plugin's store, across all repos: per prompt, the first 120 characters of its text, the repo name, its label (`/simplify`, `prompt`), cost and models. The last 2,000 prompts are kept; `/route stats clear` deletes them. Nothing leaves your machine.
+- **`auto` effort** sends the first 4,000 characters of each prompt to Haiku to classify it (trivial, standard, hard). That is an extra model request on your account; presets `balanced` and `frugal` use it.
+- **Route changes** (`/route set`, `preset`, `on`/`off`, `guard`, `ttl`, `stats clear`) only run when you type them, not from a peer session, channel or trigger. Opening a pane works from anywhere.
+- No network, file or process access of its own.
 
 ## Develop
 

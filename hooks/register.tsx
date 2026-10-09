@@ -1,59 +1,69 @@
 import { atom, read, update } from 'claude-code'
-import type { Args, BoxProps, ElementConstructor, EngineInterface, Register } from 'claude-code'
+import type { Args, BoxProps, ElementConstructor, EngineInterface, Register, Timer } from 'claude-code'
 
-import type { ActiveRoute, ColdGuard, Effort, Health, LastUsage, PromptCost, PromptItem, PromptRecord, Rewrite, RouteSetting, RouteSpend, RouterConfig } from '../types'
+import type { ActiveRoute, ColdGuard, Effort, Health, LastUsage, PromptCost, PromptRecord, Rewrite, RouteSetting, RouteSpend, RouterConfig } from '../types'
 import {
   AUTO_LABELS,
   DEFAULT_CONFIG,
   EFFORTS,
+  EMPTY_PROMPT,
   EMPTY_SPEND,
   FORK,
   GUARD_MIN_TOKENS,
+  HISTORY_LIMIT,
   MODELS,
   PRESETS,
   PRICES_AS_OF,
   ROUTES,
   SUB_CONTEXT,
   addSpend,
+  addStep,
   coldForMs,
+  commandLabel,
+  commandStats,
+  contextLevel,
+  costOf,
+  effortForLabel,
+  estimateChanges,
   fmtAge,
+  isLoopRoute,
+  labelOf,
+  modeSwitchCost,
+  modelMix,
+  modelsOf,
+  money,
+  parseSetting,
+  plural,
+  presetOf,
+  printable,
+  resolve,
   rewriteCause,
   rewriteOf,
   rewritePrice,
-  ttlOf,
-  HISTORY_LIMIT,
-  commandLabel,
-  commandStats,
-  modelMix,
-  sameDay,
-  contextLevel,
-  costOf,
-  estimateChanges,
-  modeSwitchCost,
-  effortForLabel,
-  labelOf,
-  money,
-  parseSetting,
-  resolve,
   routeForSpawn,
+  routeLabel,
+  routeText,
+  sanitizeConfig,
+  sanitizeHistory,
+  shortLabel,
   shouldSwitch,
+  subagentCount,
+  sumUsd,
+  todayUsd,
 } from './routes'
 
 const PANE = 'model-router'
 const LAST_PANE = 'model-router-last'
 const CTX_PANE = 'model-router-ctx'
 const STATS_PANE = 'model-router-stats'
-const STORE_KEY = 'config'
 
 const config = atom({ plugin: 'model-router', key: 'config' } as const, DEFAULT_CONFIG)
 const spend = atom({ plugin: 'model-router', key: 'spend' } as const, {} as Record<string, RouteSpend>)
 const isPlan = atom({ plugin: 'model-router', key: 'isPlan' } as const, false)
-const agents = atom({ plugin: 'model-router', key: 'agents' } as const, {} as Record<string, string>)
 const active = atom({ plugin: 'model-router', key: 'active' } as const, null as ActiveRoute | null)
 const draft = atom({ plugin: 'model-router', key: 'draft' } as const, null as RouterConfig | null)
 const lastUsage = atom({ plugin: 'model-router', key: 'lastUsage' } as const, null as LastUsage | null)
 const health = atom({ plugin: 'model-router', key: 'health' } as const, null as Health | null)
-const agentLabels = atom({ plugin: 'model-router', key: 'agentLabels' } as const, {} as Record<string, string>)
 const history = atom({ plugin: 'model-router', key: 'history' } as const, [] as PromptRecord[])
 const statsScope = atom({ plugin: 'model-router', key: 'statsScope' } as const, 'repo' as 'repo' | 'all')
 const promptCost = atom({ plugin: 'model-router', key: 'promptCost' } as const, null as PromptCost | null)
@@ -61,24 +71,36 @@ const isBandShown = atom({ plugin: 'model-router', key: 'isBandShown' } as const
 
 type $ = EngineInterface
 
+// The store keys the atoms kept across sessions are saved under. The engine's
+// scan needs each update() to name its atom, so callers update, then save().
+const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown' } as const
+
+/** Saves a value kept across sessions; a failed save keeps the session going. */
+async function save<T>($: $, key: string, value: T): Promise<T> {
+  await $.store.set(key, value).catch(() => undefined)
+  return value
+}
+
 export async function setConfig(
   $: $,
   fn: (c: RouterConfig) => RouterConfig,
 ): Promise<RouterConfig> {
-  const next = await update($, config, fn)
-  await $.store.set(STORE_KEY, next)
+  const next = await save($, STORE.config, await update($, config, fn))
   await refreshStatus($)
   return next
 }
 
+const nowOf = ($: $) => $.clock.now().catch(() => Date.now())
+
+const mainRoute = async ($: $) => ((await read($, isPlan)) ? 'plan' : 'main')
+
 const shortRoute = (cfg: RouterConfig, route: string) => {
   const r = resolve(cfg, route)
-  const model = r.model ? labelOf(r.model).replace(/ [\d.]+$/, '') : 'inherit'
-  return `${model}${r.effort ? ` ${r.effort}` : ''}`
+  return `${r.model ? shortLabel(labelOf(r.model)) : 'inherit'}${r.effort ? ` ${r.effort}` : ''}`
 }
 
 async function routedMainModel($: $, cfg: RouterConfig, fallback: string): Promise<string> {
-  return resolve(cfg, (await read($, isPlan)) ? 'plan' : 'main').model ?? fallback
+  return resolve(cfg, await mainRoute($)).model ?? fallback
 }
 
 const promptTokens = (last: LastUsage) => last.input + last.cacheRead + last.cacheWrite
@@ -87,8 +109,8 @@ const promptTokens = (last: LastUsage) => last.input + last.cacheRead + last.cac
 async function coldSend($: $, cfg: RouterConfig): Promise<{ at: number; text: string } | undefined> {
   const last = await read($, lastUsage)
   if (last === null) return undefined
-  const ttl = ttlOf(cfg)
-  const coldFor = coldForMs(last.at, await $.clock.now().catch(() => Date.now()), ttl)
+  const ttl = cfg.cacheTtlMinutes
+  const coldFor = coldForMs(last.at, await nowOf($), ttl)
   if (coldFor < 0) return undefined
   const context = (await $.session.usage()).context.tokens ?? promptTokens(last)
   if (context < GUARD_MIN_TOKENS) return undefined
@@ -108,11 +130,10 @@ async function refreshStatus($: $) {
   const prompt = promptTokens(last)
   const five = rateLimits.find(one => one.kind === 'five_hour')
   const seven = rateLimits.find(one => one.kind === 'seven_day')
-  const now = await $.clock.now().catch(() => Date.now())
+  const now = await nowOf($)
   const cfg = await read($, config)
-  const ttl = ttlOf(cfg)
-  const warmMinutes = Math.max(0, Math.ceil((last.at + ttl * 60_000 - now) / 60_000))
-  const resetMs = five?.resetsAt ? Date.parse(five.resetsAt) - now : undefined
+  const ttl = cfg.cacheTtlMinutes
+  const warmMinutes = Math.max(0, Math.ceil(-coldForMs(last.at, now, ttl) / 60_000))
   if (mem.compactCheckedAt === undefined || now - mem.compactCheckedAt > 10 * 60_000) {
     const { context: detailed } = await $.session.usage({ breakdown: 'summary' })
     const b = detailed.breakdown
@@ -125,27 +146,16 @@ async function refreshStatus($: $) {
     ctx: context.percent ?? Math.round((tokens / context.window) * 100),
     ctxLevel: contextLevel(tokens, context.window, mem.compactAt),
     last: (await read($, promptCost))?.usd ?? last.usd,
-    toggle: modeSwitchCost(cfg, tokens, last.model),
     ...(warmMinutes === 0 && tokens >= GUARD_MIN_TOKENS
       ? { coldUsd: rewritePrice(await routedMainModel($, cfg, last.model), tokens, ttl).write }
       : {}),
     ...(five ? { fiveHour: Math.round(five.percentUsed) } : {}),
-    ...(resetMs !== undefined && resetMs > 0 ? { resetMinutes: Math.round(resetMs / 60_000) } : {}),
     ...(seven ? { sevenDay: Math.round(seven.percentUsed) } : {}),
   }
-  await update($, health, () => next)
+  await update($, health, was => (JSON.stringify(was) === JSON.stringify(next) ? was : next))
 }
 
 const level = (value: number, warn: number, bad: number) => (value >= bad ? 'error' : value >= warn ? 'warning' : undefined)
-
-function modelsOf(p: PromptCost): Record<string, number> {
-  const out: Record<string, number> = {}
-  for (const item of p.items) {
-    const key = `${labelOf(item.model)}${item.effort ? ` ${item.effort}` : ''}`
-    out[key] = (out[key] ?? 0) + item.usd
-  }
-  return out
-}
 
 function recordOf(meta: { label: string; text: string; at: number }, p: PromptCost): PromptRecord {
   return {
@@ -171,16 +181,47 @@ async function recordPrompt($: $) {
   mem.current = undefined
   if (p === null || meta === undefined || p.usd <= 0) return
   const rec = recordOf(meta, p)
-  const next = await update($, history, all => [...all, rec].slice(-HISTORY_LIMIT))
-  await $.store.set('history', next)
+  await save($, STORE.history, await update($, history, all => [...all, rec].slice(-HISTORY_LIMIT)))
 }
+
+type Els = ReturnType<$['ui']['resolve']>
+
+/** A pane row: a coloured dot, a name that truncates, the cost right-aligned, an optional share and dim sub-lines. */
+function ledgerRow(
+  { Box, Text }: Els,
+  r: { key: string; color?: string; name: string; usd: number; share?: number; nameColor?: string; sub?: ReadonlyArray<string | undefined> },
+) {
+  const sub = (r.sub ?? []).filter(Boolean)
+  return (
+    <Box key={r.key} flexDirection="column">
+      <Box flexDirection="row" gap={1}>
+        <Box width={2} flexShrink={0}>
+          <Text color={r.color}>●</Text>
+        </Box>
+        <Box flexGrow={1} flexShrink={1}>
+          <Text color={r.nameColor} wrap="truncate-end">{r.name}</Text>
+        </Box>
+        <Box width={8} flexShrink={0} justifyContent="flex-end">
+          <Text bold>{money(r.usd)}</Text>
+        </Box>
+        {r.share === undefined ? null : (
+          <Box width={5} flexShrink={0} justifyContent="flex-end">
+            <Text dimColor>{`${Math.round(r.share * 100)}%`}</Text>
+          </Box>
+        )}
+      </Box>
+      {sub.length > 0 ? <Text dimColor>{`   ${sub.join('\n   ')}`}</Text> : null}
+    </Box>
+  )
+}
+
+const tokenLine = (one: RouteSpend) =>
+  `${one.requests} req · in ${kTokens(one.input)} · cache ${kTokens(one.cacheRead)}/${kTokens(one.cacheWrite)} · out ${kTokens(one.output)}`
 
 async function renderStatsFooter($: $, e: Args<'ui.render'>, modes: readonly string[]) {
   const { Box, Text, Button } = $.ui.resolve(e)
-  const all = await read($, history)
-  const live = await read($, promptCost)
-  const now = await $.clock.now().catch(() => Date.now())
-  const today = all.filter(r => sameDay(r.at, now)).reduce((sum, r) => sum + r.usd, 0) + (live?.usd ?? 0)
+  const [all, live, now] = await Promise.all([read($, history), read($, promptCost), nowOf($)])
+  const today = todayUsd(all, now) + (live?.usd ?? 0)
   return (
     <Box flexDirection="row" flexShrink={0}>
       {modes.length > 0 ? <Text dimColor>{`${modes.join(' & ')}  `}</Text> : null}
@@ -196,45 +237,27 @@ async function renderStatsFooter($: $, e: Args<'ui.render'>, modes: readonly str
 }
 
 async function renderStatsPane($: $, e: Args<'ui.render'>) {
-  const { Box, Text, Button } = $.ui.resolve(e)
+  const els = $.ui.resolve(e)
+  const { Box, Text, Button } = els
   const scope = await read($, statsScope)
   const saved = await read($, history)
   const live = await read($, promptCost)
   const current = mem.current
   const all = live && current && live.usd > 0 ? [...saved, recordOf(current, live)] : saved
   const records = scope === 'repo' ? all.filter(r => r.repo === mem.repo) : all
-  const now = await $.clock.now().catch(() => Date.now())
-  const sum = (rs: readonly PromptRecord[]) => rs.reduce((acc, r) => acc + r.usd, 0)
-  const today = sum(records.filter(r => sameDay(r.at, now)))
-  const week = sum(records.filter(r => now - r.at < 7 * 86_400_000))
+  const now = await nowOf($)
+  const today = todayUsd(records, now)
+  const week = sumUsd(records.filter(r => now - r.at < 7 * 86_400_000))
   const rewrites = records.flatMap(r => r.rewrites ?? [])
-  const rewriteUsd = rewrites.reduce((acc, one) => acc + one.usd, 0)
   const commands = commandStats(records).slice(0, 10)
   const priciest = [...records].sort((x, y) => y.usd - x.usd).slice(0, 8)
-  const setScope = async (next: 'repo' | 'all') => {
-    await update($, statsScope, () => next)
-    await $.store.set('statsScope', next)
-  }
+  const setScope = async (next: 'repo' | 'all') => save($, STORE.statsScope, await update($, statsScope, () => next))
   const day = (at: number) => {
     const d = new Date(at)
     return `${d.getDate()}.${d.getMonth() + 1}.`
   }
-  const row = (key: string, color: string | undefined, name: string, right: string, sub?: string) => (
-    <Box key={key} flexDirection="column">
-      <Box flexDirection="row" gap={1}>
-        <Box width={2} flexShrink={0}>
-          <Text color={color}>●</Text>
-        </Box>
-        <Box flexGrow={1} flexShrink={1}>
-          <Text wrap="truncate-end">{name}</Text>
-        </Box>
-        <Box width={8} flexShrink={0} justifyContent="flex-end">
-          <Text bold>{right}</Text>
-        </Box>
-      </Box>
-      {sub ? <Text dimColor>{`   ${sub}`}</Text> : null}
-    </Box>
-  )
+  const colorOfLabel = (label: string) => (label === 'prompt' ? 'subtle' : 'suggestion')
+  const shownText = (r: PromptRecord) => (r.label === 'prompt' ? r.text : `${r.label} ${r.text.replace(r.label, '').trim()}`.trim())
   return (
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="row" justifyContent="space-between">
@@ -245,8 +268,8 @@ async function renderStatsPane($: $, e: Args<'ui.render'>) {
         </Box>
       </Box>
       <Text dimColor>
-        today {money(today)} · 7 days {money(week)} · all {money(sum(records))} · {records.length} prompts
-        {rewrites.length > 0 ? ` · ${rewrites.length} cache rewrite${rewrites.length === 1 ? '' : 's'} ${money(rewriteUsd)}` : ''}
+        today {money(today)} · 7 days {money(week)} · all {money(sumUsd(records))} · {plural(records.length, 'prompt')}
+        {rewrites.length > 0 ? ` · ${plural(rewrites.length, 'cache rewrite')} ${money(sumUsd(rewrites))}` : ''}
       </Text>
       {records.length === 0 ? (
         <Text dimColor>Nothing recorded yet.</Text>
@@ -255,13 +278,28 @@ async function renderStatsPane($: $, e: Args<'ui.render'>) {
           <Box flexDirection="column">
             <Text bold dimColor>COMMANDS · AVERAGE PER RUN</Text>
             {commands.map(c =>
-              row(`c:${c.label}`, c.label === 'prompt' ? 'subtle' : 'suggestion', c.label, money(c.avg), [`${c.runs} run${c.runs === 1 ? '' : 's'} · total ${money(c.total)} · max ${money(c.max)}`, modelMix(c.models, money)].filter(Boolean).join('\n   ')),
+              ledgerRow(els, {
+                key: `c:${c.label}`,
+                color: colorOfLabel(c.label),
+                name: c.label,
+                usd: c.avg,
+                sub: [`${plural(c.runs, 'run')} · total ${money(c.total)} · max ${money(c.max)}`, modelMix(c.models, money)],
+              }),
             )}
           </Box>
           <Box flexDirection="column">
             <Text bold dimColor>MOST EXPENSIVE PROMPTS</Text>
             {priciest.map((r, i) =>
-              row(`p:${i}`, r.label === 'prompt' ? 'subtle' : 'suggestion', r.label === 'prompt' ? r.text : `${r.label} ${r.text.replace(r.label, '').trim()}`.trim(), money(r.usd), [`${day(r.at)} · ${scope === 'all' ? `${r.repo} · ` : ''}${r.requests} req · ${r.agents} subagent${r.agents === 1 ? '' : 's'}${(r.rewrites ?? []).map(one => ` · ${rewriteText(one)}`).join('')}`, modelMix(r.models, money)].filter(Boolean).join('\n   ')),
+              ledgerRow(els, {
+                key: `p:${i}`,
+                color: colorOfLabel(r.label),
+                name: shownText(r),
+                usd: r.usd,
+                sub: [
+                  [day(r.at), scope === 'all' ? r.repo : undefined, `${r.requests} req`, plural(r.agents, 'subagent'), ...(r.rewrites ?? []).map(rewriteText)].filter(Boolean).join(' · '),
+                  modelMix(r.models, money),
+                ],
+              }),
             )}
           </Box>
         </>
@@ -276,6 +314,7 @@ async function renderHealthRow($: $, e: Args<'ui.render'>) {
   const { Box, Text, Button } = $.ui.resolve(e)
   if (hp === null) return null
   const cacheColor = hp.cache < 50 ? 'error' : hp.cache < 80 ? 'warning' : 'success'
+  const limits = [['5h', hp.fiveHour], ['7d', hp.sevenDay]].filter((one): one is [string, number] => one[1] !== undefined)
   return (
     <Box flexDirection="row">
       <Text dimColor>
@@ -302,12 +341,14 @@ async function renderHealthRow($: $, e: Args<'ui.render'>) {
         dimColor
         onPress={() => $.ui.open({ id: LAST_PANE, title: 'Last prompt cost' })}
       />
-      {hp.fiveHour === undefined && hp.sevenDay === undefined ? null : (
+      {limits.length === 0 ? null : (
         <Text dimColor>
-          {hp.fiveHour === undefined ? '' : '  ·  5h '}
-          {hp.fiveHour === undefined ? null : <Text color={level(hp.fiveHour, 70, 90)}>{hp.fiveHour}%</Text>}
-          {hp.sevenDay === undefined ? '' : '  ·  7d '}
-          {hp.sevenDay === undefined ? null : <Text color={level(hp.sevenDay, 70, 90)}>{hp.sevenDay}%</Text>}
+          {limits.map(([name, pct]) => (
+            <Text key={`l:${name}`}>
+              {`  ·  ${name} `}
+              <Text color={level(pct, 70, 90)}>{pct}%</Text>
+            </Text>
+          ))}
         </Text>
       )}
     </Box>
@@ -316,22 +357,11 @@ async function renderHealthRow($: $, e: Args<'ui.render'>) {
 
 const MODEL_OPTIONS = [
   { value: 'inherit', label: 'inherit' },
-  ...Object.entries(MODELS).map(([value, m]) => ({ value, label: m.label.replace(/ [\d.]+$/, '') })),
+  ...Object.entries(MODELS).map(([value, m]) => ({ value, label: shortLabel(m.label) })),
 ]
 
 const MODEL_W = 11
 const EFFORT_W = 10
-
-const PANE_LABEL: Record<string, string> = {
-  plan: 'Plan mode',
-  main: 'Normal work',
-  'sub:*': 'Default',
-  'sub:Explore': 'Explore',
-  'sub:Plan': 'Plan agent',
-  'sub:general-purpose': 'General',
-  workflow: 'Workflow',
-  teammate: 'Teammates',
-}
 
 const effortOptions = (canAuto: boolean) => [
   { value: 'inherit', label: 'inherit' },
@@ -344,10 +374,12 @@ const kTokens = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(
 const ROUTE_COLOR: Record<string, string> = { plan: 'planMode', main: 'claude' }
 const colorOf = (route: string) => ROUTE_COLOR[route] ?? 'suggestion'
 
-const GROUPS: ReadonlyArray<{ title: string; keys: readonly string[] }> = [
-  { title: 'Main loop', keys: ['plan', 'main'] },
-  { title: 'Subagents', keys: ['sub:*', 'sub:Explore', 'sub:Plan', 'sub:general-purpose', 'workflow', 'teammate'] },
+const GROUPS = [
+  { title: 'Main loop', rows: ROUTES.filter(one => isLoopRoute(one.key)) },
+  { title: 'Subagents', rows: ROUTES.filter(one => !isLoopRoute(one.key)) },
 ]
+
+const INHERIT: RouteSetting = { model: 'inherit', effort: 'inherit' }
 
 const pad = (text: string, width: number) => (text.length >= width ? text.slice(0, width) : text + ' '.repeat(width - text.length))
 // Theme keys as hex, for the one place a theme key cannot go: an SVG drawn as an image.
@@ -395,31 +427,28 @@ function stackedCells(segments: readonly Segment[], whole: number, width: number
 }
 
 export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
-  const cfg = await read($, config)
-  const costs = await read($, spend)
-  const now = await read($, active)
-  const isPlanning = await read($, isPlan)
+  const [cfg, costs, now, isPlanning] = await Promise.all([read($, config), read($, spend), read($, active), read($, isPlan)])
 
   if (e.surface === 'mobile') {
     const { Box, Text } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
         <Text color={now ? colorOf(now.route) : undefined} bold>
-          {now ? `▸ ${now.route} · ${labelOf(now.model)} · ${now.effort ?? ''}` : '▸ waiting'}
+          {now ? `▸ ${now.route} · ${routeText(now.model, now.effort)}` : '▸ waiting'}
         </Text>
         <Text dimColor>Edit routes with /route set, or from a terminal or desktop.</Text>
       </Box>
     )
   }
-  const { Box, Text, Button, Select } = $.ui.resolve(e)
+  const els = $.ui.resolve(e)
+  const { Box, Text, Button, Select } = els
 
-  const pending = await read($, draft)
-  const lastPrompt = await read($, promptCost)
+  const [pending, lastPrompt] = await Promise.all([read($, draft), read($, promptCost)])
   const shown = pending ?? cfg
   const contextTokens = (await $.session.usage()).context.tokens ?? 0
   const sessionModel = now?.model ?? (await $.session.model())
   const liveRoute = isPlanning ? 'plan' : 'main'
-  const ttlMinutes = ttlOf(cfg)
+  const ttlMinutes = cfg.cacheTtlMinutes
   const changes = pending ? estimateChanges(cfg, pending, { contextTokens, liveRoute, sessionModel, ttlMinutes }) : []
   const changed = new Set(changes.map(one => one.route))
   const upFront = changes.reduce((sum, one) => sum + one.switchCost, 0)
@@ -433,22 +462,22 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
       const next = fn(d ?? cfg)
       return JSON.stringify(next) === JSON.stringify(cfg) ? null : next
     })
-    await refreshStatus($)
   }
   const setRoute = (route: string, patch: Partial<RouteSetting>) =>
     editDraft(c => {
-      const was = c.routes[route] ?? { model: 'inherit', effort: 'inherit' }
+      const was = c.routes[route] ?? INHERIT
       return { ...c, preset: 'custom', routes: { ...c.routes, [route]: { ...was, ...patch } } }
     })
   const signed = (usd: number) => `${usd >= 0 ? '+' : '−'}${money(Math.abs(usd))}`
 
   const presetOptions = [
     ...Object.entries(PRESETS).map(([value, p]) => ({ value, label: p.label })),
-    ...(PRESETS[shown.preset] ? [] : [{ value: shown.preset, label: 'Custom' }]),
+    ...(presetOf(shown.preset) ? [] : [{ value: shown.preset, label: 'Custom' }]),
   ]
 
   const spendRows = Object.entries(costs).sort((a, b) => b[1].usd - a[1].usd)
-  const total = spendRows.reduce((sum, [, one]) => sum + one.usd, 0)
+  const total = sumUsd(spendRows.map(([, one]) => one))
+  const subs = lastPrompt ? subagentCount(lastPrompt) : 0
   const nowColor = now ? colorOf(now.route) : 'subtle'
 
   return (
@@ -468,7 +497,7 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
       <Box flexDirection="column" borderStyle="round" borderColor={nowColor} paddingX={1}>
         <Box flexDirection="row" justifyContent="space-between">
           <Text bold color={nowColor}>
-            {now ? `▸ ${now.route}  ${labelOf(now.model)} · ${now.effort ?? 'default'}` : '▸ waiting for the first request'}
+            {now ? `▸ ${now.route}  ${routeText(now.model, now.effort ?? 'default')}` : '▸ waiting for the first request'}
           </Text>
           <Text dimColor>{money(total)}</Text>
         </Box>
@@ -478,8 +507,8 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
         </Text>
         {lastPrompt ? (
           <Text dimColor>
-            last prompt {money(lastPrompt.usd)} · {lastPrompt.requests} request{lastPrompt.requests === 1 ? '' : 's'}
-            {subagentCount(lastPrompt) > 0 ? ` · ${subagentCount(lastPrompt)} subagent${subagentCount(lastPrompt) === 1 ? '' : 's'}` : ''}
+            last prompt {money(lastPrompt.usd)} · {plural(lastPrompt.requests, 'request')}
+            {subs > 0 ? ` · ${plural(subs, 'subagent')}` : ''}
           </Text>
         ) : null}
         {now?.isHeld ? <Text color="warning">auto kept the current effort to protect the cache</Text> : null}
@@ -495,7 +524,7 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
           options={presetOptions}
           value={shown.preset}
           onSelect={value => {
-            const preset = PRESETS[value]
+            const preset = presetOf(value)
             if (preset) void editDraft(c => ({ ...c, preset: value, routes: { ...preset.routes } }))
           }}
         />
@@ -506,10 +535,10 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
         {GROUPS.map(group => (
           <Box key={`g:${group.title}`} flexDirection="column" marginBottom={1}>
             <Text bold dimColor>{group.title.toUpperCase()}</Text>
-            {group.keys.map(key => {
-              const row = ROUTES.find(one => one.key === key)!
-              const setting = shown.routes[key] ?? { model: 'inherit', effort: 'inherit' }
-              const isChild = key !== 'sub:*' && group.title === 'Subagents'
+            {group.rows.map(row => {
+              const key = row.key
+              const setting = shown.routes[key] ?? INHERIT
+              const isChild = row.parent === 'sub:*'
               const isLive = now?.route === key
               return (
                 <Box key={`row:${key}`} flexDirection="row" gap={1}>
@@ -518,7 +547,7 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
                   </Text>
                   <Box flexGrow={1} flexShrink={1}>
                     <Text color={isChild ? undefined : colorOf(key)} bold={!isChild} wrap="truncate-end">
-                      {isChild ? `└ ${PANE_LABEL[key] ?? row.label}` : (PANE_LABEL[key] ?? row.label)}
+                      {isChild ? `└ ${row.label}` : row.label}
                     </Text>
                   </Box>
                   <Box width={MODEL_W} flexShrink={0}>
@@ -532,7 +561,7 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
                   <Box width={EFFORT_W} flexShrink={0}>
                     <Select
                       key={`e:${key}`}
-                      options={effortOptions(row.canAuto)}
+                      options={effortOptions(isLoopRoute(key))}
                       value={setting.effort}
                       onSelect={value => void setRoute(key, { effort: value as RouteSetting['effort'] })}
                     />
@@ -550,14 +579,14 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
       ) : (
         <Box flexDirection="column" borderStyle="round" borderColor="warning" paddingX={1}>
           <Text bold color="warning">
-            ● Draft — {changes.length} change{changes.length === 1 ? '' : 's'}, not applied
+            ● Draft — {plural(changes.length, 'change')}, not applied
           </Text>
           {changes.map(one => (
             <Box key={`c:${one.route}`} flexDirection="column" marginBottom={1}>
               <Box flexDirection="row" justifyContent="space-between">
-                <Text color={colorOf(one.route)}>{PANE_LABEL[one.route] ?? one.route}</Text>
+                <Text color={colorOf(one.route)}>{routeLabel(one.route)}</Text>
                 <Text color={one.perTurnDelta <= 0 ? 'success' : 'error'}>
-                  {signed(one.perTurnDelta)}/{one.route === 'main' || one.route === 'plan' ? 'turn' : 'run'}
+                  {signed(one.perTurnDelta)}/{isLoopRoute(one.route) ? 'turn' : 'run'}
                 </Text>
               </Box>
               <Text>
@@ -589,10 +618,7 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
             <Button
               key="discard"
               label="Discard"
-              onPress={async () => {
-                await update($, draft, () => null)
-                await refreshStatus($)
-              }}
+              onPress={() => update($, draft, () => null)}
             />
           </Box>
         </Box>
@@ -604,66 +630,33 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
           <Text bold>{money(total)}</Text>
         </Box>
         {spendRows.length === 0 && <Text dimColor>No requests yet.</Text>}
-        {spendRows.map(([route, one]) => (
-          <Box key={`s:${route}`} flexDirection="column" marginBottom={1}>
-            <Box flexDirection="row" gap={1}>
-              <Box width={2} flexShrink={0}>
-                <Text color={colorOf(route)}>●</Text>
-              </Box>
-              <Box flexGrow={1} flexShrink={1}>
-                <Text color={colorOf(route)} wrap="truncate-end">{PANE_LABEL[route] ?? route}</Text>
-              </Box>
-              <Box width={7} flexShrink={0} justifyContent="flex-end">
-                <Text bold>{money(one.usd)}</Text>
-              </Box>
-              <Box width={5} flexShrink={0} justifyContent="flex-end">
-                <Text dimColor>{total > 0 ? `${Math.round((one.usd / total) * 100)}%` : ''}</Text>
-              </Box>
-            </Box>
-            <Text dimColor>
-              {'   '}
-              {one.requests} req · in {kTokens(one.input)} · cache {kTokens(one.cacheRead)}/{kTokens(one.cacheWrite)} · out{' '}
-              {kTokens(one.output)}
-            </Text>
-          </Box>
-        ))}
+        <Box flexDirection="column" gap={1}>
+          {spendRows.map(([route, one]) =>
+            ledgerRow(els, {
+              key: `s:${route}`,
+              color: colorOf(route),
+              nameColor: colorOf(route),
+              name: routeLabel(route),
+              usd: one.usd,
+              share: total > 0 ? one.usd / total : 0,
+              sub: [tokenLine(one)],
+            }),
+          )}
+        </Box>
         <Text dimColor>estimate · prices as of {PRICES_AS_OF} · cache writes at the {ttlMinutes === 60 ? '1-hour (2× input)' : '5-minute (1.25× input)'} rate</Text>
       </Box>
     </Box>
   )
 }
 
-const subagentCount = (p: PromptCost) => p.items.filter(one => one.id !== one.route).length
-
 async function renderLastPane($: $, e: Args<'ui.render'>) {
   const p = await read($, promptCost)
-  const { Box, Text } = $.ui.resolve(e)
+  const els = $.ui.resolve(e)
+  const { Box, Text } = els
   if (p === null || p.items.length === 0) return <Text dimColor>No requests in this prompt yet.</Text>
   const main = p.items.filter(one => one.id === one.route)
   const subs = p.items.filter(one => one.id !== one.route).sort((a, b) => b.usd - a.usd)
-  const subTotal = subs.reduce((sum, one) => sum + one.usd, 0)
-  const row = (one: PromptItem) => (
-    <Box key={`i:${one.id}`} flexDirection="column">
-      <Box flexDirection="row" gap={1}>
-        <Box width={2} flexShrink={0}>
-          <Text color={colorOf(one.route)}>●</Text>
-        </Box>
-        <Box flexGrow={1} flexShrink={1}>
-          <Text color={colorOf(one.route)} wrap="truncate-end">{one.label}</Text>
-        </Box>
-        <Box width={7} flexShrink={0} justifyContent="flex-end">
-          <Text bold>{money(one.usd)}</Text>
-        </Box>
-        <Box width={5} flexShrink={0} justifyContent="flex-end">
-          <Text dimColor>{p.usd > 0 ? `${Math.round((one.usd / p.usd) * 100)}%` : ''}</Text>
-        </Box>
-      </Box>
-      <Text dimColor>
-        {'   '}
-        {labelOf(one.model)}{one.effort ? ` ${one.effort}` : ''} · {one.requests} req · in {kTokens(one.input)} · cache {kTokens(one.cacheRead)}/{kTokens(one.cacheWrite)} · out {kTokens(one.output)}
-      </Text>
-    </Box>
-  )
+  const subTotal = sumUsd(subs)
   return (
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="row" justifyContent="space-between">
@@ -671,14 +664,23 @@ async function renderLastPane($: $, e: Args<'ui.render'>) {
         <Text bold>{money(p.usd)}</Text>
       </Box>
       <Text dimColor>
-        {p.requests} requests · main {money(p.usd - subTotal)} · {subs.length} subagent{subs.length === 1 ? '' : 's'} {money(subTotal)}
+        {plural(p.requests, 'request')} · main {money(p.usd - subTotal)} · {plural(subs.length, 'subagent')} {money(subTotal)}
       </Text>
       {(p.rewrites ?? []).map((one, i) => (
         <Text key={`rw:${i}`} color="warning">includes a {rewriteText(one)}</Text>
       ))}
       <Box flexDirection="column" gap={1}>
-        {main.map(row)}
-        {subs.map(row)}
+        {[...main, ...subs].map(one =>
+          ledgerRow(els, {
+            key: `i:${one.id}`,
+            color: colorOf(one.route),
+            nameColor: colorOf(one.route),
+            name: one.label,
+            usd: one.usd,
+            share: p.usd > 0 ? one.usd / p.usd : 0,
+            sub: [`${routeText(one.model, one.effort)} · ${tokenLine(one)}`],
+          }),
+        )}
       </Box>
       <Text dimColor>estimate · resets when you send the next prompt</Text>
     </Box>
@@ -763,13 +765,13 @@ async function renderCtxPane($: $, e: Args<'ui.render'>) {
       {topServers.length > 0 ? (
         <Box flexDirection="column">
           <Text bold dimColor>MCP SERVERS</Text>
-          {topServers.map(([name, tokens]) => line(`m:${name}`, name, tokens, 'suggestion'))}
+          {topServers.map(([name, tokens]) => line(`m:${name}`, printable(name), tokens, 'suggestion'))}
         </Box>
       ) : null}
       {topMemory.length > 0 ? (
         <Box flexDirection="column">
           <Text bold dimColor>MEMORY FILES</Text>
-          {topMemory.map(one => line(`f:${one.path}`, `${one.type} · ${one.path.split('/').slice(-2).join('/')}`, one.tokens, 'planMode'))}
+          {topMemory.map(one => line(`f:${one.path}`, printable(`${one.type} · ${one.path.split('/').slice(-2).join('/')}`), one.tokens, 'planMode'))}
         </Box>
       ) : null}
       <Text dimColor>
@@ -780,22 +782,19 @@ async function renderCtxPane($: $, e: Args<'ui.render'>) {
   )
 }
 
-async function setBand($: $, isShown: boolean) {
-  await update($, isBandShown, () => isShown)
-  await $.store.set('bandShown', isShown)
+const setBand = async ($: $, isShown: boolean) => save($, STORE.bandShown, await update($, isBandShown, () => isShown))
+
+function bandHead(cfg: RouterConfig, now: ActiveRoute | null): string {
+  if (!cfg.isEnabled) return 'router off'
+  if (now === null) return '▸ waiting for first request'
+  return `▸ ${now.route} · ${routeText(now.model, now.effort)}${now.isHeld ? ' (held)' : ''}`
 }
 
 async function renderBand($: $, e: Args<'ui.render'>) {
-  const cfg = await read($, config)
-  const now = await read($, active)
-  const pending = await read($, draft)
-  const total = Object.values(await read($, spend)).reduce((sum, one) => sum + one.usd, 0)
+  const [cfg, now, pending, costs] = await Promise.all([read($, config), read($, active), read($, draft), read($, spend)])
+  const total = sumUsd(Object.values(costs))
   const { Box, Text, Button } = $.ui.resolve(e)
-  const head = !cfg.isEnabled
-    ? 'router off'
-    : now
-      ? `▸ ${now.route} · ${labelOf(now.model)}${now.effort ? ` ${now.effort}` : ''}${now.isHeld ? ' (held)' : ''}`
-      : '▸ waiting for first request'
+  const head = bandHead(cfg, now)
   const healthRow = await renderHealthRow($, e)
   return (
     <Box flexDirection="row" justifyContent="space-between" gap={1}>
@@ -829,6 +828,18 @@ const GUARD_TEXT: Record<ColdGuard, string> = {
 const asEffort = (effort: unknown): Effort | undefined =>
   typeof effort === 'string' ? (effort as Effort) : undefined
 
+const PANES = {
+  route: { id: PANE, title: 'Model router' },
+  stats: { id: STATS_PANE, title: 'Stats' },
+  context: { id: CTX_PANE, title: 'Context' },
+  last: { id: LAST_PANE, title: 'Last prompt cost' },
+} as const
+
+const USAGE = '[stats [clear] | context | last | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
+
+// Origins a person typed or drove; a peer, channel or trigger may not change the routes.
+const USER_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
+
 type Decision = { model: string; effort?: Effort; isHeld: boolean }
 
 // Per-load memory: a hot reload starts it over, which only costs one unguarded turn.
@@ -837,9 +848,11 @@ const mem = {
   decisions: new Map<string, Decision>(),
   lastMain: undefined as { route: string; model: string; effort?: Effort; at: number } | undefined,
   isAfterCompact: false,
-  isNewPrompt: true,
   repo: 'unknown',
-  pendingLabel: 'prompt',
+  // The label of the prompt the next turn.start opens; undefined while a prompt's turns run.
+  pendingPrompt: 'prompt' as string | undefined,
+  agents: new Map<string, { route: string; label?: string }>(),
+  tick: undefined as Timer | undefined,
   current: undefined as { label: string; text: string; at: number } | undefined,
   compactAt: undefined as number | undefined,
   compactCheckedAt: undefined as number | undefined,
@@ -848,18 +861,20 @@ const mem = {
 }
 
 async function routeOfAgent($: $, agentId: string): Promise<string | undefined> {
-  const known = (await read($, agents))[agentId]
-  if (known !== undefined) return known
+  const known = mem.agents.get(agentId)
+  if (known !== undefined) return known.route
   const listed = (await $.agent.list()).find(one => one.id === agentId)
   if (listed !== undefined) {
-    if (listed.teammateId !== undefined) return 'teammate'
-    return listed.type === FORK ? FORK : `sub:${listed.type}`
+    const route = listed.teammateId !== undefined ? 'teammate' : listed.type === FORK ? FORK : `sub:${listed.type}`
+    mem.agents.set(agentId, { route })
+    return route
   }
   return mem.pendingWorkflow > 0 ? 'workflow' : undefined
 }
 
 async function decideMain(
   $: $,
+  cfg: RouterConfig,
   turnId: string,
   index: number,
   route: string,
@@ -869,7 +884,7 @@ async function decideMain(
 ): Promise<Decision> {
   const known = mem.decisions.get(turnId)
   if (known !== undefined && index > 0) return known
-  const want = resolve(await read($, config), route)
+  const want = resolve(cfg, route)
   const toModel = want.model ?? model
   let toEffort: Effort | undefined =
     want.effort === 'auto' ? (mem.autoEffort.get(turnId) ?? mem.lastMain?.effort ?? 'medium') : (want.effort ?? effort)
@@ -879,8 +894,7 @@ async function decideMain(
     const contextTokens = (await $.session.usage()).context.tokens ?? 0
     const from = { model: last.model, effort: last.effort }
     const to = { model: toModel, effort: toEffort }
-    const ttlMinutes = ttlOf(await read($, config))
-    if (!shouldSwitch({ contextTokens, isAfterCompact, from, to, ttlMinutes })) {
+    if (!shouldSwitch({ contextTokens, isAfterCompact, from, to, ttlMinutes: cfg.cacheTtlMinutes })) {
       toEffort = last.effort
       isHeld = true
     }
@@ -892,29 +906,71 @@ async function decideMain(
   return decision
 }
 
+type StepOutcome = {
+  cfg: RouterConfig
+  model: string
+  effort?: Effort
+  isHeld: boolean
+  isAfterCompact: boolean
+  usage: (Parameters<typeof costOf>[0] & { model: string }) | null | undefined
+}
+
+/** Counts one finished request: per-route spend, the prompt's breakdown, and, for the main loop, the band's facts. */
+async function recordStep($: $, agentId: string | undefined, key: string, s: StepOutcome) {
+  const stepAt = await nowOf($)
+  const isMain = agentId === undefined
+  const usage = s.usage
+  if (usage) {
+    const ttl = s.cfg.cacheTtlMinutes
+    const label = isMain ? (key === 'plan' ? 'Main loop (plan mode)' : 'Main loop') : (mem.agents.get(agentId)?.label ?? key)
+    const cause = isMain
+      ? rewriteCause({ isAfterCompact: s.isAfterCompact, prevAt: mem.lastMain?.at, now: stepAt, ttlMinutes: ttl, from: mem.lastMain, to: { model: s.model, effort: s.effort } })
+      : undefined
+    const rewrite = rewriteOf(usage, usage.model, cause, ttl)
+    await update($, spend, all => ({ ...all, [key]: addSpend(all[key] ?? EMPTY_SPEND, usage, usage.model, ttl) }))
+    await update($, promptCost, p => addStep(p ?? EMPTY_PROMPT, { id: agentId ?? key, route: key, label, effort: s.effort, usage, ttlMinutes: ttl, rewrite }))
+    if (isMain) {
+      await update($, lastUsage, () => ({
+        model: usage.model,
+        input: usage.input_tokens,
+        cacheRead: usage.cache_read_input_tokens,
+        cacheWrite: usage.cache_creation_input_tokens,
+        usd: costOf(usage, usage.model, ttl),
+        at: stepAt,
+      }))
+    }
+  }
+  if (!isMain) return
+  if (mem.lastMain !== undefined && mem.lastMain.route !== key && s.cfg.isEnabled) $.ui.toast(`Route ${key}: ${routeText(s.model, s.effort)}`)
+  mem.lastMain = { route: key, model: s.model, effort: s.effort, at: stepAt }
+  await update($, active, () => ({ route: key, model: s.model, effort: s.effort, isHeld: s.isHeld }))
+  await refreshStatus($)
+}
+
 export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
-    const stored = (await $.store.get(STORE_KEY)) as RouterConfig | undefined
-    if (stored?.routes) await update($, config, () => ({ ...DEFAULT_CONFIG, ...stored }))
-    const saved = await $.store.get('history')
-    if (Array.isArray(saved)) await update($, history, () => saved as PromptRecord[])
-    const scope = await $.store.get('statsScope')
+    const get = (key: string) => $.store.get(key).catch(() => undefined)
+    const [stored, saved, scope, band, repo] = await Promise.all([
+      get(STORE.config),
+      get(STORE.history),
+      get(STORE.statsScope),
+      get(STORE.bandShown),
+      $.session.repo().catch(() => null),
+    ])
+    const cfg = stored === undefined ? DEFAULT_CONFIG : sanitizeConfig(stored)
+    await update($, config, () => cfg)
+    await update($, history, () => sanitizeHistory(saved))
     if (scope === 'repo' || scope === 'all') await update($, statsScope, () => scope)
-    const repo = await $.session.repo().catch(() => null)
+    if (typeof band === 'boolean') await update($, isBandShown, () => band)
     const root = repo?.root ?? (await $.session.root().catch(() => ''))
     mem.repo = repo?.name ?? (root.split('/').pop() || 'unknown')
-    const band = await $.store.get('bandShown')
-    if (typeof band === 'boolean') await update($, isBandShown, () => band)
     $.ui.status(undefined)
-    await refreshStatus($)
-    $.clock.every(60_000, () => void refreshStatus($))
-    await $.command.register({
-      name: 'route',
-      description: 'Model router: open the pane, or `stats`, `context`, `last`, `preset <name>`, `set <route> <model> [effort]`, `on`, `off`, `band on|off`, `guard refuse|warn|off`',
-      argumentHint: '[stats | context | last | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off]',
-    })
-    const hasCacheTax = (await read($, config)).coldGuard !== 'off' && (await $.command.list().catch(() => [])).some(one => one.name === 'cache-tax')
+    await refreshStatus($).catch(() => undefined)
+    mem.tick?.cancel()
+    mem.tick = $.clock.every(60_000, () => void refreshStatus($).catch(() => undefined))
+    await $.command.register({ name: 'route', description: 'Model router: open the pane, or one of the verbs', argumentHint: USAGE })
+    const hasCacheTax = cfg.coldGuard !== 'off' && (await $.command.list().catch(() => [])).some(one => one.name === 'cache-tax')
     if (hasCacheTax) {
       $.ui.log('model-router: cache-tax is installed too, so a cold send is guarded twice. Run /route guard off to leave it to cache-tax.')
     }
@@ -954,18 +1010,14 @@ export const register: Register = on => {
     if (e.workflow !== undefined) mem.pendingWorkflow += 1
     const started = await next(canRewrite && model ? { ...e, model } : e)
     if (e.workflow !== undefined) mem.pendingWorkflow = Math.max(0, mem.pendingWorkflow - 1)
-    const id = started.agentId
-    if (id !== undefined) {
-      await update($, agents, map => ({ ...map, [id]: route }))
-      await update($, agentLabels, map => ({ ...map, [id]: `${e.subagentType} · ${e.description}` }))
-    }
+    if (started.agentId !== undefined) mem.agents.set(started.agentId, { route, label: printable(`${e.subagentType} · ${e.description}`) })
     return started
   })
 
   on('prompt.submit', async ($, e, next) => {
     if (e.turnId === undefined) {
       const cfg = await read($, config)
-      const guard = cfg.coldGuard ?? 'refuse'
+      const guard = cfg.coldGuard
       if (guard !== 'off' && e.origin.kind !== 'plugin' && !e.text.trimStart().startsWith('/')) {
         const cold = await coldSend($, cfg).catch(() => undefined)
         if (cold !== undefined && guard === 'warn') $.ui.log(`model-router: ${cold.text} Sending anyway.`)
@@ -974,35 +1026,30 @@ export const register: Register = on => {
           return { drop: `model-router: ${cold.text} Send it again to pay it, or /clear and start from a note.` }
         }
       }
-      mem.isNewPrompt = true
-      mem.pendingLabel = commandLabel(e.text)
+      mem.pendingPrompt = commandLabel(e.text)
     }
     return next(e)
   })
 
   on('command.run', ($, e, next) => {
-    if (e.origin.kind !== 'plugin' && e.command !== 'route') {
-      mem.isNewPrompt = true
-      mem.pendingLabel = `/${e.command}`
-    }
+    if (e.origin.kind !== 'plugin' && e.command !== 'route') mem.pendingPrompt = `/${e.command}`
     return next(e)
   })
 
   on('session.end', async ($, e, next) => {
-    await recordPrompt($)
+    await recordPrompt($).catch(() => undefined)
     return next(e)
   })
 
   on('turn.start', async ($, e, next) => {
-    if (mem.isNewPrompt) {
-      mem.isNewPrompt = false
-      await recordPrompt($)
-      mem.current = { label: mem.pendingLabel, text: e.text.slice(0, 120), at: await $.clock.now().catch(() => Date.now()) }
-      mem.pendingLabel = 'prompt'
-      await update($, promptCost, () => ({ usd: 0, requests: 0, items: [] }))
+    if (mem.pendingPrompt !== undefined) {
+      const label = mem.pendingPrompt
+      mem.pendingPrompt = undefined
+      await recordPrompt($).catch(() => undefined)
+      mem.current = { label, text: printable(e.text.slice(0, 120)), at: await nowOf($) }
+      await update($, promptCost, () => EMPTY_PROMPT)
     }
-    const route = (await read($, isPlan)) ? 'plan' : 'main'
-    const { effort } = resolve(await read($, config), route)
+    const { effort } = resolve(await read($, config), await mainRoute($))
     if (effort === 'auto' && e.text.trim() !== '') {
       const label = await $.model
         .classify(e.text.slice(0, 4000), AUTO_LABELS, { model: 'haiku' })
@@ -1022,9 +1069,9 @@ export const register: Register = on => {
 
     if (e.agentId === undefined) {
       mem.isAfterCompact = false
-      route = (await read($, isPlan)) ? 'plan' : 'main'
+      route = await mainRoute($)
       if (cfg.isEnabled) {
-        const decision = await decideMain($, e.turnId, e.index, route, e.model, isAfterCompact, effort)
+        const decision = await decideMain($, cfg, e.turnId, e.index, route, e.model, isAfterCompact, effort)
         model = decision.model
         effort = decision.effort
         isHeld = decision.isHeld
@@ -1041,81 +1088,22 @@ export const register: Register = on => {
     const isChanged = model !== e.model || effort !== asEffort(e.effort)
     const result = yield* next(isChanged ? { ...e, model, ...(effort ? { effort } : {}) } : e)
 
-    const key = route ?? 'sub:?'
-    const stepAt = await $.clock.now().catch(() => Date.now())
-    if (result.usage) {
-      const usage = result.usage
-      const ttl = ttlOf(cfg)
-      await update($, spend, all => ({ ...all, [key]: addSpend(all[key] ?? EMPTY_SPEND, usage, usage.model, ttl) }))
-      const itemId = e.agentId ?? key
-      const label = e.agentId === undefined ? (key === 'plan' ? 'Main loop (plan mode)' : 'Main loop') : ((await read($, agentLabels))[e.agentId] ?? key)
-      const usd = costOf(usage, usage.model, ttl)
-      const stepEffort = typeof effort === 'string' ? effort : undefined
-      const rewrite =
-        e.agentId === undefined
-          ? rewriteOf(usage, usage.model, rewriteCause({ isAfterCompact, prevAt: mem.lastMain?.at, now: stepAt, ttlMinutes: ttl, from: mem.lastMain, to: { model, effort } }), ttl)
-          : undefined
-      await update($, promptCost, p => {
-        const was = p ?? { usd: 0, requests: 0, items: [] }
-        const old: PromptItem = was.items.find(one => one.id === itemId) ?? {
-          id: itemId, route: key, label, model: usage.model, requests: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, usd: 0,
-        }
-        const item: PromptItem = {
-          ...old,
-          model: usage.model,
-          ...(stepEffort ? { effort: stepEffort } : {}),
-          requests: old.requests + 1,
-          input: old.input + usage.input_tokens,
-          cacheRead: old.cacheRead + usage.cache_read_input_tokens,
-          cacheWrite: old.cacheWrite + usage.cache_creation_input_tokens,
-          output: old.output + usage.output_tokens,
-          usd: old.usd + usd,
-        }
-        const items = was.items.some(one => one.id === itemId)
-          ? was.items.map(one => (one.id === itemId ? item : one))
-          : [...was.items, item]
-        return { usd: was.usd + usd, requests: was.requests + 1, items, rewrites: rewrite ? [...(was.rewrites ?? []), rewrite] : was.rewrites }
-      })
-      if (e.agentId === undefined) {
-        await update($, lastUsage, () => ({
-          model: usage.model,
-          input: usage.input_tokens,
-          cacheRead: usage.cache_read_input_tokens,
-          cacheWrite: usage.cache_creation_input_tokens,
-          usd: costOf(usage, usage.model, ttl),
-          at: stepAt,
-        }))
-      }
-    }
-
-    if (e.agentId === undefined) {
-      if (mem.lastMain !== undefined && mem.lastMain.route !== key && cfg.isEnabled) {
-        $.ui.toast(`Route ${key}: ${labelOf(model)}${effort ? ` ${effort}` : ''}`)
-      }
-      mem.lastMain = { route: key, model, effort, at: stepAt }
-      await update($, active, () => ({ route: key, model, effort, isHeld }))
-    }
-    await refreshStatus($)
+    // Bookkeeping never fails the request it is counting.
+    await recordStep($, e.agentId, route ?? 'sub:?', { cfg, model, effort, isHeld, isAfterCompact, usage: result.usage }).catch(() => undefined)
     return result
   })
 
   on('command.run', { command: 'route' }, async ($, e) => {
-    const [verb, ...rest] = e.args.trim().split(/\s+/).filter(Boolean)
-    if (verb === undefined) {
-      await $.ui.open({ id: PANE, title: 'Model router' })
-      return { text: 'Model router pane opened.' }
+    const [verb = 'route', ...rest] = e.args.trim().split(/\s+/).filter(Boolean)
+    if (Object.hasOwn(PANES, verb) && rest.length === 0) {
+      const pane = PANES[verb as keyof typeof PANES]
+      await $.ui.open(pane)
+      return { text: `${pane.title} pane opened.` }
     }
-    if (verb === 'stats') {
-      await $.ui.open({ id: STATS_PANE, title: 'Stats' })
-      return { text: 'Stats pane opened.' }
-    }
-    if (verb === 'context') {
-      await $.ui.open({ id: CTX_PANE, title: 'Context' })
-      return { text: 'Context pane opened.' }
-    }
-    if (verb === 'last') {
-      await $.ui.open({ id: LAST_PANE, title: 'Last prompt cost' })
-      return { text: 'Last prompt cost pane opened.' }
+    if (!USER_ORIGINS.has(e.origin.kind)) return { text: `model-router: /route ${verb} only runs when you type it.` }
+    if (verb === 'stats' && rest[0] === 'clear') {
+      await save($, STORE.history, await update($, history, () => []))
+      return { text: 'Prompt history cleared.' }
     }
     if (verb === 'ttl') {
       const minutes = Number(rest[0])
@@ -1140,7 +1128,7 @@ export const register: Register = on => {
     }
     if (verb === 'preset') {
       const name = rest[0] ?? ''
-      const preset = PRESETS[name]
+      const preset = presetOf(name)
       if (preset === undefined) return { text: `Presets: ${Object.keys(PRESETS).join(', ')}.` }
       await setConfig($, c => ({ ...c, preset: name, routes: { ...preset.routes } }))
       return { text: `Preset ${name}: ${preset.label}.` }
@@ -1148,12 +1136,12 @@ export const register: Register = on => {
     if (verb === 'set') {
       const [route, model, effort] = rest
       if (route === undefined) return { text: `Routes: ${ROUTES.map(one => one.key).join(', ')}, or sub:<agent-type>.` }
-      const setting = parseSetting(model, effort)
+      const setting = parseSetting(route, model, effort)
       if (typeof setting === 'string') return { text: setting }
       await setConfig($, c => ({ ...c, preset: 'custom', routes: { ...c.routes, [route]: setting } }))
       return { text: `${route} → ${setting.model} · ${setting.effort}.` }
     }
-    return { text: 'Usage: /route [stats | context | last | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]' }
+    return { text: `Usage: /route ${USAGE}` }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, ($, e) => renderPane($, e))
@@ -1166,8 +1154,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     if (e.component !== 'SessionMode') return next(e)
-    const tree = await renderStatsFooter($, e, e.props.modes)
-    return tree ?? next(e)
+    return renderStatsFooter($, e, e.props.modes)
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
