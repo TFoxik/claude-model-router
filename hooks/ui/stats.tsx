@@ -1,12 +1,7 @@
 import type { PromptRecord, Rewrite, Scope } from '../../types'
 import { HISTORY_LIMIT, money, plural, statsSummary, sumUsd } from '../routes'
-import { rewriteText } from './kit'
+import { day, rewriteText } from './kit'
 import type { Els, Open } from './kit'
-
-const day = (at: number) => {
-  const d = new Date(at)
-  return `${d.getDate()}.${d.getMonth() + 1}.`
-}
 
 const colorOfLabel = (label: string) => (label === 'prompt' ? undefined : 'suggestion')
 

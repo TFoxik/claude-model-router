@@ -16,6 +16,12 @@ export type Open = (pane: keyof typeof PANES) => void
 
 export type Els = ReturnType<EngineInterface['ui']['resolve']>
 
+/** `9.10.`: a short local date for a timestamp. */
+export const day = (at: number) => {
+  const d = new Date(at)
+  return `${d.getDate()}.${d.getMonth() + 1}.`
+}
+
 const ROUTE_COLOR: Record<string, string> = { plan: 'planMode', main: 'claude' }
 export const colorOf = (route: string) => ROUTE_COLOR[route] ?? 'suggestion'
 

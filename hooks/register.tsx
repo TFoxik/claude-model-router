@@ -53,6 +53,7 @@ import { contextMobileView, contextPaneView } from './ui/context-pane'
 import { PANES } from './ui/kit'
 import type { Open } from './ui/kit'
 import { lastPaneView } from './ui/last-pane'
+import { learnPaneView } from './ui/learn-pane'
 import { routesMobileView, routesPaneView } from './ui/routes-pane'
 import { statsFooterView, statsPaneView } from './ui/stats'
 
@@ -268,10 +269,11 @@ const openPane = ($: $): Open => pane => {
 }
 
 async function renderLearnPane($: $, e: Args<'ui.render'>) {
-  const { Box, Text } = $.ui.resolve(e)
-  const all = await read($, lessons)
-  if (all.length === 0) return <Text dimColor>No lessons yet.</Text>
-  return <Box flexDirection="column">{all.map((one, i) => <Text key={`l:${i}`}>{one.fact}</Text>)}</Box>
+  const [cfg, all, expanded] = await Promise.all([read($, config), read($, lessons), read($, learnOpen)])
+  return learnPaneView($.ui.resolve(e), { lessons: all, isLearning: cfg.isLearning, expanded }, {
+    turnOn: () => void setConfig($, c => ({ ...c, isLearning: true })),
+    toggle: kind => void update($, learnOpen, open => (open.includes(kind) ? open.filter(one => one !== kind) : [...open, kind])),
+  })
 }
 
 /** Saved history plus the prompt still running, every repo; the Stats pane narrows it to one. */

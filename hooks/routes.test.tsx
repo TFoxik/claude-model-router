@@ -966,3 +966,23 @@ test('a failed lessons read never saves over them', async ($, on) => {
   }
   expect(data.lessons).toEqual(kept)
 })
+
+test('the learn pane explains a kind until seen enough, toggles why, and offers to turn learn mode on', async ($, on) => {
+  const at = (i: number) => T0 + i * 60_000
+  const cold = [0, 1, 2].map(i => ({ kind: 'cold-rewrite', at: at(i), repo: 'r', fact: `cold ${i}` }))
+  const ctx = [{ kind: 'context-high', at: at(5), repo: 'r', fact: 'ctx 0' }]
+  mock.store(on, { config: MINE, lessons: [...cold, ...ctx] })
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const pane = await mountPane($, 'learn', 'desktop')
+  expect(await pane.find({ type: 'Text', text: 'Context is getting big' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Every turn sends the whole context again/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Each request re-sends the whole conversation/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /cold 2$/ })).toBeDefined()
+  await pane.press({ key: 'why:cold-rewrite' })
+  expect(await pane.find({ type: 'Text', text: /^Each request re-sends the whole conversation/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Learn mode is off/ })).toBeDefined()
+  await pane.press({ key: 'learn-on' })
+  expect(await pane.find({ type: 'Text', text: /^Learn mode is off/ })).toBeUndefined()
+  await pane.unmount()
+})
