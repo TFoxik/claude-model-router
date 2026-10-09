@@ -1,5 +1,11 @@
 # Release notes
 
+## 0.4.0 — 2026-10-09
+
+### Added
+
+- Learn mode, off by default: `/route learn on`. Cache rewrites, an expensive model doing most of a prompt, context growing toward auto-compact, compaction and subagent-heavy prompts each become a lesson with the measured numbers: a toast when it happens (at most one per turn, once an hour per topic, three times per topic) and a **Learn** pane that explains each concept the first times and lists the facts. The band shows **Learn ●N** while lessons are unread.
+
 ## 0.3.2 — 2026-10-09
 
 ### Changed

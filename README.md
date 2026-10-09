@@ -41,6 +41,7 @@ See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 - **Footer**: `▤ today $12.30`, what you've spent today. Click it for **Stats**, kept across sessions for this repo or all repos: commands ranked by average cost per run (`/simplify`, `/code-review`, plain prompts…) and your most expensive prompts, each with the models and effort levels it used and what each cost, so you learn over time which calls are costly.
 - **Cold-send guard**: when the cache has gone cold over 50k+ tokens of context, your next message is dropped once with its price, worked out for the model the next turn is routed to: `the prompt cache went cold 1h12m ago. This send re-writes ~200k tokens on Opus 5.5 = $1.60 (warm would be $0.04)`. Send it again to pay it, or `/clear`. Slash commands that reach the model are held the same way: user commands and MCP prompts always, and skills such as `/simplify` once the router has seen them start a model turn (a brand-new skill's first cold run goes through). Only what you type is held; notifications, triggers and peer messages always pass. `/route guard warn` only shows the price; `/route guard off` turns it off.
 - **Cache rewrites in the cost panes**: a request that rebuilt the cache, because it went cold or because the route changed model or effort, is marked in **Last** and counted in **Stats** (`· 3 cache rewrites $4.20`), with what it cost above a warm read.
+- **Learn mode** (off by default, `/route learn on`): when a cache rewrite, an expensive model, a growing context, a compaction or busy subagents cost you something, a toast explains it with the real numbers, for example `Cache went cold: … re-wrote 180k tokens on Opus 5.5 for $1.44; read warm they would have cost $0.04`. The first time a topic comes up the **Learn** pane explains the concept in full; after that only the numbers. At most one toast per turn, once an hour per topic, and a topic stops toasting after three times. A **Learn ●N** button in the band opens the pane while lessons are unread. The Sonnet comparison is price arithmetic only, not a quality claim.
 - **`/route` pane**: model and effort per route, presets, and a per-route spend table. Edits stay a draft until you press **Apply**. The draft shows the per-turn cost change, the one-off cache rewrite cost, the plan-mode toggle cost and the payback.
 
 ## Commands
@@ -51,6 +52,8 @@ See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 | `/route stats` / `context` / `last` | Open the Stats, Context or Last prompt cost pane (handy in the terminal) |
 | `/route stats clear` | Delete the saved prompt history |
 | `/route stats text on\|off` | Keep the first 120 characters of each prompt in Stats (default on); `off` also removes text already kept |
+| `/route learn` | Open the Learn pane |
+| `/route learn on\|off` | Turn learn mode on or off (default off) |
 | `/route preset inherit\|mine\|balanced\|frugal\|max` | Apply a preset (`inherit` changes no model, it only tracks) |
 | `/route set <route> <model> [effort]` | Set one route now, for example `/route set sub:Explore haiku low` |
 | `/route on` / `/route off` | Enable or disable routing |
@@ -74,8 +77,9 @@ Models: `opus`, `sonnet`, `haiku`, `fable`, `inherit`. Efforts: `low` through `m
 - **Changes no model on install**: the default `inherit` preset only tracks costs, draws the band and guards cold sends. Pick a preset (`/route preset mine`) or set routes to start routing. An install from before this default that never saved its settings keeps routing as `mine`; saved settings always carry over on update.
 - **Model IDs are the Anthropic API's** (`claude-opus-5-5` and so on). On a provider that names models differently, turn routing off or set routes to `inherit`.
 - **Prompt history** (Stats) is saved in this plugin's store, across all repos: per prompt, the first 120 characters of its text (`/route stats text off` stops that), the repo name, its label (`/simplify`, `prompt`), cost and models. The last 2,000 prompts are kept; `/route stats clear` deletes them. Nothing leaves your machine.
+- **Lessons** (learn mode) are saved in this plugin's store: per lesson, its kind, the repo name, the time and the fact text (numbers, model names, route names; never prompt text). The last 20 of each kind are kept.
 - **`auto` effort** sends the first 4,000 characters of each prompt to Haiku to classify it (trivial, standard, hard). That is an extra model request on your account; presets `balanced` and `frugal` use it.
-- **Route changes** (`/route set`, `preset`, `on`/`off`, `guard`, `ttl`, `stats clear`, `stats text`) only run when you type them, not from a peer session, channel or trigger. Opening a pane works from anywhere.
+- **Route changes** (`/route set`, `preset`, `on`/`off`, `guard`, `ttl`, `stats clear`, `stats text`, `learn on`/`off`) only run when you type them, not from a peer session, channel or trigger. Opening a pane works from anywhere.
 - No network, file or process access of its own.
 
 ## Develop
