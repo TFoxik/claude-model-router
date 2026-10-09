@@ -6,6 +6,8 @@ import {
   capLessons,
   lessonFromCompact,
   lessonFromContext,
+  lessonFromExpiry,
+  lessonFromPlanToggle,
   lessonFromRewrite,
   lessonsFromPrompt,
   pickToast,
@@ -91,17 +93,49 @@ test('subagents lesson: share, the busiest route, and a reroute hint only for su
   expect(lessonsFromPrompt({ usd: 1, requests: 3, items: notRoutable }, 60)).toEqual([])
 })
 
-test('context lesson: only when the level rises, never on the first reading or an unknown model', () => {
-  expect(cents([lessonFromContext('success', 'warning', 300_000, opus, 60)!])[0]).toEqual({
+test('context lesson: a heads-up when the level rises, never on the first reading or an unknown model', () => {
+  expect(cents([lessonFromContext('success', 'warning', 300_000, opus, 60, true)!])[0]).toEqual({
     kind: 'context-high',
     usd: 0.06,
-    fact: 'Context reached 300k tokens, past 60% of the way to auto-compact. Every turn re-reads all of it: about $0.06 a turn on Opus 5.5 while the cache is warm, $2.40 if it has gone cold.',
+    fact: 'Context reached 300k tokens, past 60% of the way to auto-compact. From here every turn re-reads all of it: about $0.06 a turn on Opus 5.5 while the cache is warm, $2.40 if it goes cold. Finishing this task and running /clear brings that back down.',
   })
-  expect(lessonFromContext('warning', 'error', 300_000, opus, 60)!.fact).toMatch(/^Context reached 300k tokens, past 85% of the way to auto-compact\./)
-  expect(lessonFromContext(undefined, 'error', 300_000, opus, 60)).toBeUndefined()
-  expect(lessonFromContext('warning', 'warning', 300_000, opus, 60)).toBeUndefined()
-  expect(lessonFromContext('error', 'warning', 300_000, opus, 60)).toBeUndefined()
-  expect(lessonFromContext('success', 'warning', 300_000, 'gpt-something', 60)).toBeUndefined()
+  expect(lessonFromContext('warning', 'error', 300_000, opus, 60, true)!.fact).toMatch(/^Context reached 300k tokens, past 85% of the way to auto-compact\./)
+  expect(lessonFromContext('success', 'warning', 300_000, opus, 60, false)!.fact).toMatch(/^Context reached 300k tokens, past 60% of the context window\./)
+  expect(lessonFromContext(undefined, 'error', 300_000, opus, 60, true)).toBeUndefined()
+  expect(lessonFromContext('warning', 'warning', 300_000, opus, 60, true)).toBeUndefined()
+  expect(lessonFromContext('error', 'warning', 300_000, opus, 60, true)).toBeUndefined()
+  expect(lessonFromContext('success', 'warning', 300_000, 'gpt-something', 60, true)).toBeUndefined()
+})
+
+test('expiry lesson: once, as the warm time crosses the warning mark, over a big context', () => {
+  expect(cents([lessonFromExpiry(6, 5, 60, 200_000, opus)!])[0]).toEqual({
+    kind: 'cache-expiring',
+    usd: 1.56,
+    fact: 'The prompt cache goes cold in 5m. A send before then reads the 200k tokens for $0.04; after, it re-writes them on Opus 5.5 for $1.60.',
+  })
+  expect(lessonFromExpiry(6, 4, 60, 200_000, opus)!.fact).toMatch(/^The prompt cache goes cold in 4m\./)
+  expect(lessonFromExpiry(3, 2, 5, 200_000, opus)!.fact).toBe(
+    'The prompt cache goes cold in 2m. A send before then reads the 200k tokens for $0.04; after, it re-writes them on Opus 5.5 for $1.00.',
+  )
+  expect(lessonFromExpiry(5, 5, 60, 200_000, opus)).toBeUndefined()
+  expect(lessonFromExpiry(undefined, 5, 60, 200_000, opus)).toBeUndefined()
+  expect(lessonFromExpiry(6, 0, 60, 200_000, opus)).toBeUndefined()
+  expect(lessonFromExpiry(6, 5, 60, 40_000, opus)).toBeUndefined()
+  expect(lessonFromExpiry(6, 5, 60, 200_000, 'gpt-something')).toBeUndefined()
+})
+
+test('plan toggle lesson: the cost of each switch, only when plan and main differ', () => {
+  const plan = { model: opus, effort: 'high' }
+  const main = { model: opus, effort: 'medium' }
+  expect(cents([lessonFromPlanToggle(plan, main, 200_000, 60)!])[0]).toEqual({
+    kind: 'plan-toggle',
+    usd: 3.2,
+    fact: 'Plan mode runs on Opus 5.5 high and normal work on Opus 5.5 medium, so each switch re-writes the cache: at 200k tokens, entering cost about $1.60 and leaving will cost about $1.60. Routing both the same avoids it; so does switching while the context is small.',
+  })
+  expect(lessonFromPlanToggle({ model: sonnet, effort: 'high' }, main, 200_000, 60)!.fact).toMatch(/entering cost about \$0\.80 and leaving will cost about \$1\.60\./)
+  expect(lessonFromPlanToggle(main, main, 200_000, 60)).toBeUndefined()
+  expect(lessonFromPlanToggle(plan, main, 5_000, 60)).toBeUndefined()
+  expect(lessonFromPlanToggle({ model: 'gpt-x', effort: 'high' }, { model: 'gpt-x' }, 200_000, 60)).toBeUndefined()
 })
 
 test('compaction lesson', () => {

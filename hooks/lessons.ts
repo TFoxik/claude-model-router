@@ -1,5 +1,5 @@
 import type { Effort, Lesson, LessonKind, PromptCost, PromptItem, Rewrite } from '../types'
-import { MODELS, costOf, fmtAge, isSub, kTokens, labelOf, modelKeyOf, money, plural, printable, rewritePrice, routeText } from './routes'
+import { GUARD_MIN_TOKENS, MODELS, costOf, fmtAge, isSub, kTokens, labelOf, modelKeyOf, money, plural, printable, rewritePrice, routeText } from './routes'
 
 export type LessonDraft = Pick<Lesson, 'kind' | 'fact' | 'usd'>
 type Level = 'success' | 'warning' | 'error'
@@ -34,6 +34,14 @@ export const CONCEPTS: Record<LessonKind, { title: string; body: string }> = {
   compacted: {
     title: 'Conversation compacted',
     body: 'Compaction replaces the conversation with a summary written by the model. Later turns are cheaper because there is less to re-read, but anything the summary left out is gone. The summary is written to the cache once, like any new context.',
+  },
+  'cache-expiring': {
+    title: 'Cache about to go cold',
+    body: 'The prompt cache keeps the conversation cheap to re-send only for its TTL after the last request. Any send before it expires keeps it warm for another full TTL; after it expires, the next send writes the whole context again. If you are done for now, /clear costs nothing and the next session starts small.',
+  },
+  'plan-toggle': {
+    title: 'Plan mode switches rewrite the cache',
+    body: 'A prompt cache belongs to one model at one effort. When plan mode is routed differently from normal work, entering and leaving plan mode each start a new cache, and the first send after each switch writes the whole context again. Plan at the start of a task, while the context is small, or route plan and main the same.',
   },
   subagents: {
     title: 'Subagents did most of the spending',
@@ -127,15 +135,53 @@ export function lessonsFromPrompt(p: PromptCost, ttlMinutes: number): LessonDraf
   return [priceyLesson(p, ttlMinutes), subagentLesson(p)].filter((one): one is LessonDraft => one !== undefined)
 }
 
-/** Context crossing into amber or red, priced per turn on the model the main loop runs. */
-export function lessonFromContext(prev: Level | undefined, next: Level, tokens: number, model: string, ttlMinutes: number): LessonDraft | undefined {
+/** Context crossing into amber or red, priced per turn ahead on the model the main loop runs; measured against auto-compact when it is on. */
+export function lessonFromContext(
+  prev: Level | undefined,
+  next: Level,
+  tokens: number,
+  model: string,
+  ttlMinutes: number,
+  hasAutoCompact: boolean,
+): LessonDraft | undefined {
   if (prev === undefined || RANK[next] <= RANK[prev] || next === 'success' || modelKeyOf(model) === undefined) return undefined
   const { write, warm } = rewritePrice(model, tokens, ttlMinutes)
-  const how = next === 'error' ? 'past 85%' : 'past 60%'
+  const share = next === 'error' ? '85%' : '60%'
+  const how = hasAutoCompact ? `past ${share} of the way to auto-compact` : `past ${share} of the context window`
   return {
     kind: 'context-high',
     usd: warm,
-    fact: `Context reached ${kTokens(tokens)} tokens, ${how} of the way to auto-compact. Every turn re-reads all of it: about ${money(warm)} a turn on ${labelOf(model)} while the cache is warm, ${money(write)} if it has gone cold.`,
+    fact: `Context reached ${kTokens(tokens)} tokens, ${how}. From here every turn re-reads all of it: about ${money(warm)} a turn on ${labelOf(model)} while the cache is warm, ${money(write)} if it goes cold. Finishing this task and running /clear brings that back down.`,
+  }
+}
+
+/** Minutes before expiry the warning fires: enough to send something, scaled to the TTL. */
+const warnMinutes = (ttlMinutes: number) => (ttlMinutes >= 60 ? 5 : 2)
+
+/** The cache's last minutes over a big context, while a send still keeps it warm. */
+export function lessonFromExpiry(prevWarm: number | undefined, warm: number, ttlMinutes: number, tokens: number, model: string): LessonDraft | undefined {
+  const at = warnMinutes(ttlMinutes)
+  if (prevWarm === undefined || prevWarm <= at || warm > at || warm <= 0 || tokens < GUARD_MIN_TOKENS || modelKeyOf(model) === undefined) return undefined
+  const price = rewritePrice(model, tokens, ttlMinutes)
+  return {
+    kind: 'cache-expiring',
+    usd: price.premium,
+    fact: `The prompt cache goes cold in ${warm}m. A send before then reads the ${kTokens(tokens)} tokens for ${money(price.warm)}; after, it re-writes them on ${labelOf(model)} for ${money(price.write)}.`,
+  }
+}
+
+type LoopRoute = { model: string; effort?: string }
+
+/** What each switch between differently routed plan mode and normal work re-writes, at the current context. */
+export function lessonFromPlanToggle(plan: LoopRoute, main: LoopRoute, tokens: number, ttlMinutes: number): LessonDraft | undefined {
+  if (plan.model === main.model && plan.effort === main.effort) return undefined
+  const enter = rewritePrice(plan.model, tokens, ttlMinutes).write
+  const leave = rewritePrice(main.model, tokens, ttlMinutes).write
+  if (Math.min(enter, leave) < MIN_REWRITE_USD) return undefined
+  return {
+    kind: 'plan-toggle',
+    usd: enter + leave,
+    fact: `Plan mode runs on ${routeText(plan.model, plan.effort)} and normal work on ${routeText(main.model, main.effort)}, so each switch re-writes the cache: at ${kTokens(tokens)} tokens, entering cost about ${money(enter)} and leaving will cost about ${money(leave)}. Routing both the same avoids it; so does switching while the context is small.`,
   }
 }
 

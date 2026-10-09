@@ -59,7 +59,15 @@ export type ActiveRoute = {
   effort?: Effort
   isHeld: boolean
 }
-export type LessonKind = 'cold-rewrite' | 'switch-rewrite' | 'pricey-model' | 'context-high' | 'compacted' | 'subagents'
+export type LessonKind =
+  | 'cold-rewrite'
+  | 'switch-rewrite'
+  | 'pricey-model'
+  | 'context-high'
+  | 'compacted'
+  | 'subagents'
+  | 'cache-expiring'
+  | 'plan-toggle'
 export type Lesson = { kind: LessonKind; at: number; repo: string; fact: string; usd?: number; isToasted?: boolean }
 
 declare module 'claude-code' {

@@ -890,10 +890,11 @@ test('learn mode: a cold rewrite toasts once per turn, lands in the pane, and th
   const { toasts, prompt } = await coldPrompts($, on, true)
   await prompt('cold', usageOf(0, 100_000))
   expect(toasts).toEqual([
+    'Cache about to go cold: The prompt cache goes cold in 5m. A send before then reads the 100k tokens for $0.02; after, it re-writes them on Opus 5.5 for $0.80. · /route learn',
     'Cache went cold: The cache had expired after 1h01m idle, so this send re-wrote 100k tokens on Opus 5.5 for $0.80; read warm they would have cost $0.02. · /route learn',
   ])
   const band = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
-  expect(await band.find({ type: 'Button', text: 'Learn ●2' })).toBeDefined()
+  expect(await band.find({ type: 'Button', text: 'Learn ●3' })).toBeDefined()
   await band.press({ key: 'band-learn' })
   await band.unmount()
   const after = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
@@ -914,11 +915,12 @@ test('learn mode off: no lessons, no toast, and switching off drops pending ones
   await submit($, 'x')
   await $.turn.start({ text: 'x', turnId: 'x' })
   await step($, 'x')
+  const before = toasts.length
   await route($, 'learn off')
   await complete($, 'x')
-  expect(toasts).toEqual([])
+  expect(toasts.length).toBe(before)
   const pane = await mountPane($, 'learn')
-  expect(await pane.find({ type: 'Text', text: /^No lessons yet/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /The cache had expired/ })).toBeUndefined()
   await pane.unmount()
 })
 
@@ -928,10 +930,11 @@ test('a subagent turn ending does not flush the main loop lessons', async ($, on
   await submit($, 'c')
   await $.turn.start({ text: 'c', turnId: 'c' })
   await step($, 'c')
+  const before = toasts.length
   await complete($, 's1', 'sub-1')
-  expect(toasts).toEqual([])
+  expect(toasts.length).toBe(before)
   await complete($, 'c')
-  expect(toasts.length).toBe(1)
+  expect(toasts.length).toBe(before + 1)
 })
 
 test('/route learn opens the pane from anywhere; on and off only when typed', async ($, on) => {
@@ -985,4 +988,54 @@ test('the learn pane explains a kind until seen enough, toggles why, and offers 
   await pane.press({ key: 'learn-on' })
   expect(await pane.find({ type: 'Text', text: /^Learn mode is off/ })).toBeUndefined()
   await pane.unmount()
+})
+
+/** A learning session over a 200k context on the mine preset, one warm prompt in, toasts collected. */
+async function learningSession($: Engine, on: On, coldGuard: 'refuse' | 'off' = 'off') {
+  mock.store(on, { config: { ...MINE, coldGuard, isLearning: true } })
+  const clock = mock.clock(on, { now: T0 })
+  guardSession(on, { context: 200_000, usage: usageOf(200_000) })
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined } as never
+  })
+  on('prompt.attachment', (_$, e) => ({ text: e.text }))
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const prompt = async (id: string, before?: () => Promise<void>) => {
+    await submit($, id)
+    await $.turn.start({ text: id, turnId: id })
+    await before?.()
+    await step($, id)
+    await complete($, id)
+  }
+  await prompt('a')
+  return { toasts, clock, prompt }
+}
+
+test('learn mode warns while idle, before the cache goes cold', async ($, on) => {
+  const { toasts, clock } = await learningSession($, on)
+  await clock.advance(54 * 60_000)
+  expect(toasts).toEqual([])
+  await clock.advance(60_000)
+  expect(toasts).toEqual([
+    'Cache about to go cold: The prompt cache goes cold in 5m. A send before then reads the 200k tokens for $0.04; after, it re-writes them on Opus 5.5 for $1.60. · /route learn',
+  ])
+})
+
+test('learn mode explains why the cold-send guard held a message', async ($, on) => {
+  const { clock } = await learningSession($, on, 'refuse')
+  await clock.advance(61 * 60_000)
+  const held = await submit($, 'recap')
+  expect(held.drop).toMatch(/Send it again to pay it, or \/clear and start from a note\.\n\nWhy: Each request re-sends the whole conversation\./)
+})
+
+test('learn mode warns that leaving plan mode will rewrite the cache too', async ($, on) => {
+  const { toasts, prompt } = await learningSession($, on)
+  await prompt('p', () => attach($, 'plan_mode'))
+  expect(toasts.filter(one => !one.startsWith('Route '))).toEqual([
+    'Plan mode switches rewrite the cache: Plan mode runs on Opus 5.5 high and normal work on Opus 5.5 medium, so each switch re-writes the cache: at 200k tokens, entering cost about $1.60 and leaving will cost about $1.60. Routing both the same avoids it; so does switching while the context is small. · /route learn',
+  ])
+  await prompt('p2', () => attach($, 'plan_mode'))
+  expect(toasts.filter(one => !one.startsWith('Route ')).length).toBe(1)
 })
