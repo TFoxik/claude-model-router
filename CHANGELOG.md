@@ -1,5 +1,21 @@
 # Release notes
 
+## 0.3.0 — 2026-10-09
+
+### Fixed
+
+- The cold-send guard holds only what you type. A task notification, scheduled trigger or peer message arriving on a cold cache used to be dropped with nobody to resend it.
+- Two open sessions no longer overwrite each other's Stats history or settings: each save starts from what is stored.
+- A failed read of the stored settings or history no longer saves defaults over them.
+- Apply in the `/route` pane no longer turns routing back on after `/route off`.
+- A `/route` change no longer reports failure when only the status refresh after it failed.
+- A background subagent that keeps running after its prompt is charged to that prompt in Stats, not to whichever prompt is running when it finishes.
+- An agent the router can't identify, such as the engine's own compaction or memory fork, is no longer given the workflow route's model while a workflow agent is starting. It keeps the engine's model, and its cost shows as Engine.
+
+### Added
+
+- The cold-send guard also holds slash commands that reach the model: user commands and MCP prompts always, skills once they have been seen to start a model turn.
+
 ## 0.2.0 — 2026-10-09
 
 ### Changed

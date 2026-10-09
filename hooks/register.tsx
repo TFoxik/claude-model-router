@@ -7,12 +7,14 @@ import {
   DEFAULT_CONFIG,
   EMPTY_PROMPT,
   EMPTY_SPEND,
+  ENGINE,
   FORK,
   GUARD_MIN_TOKENS,
   HISTORY_LIMIT,
   PRESETS,
   ROUTES,
   addSpend,
+  addLateStep,
   addStep,
   coldForMs,
   commandLabel,
@@ -33,6 +35,7 @@ import {
   rewritePrice,
   routeForSpawn,
   routeText,
+  sanitizeConfig,
   sanitizeHistory,
   shouldSwitch,
   startingConfig,
@@ -70,7 +73,7 @@ type $ = EngineInterface
 
 // The store keys the atoms kept across sessions are saved under. The engine's
 // scan needs each update() to name its atom, so callers update, then save().
-const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown' } as const
+const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown', modelCommands: 'modelCommands' } as const
 
 /** Saves a value kept across sessions; a failed save keeps the session going. */
 async function save<T>($: $, key: string, value: T): Promise<T> {
@@ -78,12 +81,55 @@ async function save<T>($: $, key: string, value: T): Promise<T> {
   return value
 }
 
+// A read that failed, as distinct from a key never saved: nothing is overwritten on the strength of it.
+const UNREADABLE = Symbol('unreadable')
+
+const load = ($: $, key: string): Promise<unknown> => $.store.get(key).catch(() => UNREADABLE)
+
+/**
+ * Edits start from what is stored, not this session's copy: other sessions
+ * share the store, and saving a stale copy would undo what they saved.
+ */
 async function setConfig(
   $: $,
   fn: (c: RouterConfig) => RouterConfig,
 ): Promise<RouterConfig> {
-  const next = await save($, STORE.config, await update($, config, fn))
-  await refreshStatus($)
+  const stored = await load($, STORE.config)
+  const next = await update($, config, c => fn(stored === UNREADABLE || stored === undefined ? c : sanitizeConfig(stored)))
+  if (stored !== UNREADABLE) await save($, STORE.config, next)
+  await refreshStatus($).catch(() => undefined)
+  return next
+}
+
+/**
+ * Remembers that a slash command reached the model, so the cold guard holds it
+ * next time; merged with what other sessions learned.
+ */
+async function learnModelCommand($: $, name: string) {
+  if (mem.modelCommands.has(name)) return
+  mem.modelCommands.add(name)
+  const stored = await load($, STORE.modelCommands)
+  if (stored === UNREADABLE) return
+  const known = Array.isArray(stored) ? stored.filter((one): one is string => typeof one === 'string') : []
+  for (const one of known) mem.modelCommands.add(one)
+  await save($, STORE.modelCommands, [...mem.modelCommands])
+}
+
+// Prompt-only sources: their commands always reach the model.
+const PROMPT_SOURCES: ReadonlySet<string> = new Set(['user', 'mcp'])
+
+/** Whether a slash command starts a model turn: learned from earlier runs, or known from where it comes from. */
+async function reachesModel($: $, name: string): Promise<boolean> {
+  if (mem.modelCommands.has(name)) return true
+  const info = (await $.command.list().catch(() => [])).find(one => one.name === name)
+  return info !== undefined && PROMPT_SOURCES.has(info.source)
+}
+
+/** The same for history: another session's prompts since this one loaded are kept. Neither saves after a failed read. */
+async function setHistory($: $, fn: (records: PromptRecord[]) => PromptRecord[]): Promise<PromptRecord[]> {
+  const stored = await load($, STORE.history)
+  const next = await update($, history, all => fn(stored === UNREADABLE || stored === undefined ? all : sanitizeHistory(stored)))
+  if (stored !== UNREADABLE) await save($, STORE.history, next)
   return next
 }
 
@@ -167,7 +213,7 @@ async function recordPrompt($: $) {
   mem.current = undefined
   if (p === null || meta === undefined || p.usd <= 0) return
   const rec = recordOf(meta, p)
-  await save($, STORE.history, await update($, history, all => [...all, rec].slice(-HISTORY_LIMIT)))
+  await setHistory($, all => [...all, rec].slice(-HISTORY_LIMIT))
 }
 
 async function renderLastPane($: $, e: Args<'ui.render'>) {
@@ -231,10 +277,10 @@ async function renderPane($: $, e: Args<'ui.render'>) {
         return JSON.stringify(next) === JSON.stringify(cfg) ? null : next
       }),
     toggle: () => void setConfig($, c => ({ ...c, isEnabled: !c.isEnabled })),
-    // Only the routing comes from the draft, so a setting changed by command while it was open is kept.
+    // Only the routes come from the draft, so on/off or a setting changed while it was open is kept.
     apply: async next => {
       await update($, draft, () => null)
-      await setConfig($, c => ({ ...c, isEnabled: next.isEnabled, preset: next.preset, routes: next.routes }))
+      await setConfig($, c => ({ ...c, preset: next.preset, routes: next.routes }))
     },
     discard: () => void update($, draft, () => null),
   })
@@ -251,7 +297,7 @@ const asEffort = (effort: unknown): Effort | undefined =>
 
 const USAGE = '[stats [clear | text on|off] | context | last | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
 
-// Origins a person typed or drove; a peer, channel or trigger may not change the routes.
+// Origins a person typed or drove: only these may change the routes, and only these are held by the cold guard.
 const USER_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
 
 type Decision = { model: string; effort?: Effort; isHeld: boolean }
@@ -265,13 +311,16 @@ const mem = {
   repo: 'unknown',
   // The label of the prompt the next turn.start opens; undefined while a prompt's turns run.
   pendingPrompt: 'prompt' as string | undefined,
-  agents: new Map<string, { route: string; label?: string }>(),
+  // Each agent's route, label and the prompt that started it (its `current.at`), when spawned in view.
+  agents: new Map<string, { route: string; label?: string; promptAt?: number }>(),
   tick: undefined as Timer | undefined,
   current: undefined as { label: string; text: string; at: number } | undefined,
   compactAt: undefined as number | undefined,
   compactCheckedAt: undefined as number | undefined,
-  pendingWorkflow: 0,
   coldAckedAt: undefined as number | undefined,
+  // Slash commands seen to start a model turn, and the command that ran last, until a turn shows whether it did.
+  modelCommands: new Set<string>(),
+  lastCommand: undefined as string | undefined,
 }
 
 async function routeOfAgent($: $, agentId: string): Promise<string | undefined> {
@@ -283,7 +332,8 @@ async function routeOfAgent($: $, agentId: string): Promise<string | undefined> 
     mem.agents.set(agentId, { route })
     return route
   }
-  return mem.pendingWorkflow > 0 ? 'workflow' : undefined
+  // A workflow's agents and the engine's own forks (compaction, memory) are in no list: left on their model.
+  return undefined
 }
 
 async function decideMain(
@@ -342,7 +392,13 @@ async function recordStep($: $, agentId: string | undefined, key: string, s: Ste
       : undefined
     const rewrite = rewriteOf(usage, usage.model, cause, ttl)
     await update($, spend, all => ({ ...all, [key]: addSpend(all[key] ?? EMPTY_SPEND, usage, usage.model, ttl) }))
-    await update($, promptCost, p => addStep(p ?? EMPTY_PROMPT, { id: agentId ?? key, route: key, label, effort: s.effort, usage, ttlMinutes: ttl, rewrite }))
+    const promptAt = isMain ? undefined : mem.agents.get(agentId)?.promptAt
+    if (promptAt !== undefined && promptAt !== mem.current?.at) {
+      // A background agent outlived the prompt that started it: its cost belongs to that prompt's saved record.
+      await setHistory($, all => all.map(r => (r.at === promptAt && r.repo === mem.repo ? addLateStep(r, { usage, effort: s.effort, ttlMinutes: ttl }) : r)))
+    } else {
+      await update($, promptCost, p => addStep(p ?? EMPTY_PROMPT, { id: agentId ?? key, route: key, label, effort: s.effort, usage, ttlMinutes: ttl, rewrite }))
+    }
     if (isMain) {
       await update($, lastUsage, () => ({
         model: usage.model,
@@ -363,19 +419,24 @@ async function recordStep($: $, agentId: string | undefined, key: string, s: Ste
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const get = (key: string) => $.store.get(key).catch(() => undefined)
-    const [stored, saved, scope, band, repo] = await Promise.all([
-      get(STORE.config),
-      get(STORE.history),
-      get(STORE.statsScope),
-      get(STORE.bandShown),
+    const [stored, saved, scope, band, learned, repo] = await Promise.all([
+      load($, STORE.config),
+      load($, STORE.history),
+      load($, STORE.statsScope),
+      load($, STORE.bandShown),
+      load($, STORE.modelCommands),
       $.session.repo().catch(() => null),
     ])
-    const kept = sanitizeHistory(saved)
-    const cfg = startingConfig(stored, kept.length > 0)
-    await update($, config, () => cfg)
-    // Saved on first run so the history check above decides once: a fresh install keeps `inherit` after it gains history.
-    if (stored === undefined) await save($, STORE.config, cfg)
+    if (Array.isArray(learned)) for (const one of learned) if (typeof one === 'string') mem.modelCommands.add(one)
+    const kept = saved === UNREADABLE ? [] : sanitizeHistory(saved)
+    if (stored === UNREADABLE || saved === UNREADABLE) {
+      $.ui.log('model-router: could not read saved settings or history; using defaults for this session and saving nothing over them.')
+    } else {
+      const cfg = startingConfig(stored, kept.length > 0)
+      await update($, config, () => cfg)
+      // Saved on first run so the history check above decides once: a fresh install keeps `inherit` after it gains history.
+      if (stored === undefined) await save($, STORE.config, cfg)
+    }
     await update($, history, () => kept)
     if (scope === 'repo' || scope === 'all') await update($, statsScope, () => scope)
     if (typeof band === 'boolean') await update($, isBandShown, () => band)
@@ -386,7 +447,7 @@ export const register: Register = on => {
     mem.tick?.cancel()
     mem.tick = $.clock.every(60_000, () => void refreshStatus($).catch(() => undefined))
     await $.command.register({ name: 'route', description: 'Model router: open the pane, or one of the verbs', argumentHint: USAGE })
-    const hasCacheTax = cfg.coldGuard !== 'off' && (await $.command.list().catch(() => [])).some(one => one.name === 'cache-tax')
+    const hasCacheTax = (await read($, config)).coldGuard !== 'off' && (await $.command.list().catch(() => [])).some(one => one.name === 'cache-tax')
     if (hasCacheTax) {
       $.ui.log('model-router: cache-tax is installed too, so a cold send is guarded twice. Run /route guard off to leave it to cache-tax.')
     }
@@ -423,10 +484,10 @@ export const register: Register = on => {
     const route = routeForSpawn(e)
     const { model } = resolve(await read($, config), route)
     const canRewrite = route !== FORK && e.workflow === undefined
-    if (e.workflow !== undefined) mem.pendingWorkflow += 1
     const started = await next(canRewrite && model ? { ...e, model } : e)
-    if (e.workflow !== undefined) mem.pendingWorkflow = Math.max(0, mem.pendingWorkflow - 1)
-    if (started.agentId !== undefined) mem.agents.set(started.agentId, { route, label: printable(`${e.subagentType} · ${e.description}`) })
+    if (started.agentId !== undefined) {
+      mem.agents.set(started.agentId, { route, label: printable(`${e.subagentType} · ${e.description}`), promptAt: mem.current?.at })
+    }
     return started
   })
 
@@ -434,7 +495,8 @@ export const register: Register = on => {
     if (e.turnId === undefined) {
       const cfg = await read($, config)
       const guard = cfg.coldGuard
-      if (guard !== 'off' && e.origin.kind !== 'plugin' && !e.text.trimStart().startsWith('/')) {
+      // Only a person can resend a dropped message; a notification, trigger or peer message would be lost.
+      if (guard !== 'off' && USER_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) {
         const cold = await coldSend($, cfg).catch(() => undefined)
         if (cold !== undefined && guard === 'warn') $.ui.log(`model-router: ${cold.text} Sending anyway.`)
         if (cold !== undefined && guard === 'refuse' && mem.coldAckedAt !== cold.at) {
@@ -443,12 +505,26 @@ export const register: Register = on => {
         }
       }
       mem.pendingPrompt = commandLabel(e.text)
+      if (!e.text.trimStart().startsWith('/')) mem.lastCommand = undefined
     }
     return next(e)
   })
 
-  on('command.run', ($, e, next) => {
-    if (e.origin.kind !== 'plugin' && e.command !== 'route') mem.pendingPrompt = `/${e.command}`
+  on('command.run', async ($, e, next) => {
+    if (e.origin.kind === 'plugin' || e.command === 'route') return next(e)
+    const cfg = await read($, config)
+    if (cfg.coldGuard !== 'off' && USER_ORIGINS.has(e.origin.kind)) {
+      const cold = await coldSend($, cfg).catch(() => undefined)
+      if (cold !== undefined && (await reachesModel($, e.command))) {
+        if (cfg.coldGuard === 'warn') $.ui.log(`model-router: ${cold.text} Running /${e.command} anyway.`)
+        else if (mem.coldAckedAt !== cold.at) {
+          mem.coldAckedAt = cold.at
+          return { text: `model-router: ${cold.text} Run /${e.command} again to pay it, or /clear and start from a note.` }
+        }
+      }
+    }
+    mem.pendingPrompt = `/${e.command}`
+    mem.lastCommand = e.command
     return next(e)
   })
 
@@ -458,6 +534,11 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
+    if (mem.lastCommand !== undefined) {
+      const name = mem.lastCommand
+      mem.lastCommand = undefined
+      await learnModelCommand($, name).catch(() => undefined)
+    }
     const [cfg, route] = await Promise.all([read($, config), mainRoute($)])
     if (mem.pendingPrompt !== undefined) {
       const label = mem.pendingPrompt
@@ -506,7 +587,7 @@ export const register: Register = on => {
     const result = yield* next(isChanged ? { ...e, model, ...(effort ? { effort } : {}) } : e)
 
     // Bookkeeping never fails the request it is counting.
-    await recordStep($, e.agentId, route ?? 'sub:?', { cfg, model, effort, isHeld, isAfterCompact, usage: result.usage }).catch(() => undefined)
+    await recordStep($, e.agentId, route ?? ENGINE, { cfg, model, effort, isHeld, isAfterCompact, usage: result.usage }).catch(() => undefined)
     return result
   })
 
@@ -519,7 +600,7 @@ export const register: Register = on => {
     }
     if (!USER_ORIGINS.has(e.origin.kind)) return { text: `model-router: /route ${verb} only runs when you type it.` }
     if (verb === 'stats' && rest[0] === 'clear') {
-      await save($, STORE.history, await update($, history, () => []))
+      await setHistory($, () => [])
       return { text: 'Prompt history cleared.' }
     }
     if (verb === 'stats' && rest[0] === 'text' && (rest[1] === 'on' || rest[1] === 'off')) {
@@ -527,7 +608,7 @@ export const register: Register = on => {
       await setConfig($, c => ({ ...c, keepPromptText: keep }))
       if (keep) return { text: 'Stats keeps the first 120 characters of each prompt again.' }
       if (mem.current) mem.current.text = ''
-      await save($, STORE.history, await update($, history, withoutText))
+      await setHistory($, withoutText)
       return { text: 'Stats keeps only labels and costs now; saved prompt text was removed.' }
     }
     if (verb === 'ttl') {

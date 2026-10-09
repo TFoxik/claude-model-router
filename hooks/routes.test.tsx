@@ -511,7 +511,9 @@ test('a cold send over a big context is dropped once, priced on the routed model
   expect(await band.find({ type: 'Text', text: /^cache cold \$0\.80/ })).toBeDefined()
   await band.unmount()
   expect((await submit($, '/simplify')).drop).toBeUndefined()
-  expect((await $.prompt.submit({ text: 'x', origin: { kind: 'plugin' } } as Args<'prompt.submit'>)).drop).toBeUndefined()
+  for (const kind of ['plugin', 'task-notification', 'scheduled-trigger', 'peer']) {
+    expect((await $.prompt.submit({ text: 'x', origin: { kind } } as unknown as Args<'prompt.submit'>)).drop).toBeUndefined()
+  }
   const refused = await submit($, 'recap')
   expect(refused.drop).toBe('model-router: the prompt cache went cold 1m ago. This send re-writes ~200k tokens on Sonnet 5.5 = $0.80 (warm would be $0.04). Send it again to pay it, or /clear and start from a note.')
   expect((await submit($, 'recap')).drop).toBeUndefined()
@@ -672,4 +674,184 @@ test('Apply takes only the routing from the draft', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /5-minute/ })).toBeDefined()
   expect(await ui.find({ key: 'm:main' })).toMatchObject({ props: { value: 'sonnet' } })
   await ui.unmount()
+})
+
+const record = (text: string, at = T0) => ({ at, repo: 'unknown', label: 'prompt', text, usd: 1, requests: 1, agents: 0 })
+
+/** A store the test can read and change, as another session sharing it would. */
+function sharedStore(on: On, data: Record<string, unknown>, unreadable = new Set<string>()) {
+  on('store.get', (_$, e) => {
+    if (unreadable.has(e.key)) throw new Error('store busy')
+    return { value: data[e.key] }
+  })
+  on('store.set', (_$, e) => {
+    data[e.key] = e.value
+    return { value: undefined }
+  })
+}
+
+test('saves merge with what another session stored meanwhile', async ($, on) => {
+  const data: Record<string, unknown> = { config: MINE, history: [record('mine')] }
+  sharedStore(on, data)
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  data.history = [record('mine'), record('from the other session')]
+  data.config = { ...MINE, cacheTtlMinutes: 5 }
+  for (const text of ['this session', 'next']) {
+    await submit($, text)
+    await $.turn.start({ text, turnId: text })
+    await step($, text)
+  }
+  expect((data.history as Array<{ text: string }>).map(r => r.text)).toEqual(['mine', 'from the other session', 'this session'])
+  await route($, 'guard warn')
+  expect(data.config).toMatchObject({ cacheTtlMinutes: 5, coldGuard: 'warn' })
+  await route($, 'stats text off')
+  expect((data.history as Array<{ text: string }>).every(r => r.text === '')).toBe(true)
+})
+
+test('a failed store read never saves over what is stored', async ($, on) => {
+  const custom = { ...MINE, coldGuard: 'warn' }
+  const data: Record<string, unknown> = { config: custom, history: [record('kept')] }
+  const unreadable = new Set(['config', 'history'])
+  sharedStore(on, data, unreadable)
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  on('ui.log', () => ({ value: undefined }) as never)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  for (const text of ['a', 'b']) {
+    await submit($, text)
+    await $.turn.start({ text, turnId: text })
+    await step($, text)
+  }
+  await route($, 'set main haiku low')
+  expect(data).toEqual({ config: custom, history: [record('kept')] })
+})
+
+test('Apply keeps an on/off change made while the draft was open', async ($, on) => {
+  mock.store(on, { config: MINE })
+  guardSession(on, { context: 100_000, usage: usageOf(100_000) })
+  on('session.model', () => ({ value: opus }))
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const ui = await mountPane($, 'route')
+  await ui.select({ key: 'm:main', value: 'sonnet' })
+  await route($, 'off')
+  await ui.press({ key: 'apply' })
+  expect(await ui.find({ type: 'Text', text: '○ off' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a /route change reports success even when the status refresh fails', async ($, on) => {
+  mock.store(on, { config: MINE })
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('session.usage', () => {
+    throw new Error('no usage')
+  })
+  const sent: Sent[] = []
+  on('turn.step', async function* (_$, e) {
+    sent.push({ model: e.model, effort: e.effort })
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: usageOf(1000) }
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await step($, 'a')
+  expect((await route($, 'set main sonnet low')).text).toBe('main → sonnet · low.')
+  await step($, 'b')
+  expect(sent.map(one => one.model)).toEqual([opus, sonnet])
+})
+
+test('agents not seen at spawn are routed from the agent list, and looked up once', async ($, on) => {
+  mock.store(on, { config: { ...MINE, routes: { ...MINE.routes, 'sub:Explore': { model: 'haiku', effort: 'low' }, teammate: { model: 'opus', effort: 'high' } } } })
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  let lists = 0
+  on('agent.list', () => {
+    lists += 1
+    return { value: [{ id: 'ex', type: 'Explore' }, { id: 'tm', type: 'general-purpose', teammateId: 't1' }, { id: 'fk', type: FORK }] } as never
+  })
+  const sent: Sent[] = []
+  bottomStep(on, sent)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  for (const id of ['ex', 'ex', 'tm', 'fk']) await step($, 's', id)
+  expect(sent.map(one => one.model)).toEqual([haiku, haiku, opus, sonnet])
+  expect(lists).toBe(3)
+})
+
+test('slash commands that reach the model are guarded once learned or from a prompt-only source', async ($, on) => {
+  const data: Record<string, unknown> = { config: MINE }
+  sharedStore(on, data)
+  const clock = mock.clock(on, { now: T0 })
+  guardSession(on, { context: 200_000, usage: usageOf(200_000) })
+  on('command.list', () => ({ value: [{ name: 'help', description: '', source: 'builtin' }, { name: 'mcp-prompt', description: '', source: 'mcp' }, { name: 'simplify', description: '', source: 'builtin' }] }) as never)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const command = (name: string) => $.command.run({ command: name, args: '', origin: { kind: 'composer' } } as unknown as Args<'command.run'>)
+
+  await command('simplify')
+  await $.turn.start({ text: 'simplify', turnId: 'warm' })
+  await step($, 'warm')
+  expect(data.modelCommands).toEqual(['simplify'])
+  await command('help')
+  await submit($, 'a plain prompt')
+  await $.turn.start({ text: 'a plain prompt', turnId: 'plain' })
+  expect(data.modelCommands).toEqual(['simplify'])
+
+  await clock.advance(61 * 60_000)
+  expect((await command('help')).text).toBe('engine')
+  expect((await command('simplify')).text).toMatch(/^model-router: the prompt cache went cold .* Run \/simplify again to pay it/)
+  expect((await command('simplify')).text).toBe('engine')
+})
+
+test('a prompt-only command is guarded on its first cold run', async ($, on) => {
+  mock.store(on, { config: MINE })
+  const clock = mock.clock(on, { now: T0 })
+  guardSession(on, { context: 200_000, usage: usageOf(200_000) })
+  on('command.list', () => ({ value: [{ name: 'mcp-prompt', description: '', source: 'mcp' }] }) as never)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await step($, 'a')
+  await clock.advance(61 * 60_000)
+  const command = (kind: string) => $.command.run({ command: 'mcp-prompt', args: '', origin: { kind } } as unknown as Args<'command.run'>)
+  expect((await command('task-notification')).text).toBe('engine')
+  expect((await command('composer')).text).toMatch(/Run \/mcp-prompt again/)
+})
+
+test('a background agent that outlives its prompt is charged to that prompt', async ($, on) => {
+  const data: Record<string, unknown> = { config: MINE }
+  sharedStore(on, data)
+  const clock = mock.clock(on, { now: T0 })
+  guardSession(on, { context: 1000, usage: { ...usageOf(0), input_tokens: 1_000_000 } })
+  on('agent.spawn', (_$, e) => ({ model: e.model ?? opus, agentId: 'bg' }))
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const prompt = async (text: string) => {
+    await submit($, text)
+    await $.turn.start({ text, turnId: text })
+  }
+
+  await prompt('start a background agent')
+  await step($, 'start a background agent')
+  await $.agent.spawn({ tool_use_id: 'tu', prompt: 'p', description: 'd', subagentType: 'Explore', provider: { plugin: 'engine', tier: 'core' }, parentModel: opus, background: true, fork: false } as Args<'agent.spawn'>)
+  await clock.advance(60_000)
+  await prompt('next')
+  await step($, 'bg-1', 'bg')
+  await step($, 'bg-2', 'bg')
+
+  const [first] = data.history as Array<{ text: string; usd: number; requests: number }>
+  expect([first!.text, first!.usd, first!.requests]).toEqual(['start a background agent', 12, 3])
+  const last = await mountPane($, 'last')
+  expect(await last.find({ type: 'Text', text: 'No requests in this prompt yet.' })).toBeDefined()
+  await last.unmount()
+})
+
+test('an agent no list names is left on its model, even while a workflow spawn is pending', async ($, on) => {
+  mock.store(on, { config: { ...MINE, routes: { ...MINE.routes, workflow: { model: 'haiku', effort: 'low' } } } })
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('agent.list', () => ({ value: [] }) as never)
+  const sent: Sent[] = []
+  bottomStep(on, sent)
+  on('agent.spawn', async (_$, e) => {
+    await step($, 'compaction', 'engine-fork')
+    return { model: e.model ?? opus, agentId: 'wf-1' }
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await $.agent.spawn({ tool_use_id: 'tu', prompt: 'p', description: 'd', subagentType: 'general-purpose', provider: { plugin: 'engine', tier: 'core' }, parentModel: opus, background: false, fork: false, workflow: { runId: 'wf_1', agentIndex: 1 } } as Args<'agent.spawn'>)
+  await step($, 'w', 'wf-1')
+  expect(sent.map(one => [one.agentId, one.model])).toEqual([['engine-fork', sonnet], ['wf-1', haiku]])
 })

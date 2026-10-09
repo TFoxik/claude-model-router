@@ -49,7 +49,10 @@ export const ROUTES: readonly RouteRow[] = [
 /** The main loop's routes: only these carry a cache across turns, so only they take `auto`. */
 export const isLoopRoute = (route: string) => route === 'main' || route === 'plan'
 
-export const routeLabel = (route: string) => ROUTES.find(one => one.key === route)?.label ?? route
+/** Where the steps of agents the router can't place are counted: a workflow's before its spawn settles, the engine's own forks. */
+export const ENGINE = 'engine'
+
+export const routeLabel = (route: string) => ROUTES.find(one => one.key === route)?.label ?? (route === ENGINE ? 'Engine (forks, workflows)' : route)
 
 /** A route `/route set` may write: a known one, or `sub:<agent-type>`. */
 export const isRouteKey = (route: string) => ROUTES.some(one => one.key === route) || /^sub:[\w.:-]{1,64}$/.test(route)
@@ -340,6 +343,13 @@ export function addStep(p: PromptCost, s: StepFacts): PromptCost {
 
 /** A subagent's item is keyed by its agent id; the main loop's by its route. */
 export const isSub = (item: PromptItem) => item.id !== item.route
+
+/** A saved prompt with one more request from a subagent it started that outlived it. */
+export function addLateStep(r: PromptRecord, s: { usage: Usage & { model: string }; effort?: Effort; ttlMinutes: number }): PromptRecord {
+  const usd = costOf(s.usage, s.usage.model, s.ttlMinutes)
+  const key = routeText(s.usage.model, s.effort)
+  return { ...r, usd: r.usd + usd, requests: r.requests + 1, models: { ...r.models, [key]: (r.models?.[key] ?? 0) + usd } }
+}
 
 export const subagentCount = (p: PromptCost) => p.items.filter(isSub).length
 
