@@ -9,8 +9,10 @@ export type RouterConfig = {
   routes: Record<string, RouteSetting>
   cacheTtlMinutes: number
   coldGuard: ColdGuard
+  keepPromptText: boolean
 }
 export type ColdGuard = 'refuse' | 'warn' | 'off'
+export type Scope = 'repo' | 'all'
 export type Rewrite = { cause: 'cold' | 'switch'; tokens: number; usd: number }
 export type RouteSpend = {
   requests: number
@@ -70,7 +72,7 @@ declare module 'claude-code' {
       health: Health | null
       promptCost: PromptCost | null
       history: PromptRecord[]
-      statsScope: 'repo' | 'all'
+      statsScope: Scope
     }
   }
 }

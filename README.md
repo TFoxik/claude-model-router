@@ -14,6 +14,19 @@ At the prompt of a terminal Claude Code session:
 
 Answer `y` to add the marketplace, then choose a scope (user scope loads it in every session).
 
+From a shell instead:
+
+```
+claude plugin marketplace add TFoxik/claude-model-router
+claude plugin install model-router@claude-model-router
+```
+
+To update, run `claude plugin marketplace update claude-model-router`, then `claude plugin update model-router@claude-model-router`, and restart Claude Code or run `/reload-plugins`. Saved settings carry over.
+
+A fresh install starts on the `inherit` preset, which changes no model. Run `/route preset mine` (or pick one in `/route`) to start routing.
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
+
 ## What you get
 
 - **Band above the prompt**, two rows:
@@ -35,7 +48,8 @@ Answer `y` to add the marketplace, then choose a scope (user scope loads it in e
 | `/route` | Open the pane |
 | `/route stats` / `context` / `last` | Open the Stats, Context or Last prompt cost pane (handy in the terminal) |
 | `/route stats clear` | Delete the saved prompt history |
-| `/route preset mine\|balanced\|frugal\|max` | Apply a preset |
+| `/route stats text on\|off` | Keep the first 120 characters of each prompt in Stats (default on); `off` also removes text already kept |
+| `/route preset inherit\|mine\|balanced\|frugal\|max` | Apply a preset (`inherit` changes no model, it only tracks) |
 | `/route set <route> <model> [effort]` | Set one route now, for example `/route set sub:Explore haiku low` |
 | `/route on` / `/route off` | Enable or disable routing |
 | `/route band on\|off` | Show or hide the band |
@@ -55,11 +69,11 @@ Models: `opus`, `sonnet`, `haiku`, `fable`, `inherit`. Efforts: `low` through `m
 
 ## What it sees and keeps
 
-- **Enabled on install**, with the `mine` preset: it sets the model and effort of every main-loop request and every subagent it can route. `/route off` stops that.
+- **Changes no model on install**: the default `inherit` preset only tracks costs, draws the band and guards cold sends. Pick a preset (`/route preset mine`) or set routes to start routing. An install from before this default that never saved its settings keeps routing as `mine`; saved settings always carry over on update.
 - **Model IDs are the Anthropic API's** (`claude-opus-5-5` and so on). On a provider that names models differently, turn routing off or set routes to `inherit`.
-- **Prompt history** (Stats) is saved in this plugin's store, across all repos: per prompt, the first 120 characters of its text, the repo name, its label (`/simplify`, `prompt`), cost and models. The last 2,000 prompts are kept; `/route stats clear` deletes them. Nothing leaves your machine.
+- **Prompt history** (Stats) is saved in this plugin's store, across all repos: per prompt, the first 120 characters of its text (`/route stats text off` stops that), the repo name, its label (`/simplify`, `prompt`), cost and models. The last 2,000 prompts are kept; `/route stats clear` deletes them. Nothing leaves your machine.
 - **`auto` effort** sends the first 4,000 characters of each prompt to Haiku to classify it (trivial, standard, hard). That is an extra model request on your account; presets `balanced` and `frugal` use it.
-- **Route changes** (`/route set`, `preset`, `on`/`off`, `guard`, `ttl`, `stats clear`) only run when you type them, not from a peer session, channel or trigger. Opening a pane works from anywhere.
+- **Route changes** (`/route set`, `preset`, `on`/`off`, `guard`, `ttl`, `stats clear`, `stats text`) only run when you type them, not from a peer session, channel or trigger. Opening a pane works from anywhere.
 - No network, file or process access of its own.
 
 ## Develop

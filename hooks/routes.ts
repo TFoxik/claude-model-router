@@ -59,6 +59,10 @@ export const FORK = 'fork'
 const r = (model: RouteSetting['model'], effort: RouteEffort): RouteSetting => ({ model, effort })
 
 export const PRESETS: Record<string, { label: string; routes: Record<string, RouteSetting> }> = {
+  inherit: {
+    label: 'Inherit (track only)',
+    routes: {},
+  },
   mine: {
     label: 'Mine',
     routes: {
@@ -99,15 +103,40 @@ export const PRESETS: Record<string, { label: string; routes: Record<string, Rou
   },
 }
 
+/** A fresh install changes no model until a preset is picked; costs, the band and the guard still work. */
 export const DEFAULT_CONFIG: RouterConfig = {
   isEnabled: true,
-  preset: 'mine',
-  routes: PRESETS.mine!.routes,
+  preset: 'inherit',
+  routes: {},
   cacheTtlMinutes: 60,
   coldGuard: 'refuse',
+  keepPromptText: true,
+}
+
+/**
+ * The config to start from when the store holds none. An install that already
+ * kept history predates the inherit default and never saved a config, so it
+ * keeps the routing it ran with: the `mine` preset.
+ */
+export function startingConfig(stored: unknown, hasHistory: boolean): RouterConfig {
+  if (stored !== undefined) return sanitizeConfig(stored)
+  return hasHistory ? withPreset(DEFAULT_CONFIG, 'mine')! : DEFAULT_CONFIG
 }
 
 export const presetOf = (name: string) => (Object.hasOwn(PRESETS, name) ? PRESETS[name] : undefined)
+
+/** The config with a preset's routes; undefined for a name that is not a preset. */
+export function withPreset(config: RouterConfig, name: string): RouterConfig | undefined {
+  const preset = presetOf(name)
+  return preset && { ...config, preset: name, routes: { ...preset.routes } }
+}
+
+/** The config with one route set, which makes it a custom preset. */
+export const withRoute = (config: RouterConfig, route: string, setting: RouteSetting): RouterConfig => ({
+  ...config,
+  preset: 'custom',
+  routes: { ...config.routes, [route]: setting },
+})
 
 const isModel = (m: unknown): m is RouteSetting['model'] => m === 'inherit' || (typeof m === 'string' && Object.hasOwn(MODELS, m))
 const isEffort = (e: unknown): e is RouteEffort =>
@@ -131,9 +160,10 @@ export function sanitizeConfig(stored: unknown): RouterConfig {
   return {
     isEnabled: typeof s.isEnabled === 'boolean' ? s.isEnabled : DEFAULT_CONFIG.isEnabled,
     preset: typeof s.preset === 'string' ? s.preset : DEFAULT_CONFIG.preset,
-    routes: Object.keys(routes).length > 0 ? routes : DEFAULT_CONFIG.routes,
+    routes,
     cacheTtlMinutes: s.cacheTtlMinutes === 5 || s.cacheTtlMinutes === 60 ? s.cacheTtlMinutes : DEFAULT_CONFIG.cacheTtlMinutes,
     coldGuard: GUARDS.includes(s.coldGuard as ColdGuard) ? (s.coldGuard as ColdGuard) : DEFAULT_CONFIG.coldGuard,
+    keepPromptText: typeof s.keepPromptText === 'boolean' ? s.keepPromptText : DEFAULT_CONFIG.keepPromptText,
   }
 }
 
@@ -308,7 +338,10 @@ export function addStep(p: PromptCost, s: StepFacts): PromptCost {
   }
 }
 
-export const subagentCount = (p: PromptCost) => p.items.filter(one => one.id !== one.route).length
+/** A subagent's item is keyed by its agent id; the main loop's by its route. */
+export const isSub = (item: PromptItem) => item.id !== item.route
+
+export const subagentCount = (p: PromptCost) => p.items.filter(isSub).length
 
 export function modelsOf(p: PromptCost): Record<string, number> {
   const out: Record<string, number> = {}
@@ -398,6 +431,20 @@ export function sameDay(a: number, b: number): boolean {
   return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate()
 }
 
+/** The history without prompt text, for when it should not be kept. */
+export const withoutText = (records: readonly PromptRecord[]): PromptRecord[] => records.map(r => ({ ...r, text: '' }))
+
+/** What the Stats pane shows for a set of records. */
+export function statsSummary(records: readonly PromptRecord[], now: number) {
+  return {
+    today: todayUsd(records, now),
+    week: sumUsd(records.filter(r => now - r.at < 7 * 86_400_000)),
+    rewrites: records.flatMap(r => r.rewrites ?? []),
+    commands: commandStats(records).slice(0, 10),
+    priciest: [...records].sort((x, y) => y.usd - x.usd).slice(0, 8),
+  }
+}
+
 /** Today's spend; records are kept in time order, so only today's tail is read. */
 export function todayUsd(records: readonly PromptRecord[], now: number): number {
   let usd = 0
@@ -428,6 +475,8 @@ export function modelMix(models: Record<string, number> | undefined, format: (us
     .map(([model, usd]) => `${model} ${format(usd)}`)
     .join(' · ')
 }
+
+export const kTokens = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n))
 
 export function money(usd: number): string {
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`
@@ -471,7 +520,7 @@ const same = (a: Resolved, b: Resolved) => a.model === b.model && a.effort === b
 export function estimateChanges(
   current: RouterConfig,
   next: RouterConfig,
-  facts: { contextTokens: number; liveRoute: 'main' | 'plan'; sessionModel: string; ttlMinutes: number },
+  facts: DraftFacts,
 ): ChangeRow[] {
   const rows: ChangeRow[] = []
   for (const { key } of ROUTES) {
@@ -488,6 +537,19 @@ export function estimateChanges(
     })
   }
   return rows
+}
+
+type DraftFacts = { contextTokens: number; liveRoute: 'main' | 'plan'; sessionModel: string; ttlMinutes: number }
+
+/** What applying `pending` would cost: per-route changes, the cache rewrite now, the plan toggle before and after, and the payback in turns. */
+export function draftSummary(current: RouterConfig, pending: RouterConfig | null, facts: DraftFacts) {
+  const changes = pending ? estimateChanges(current, pending, facts) : []
+  const upFront = changes.reduce((sum, one) => sum + one.switchCost, 0)
+  const toggleNow = modeSwitchCost(current, facts.contextTokens, facts.sessionModel)
+  const toggleAfter = pending ? modeSwitchCost(pending, facts.contextTokens, facts.sessionModel) : toggleNow
+  const livePerTurn = changes.filter(one => one.route === facts.liveRoute).reduce((sum, one) => sum + one.perTurnDelta, 0)
+  const payback = upFront > 0 && livePerTurn < 0 ? Math.ceil(upFront / -livePerTurn) : undefined
+  return { changes, upFront, toggleNow, toggleAfter, payback }
 }
 
 /** Each plan-mode toggle rewrites the cache when plan and main differ. */

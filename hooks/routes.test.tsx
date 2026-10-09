@@ -19,7 +19,9 @@ import {
   printable,
   sanitizeConfig,
   sanitizeHistory,
+  startingConfig,
   todayUsd,
+  withPreset,
   fmtAge,
   rewriteCause,
   rewriteOf,
@@ -34,6 +36,11 @@ import {
 const opus = MODELS.opus.id
 const sonnet = MODELS.sonnet.id
 const haiku = MODELS.haiku.id
+const MINE = withPreset(DEFAULT_CONFIG, 'mine')!
+const PANE_IDS = { route: 'model-router', last: 'model-router-last', context: 'model-router-ctx', stats: 'model-router-stats' } as const
+const mountPane = ($: Engine, pane: keyof typeof PANE_IDS, surface: 'terminal' | 'desktop' = 'terminal') =>
+  $.ui.mount({ plugin: 'model-router', surface, component: 'Pane', requestId: PANE_IDS[pane], props: {} as never })
+const useMine = ($: Engine) => $.command.run({ command: 'route', args: 'preset mine', origin: { kind: 'composer' } } as unknown as Args<'command.run'>)
 
 test('plan falls back to main, sub:<type> to sub:*', () => {
   const config = { ...DEFAULT_CONFIG, routes: { main: { model: 'opus', effort: 'medium' }, 'sub:*': { model: 'sonnet', effort: 'high' } } } as const
@@ -44,10 +51,15 @@ test('plan falls back to main, sub:<type> to sub:*', () => {
   expect(resolve(cfg, 'workflow')).toEqual({ model: sonnet, effort: 'high' })
 })
 
-test('the default preset is the requested split', () => {
-  expect(resolve(DEFAULT_CONFIG, 'main')).toEqual({ model: opus, effort: 'medium' })
-  expect(resolve(DEFAULT_CONFIG, 'plan')).toEqual({ model: opus, effort: 'high' })
-  expect(resolve(DEFAULT_CONFIG, 'sub:general-purpose')).toEqual({ model: sonnet, effort: 'high' })
+test('a fresh install inherits everything; an install with history keeps mine', () => {
+  expect(resolve(DEFAULT_CONFIG, 'main')).toEqual({ model: undefined, effort: undefined })
+  expect(resolve(DEFAULT_CONFIG, 'sub:Explore')).toEqual({ model: undefined, effort: undefined })
+  expect(startingConfig(undefined, false)).toBe(DEFAULT_CONFIG)
+  expect(startingConfig(undefined, true)).toEqual(MINE)
+  expect(startingConfig({ routes: { main: { model: 'haiku', effort: 'low' } } }, true).routes).toEqual({ main: { model: 'haiku', effort: 'low' } })
+  expect(resolve(MINE, 'main')).toEqual({ model: opus, effort: 'medium' })
+  expect(resolve(MINE, 'plan')).toEqual({ model: opus, effort: 'high' })
+  expect(resolve(MINE, 'sub:general-purpose')).toEqual({ model: sonnet, effort: 'high' })
 })
 
 test('a route left inherit everywhere changes nothing, and forks are never routed', () => {
@@ -129,6 +141,7 @@ test('main and plan turns get their own model and effort', async ($, on) => {
   const sent: Sent[] = []
   bottomStep(on, sent)
   on('prompt.attachment', (_$, e) => ({ text: e.text }))
+  await useMine($)
 
   await step($, 't1')
   await attach($, 'plan_mode')
@@ -165,6 +178,7 @@ test('subagents are routed by type at spawn and at every step', async ($, on) =>
       fork,
     } as Args<'agent.spawn'>)
 
+  await useMine($)
   await spawn('Explore')
   await spawn('fork', true)
   await step($, 's1', 'a-1')
@@ -211,7 +225,7 @@ test('the pane draws on terminal and desktop', async ($, on) => {
 })
 
 test('the band above the prompt draws and hides', async ($, on) => {
-  mock.store(on, { bandShown: true })
+  mock.store(on, { bandShown: true, config: MINE })
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('ui.render', { component: 'AbovePrompt' }, ($, e) => { const { Text } = $.ui.resolve(e); return <Text key="engine-band">engine</Text> })
@@ -231,8 +245,8 @@ test('the band above the prompt draws and hides', async ($, on) => {
 })
 
 test('estimates: only the live main-loop route pays a cache rewrite up front', () => {
-  const next = { ...DEFAULT_CONFIG, routes: { ...DEFAULT_CONFIG.routes, main: { model: 'sonnet', effort: 'low' }, 'sub:*': { model: 'haiku', effort: 'low' } } } as typeof DEFAULT_CONFIG
-  const rows = estimateChanges(DEFAULT_CONFIG, next, { contextTokens: 100_000, liveRoute: 'main', sessionModel: opus, ttlMinutes: 60 })
+  const next = { ...MINE, routes: { ...MINE.routes, main: { model: 'sonnet', effort: 'low' }, 'sub:*': { model: 'haiku', effort: 'low' } } } as typeof MINE
+  const rows = estimateChanges(MINE, next, { contextTokens: 100_000, liveRoute: 'main', sessionModel: opus, ttlMinutes: 60 })
   const main = rows.find(one => one.route === 'main')!
   const sub = rows.find(one => one.route === 'sub:*')!
   expect(Math.abs(main.switchCost - 0.38)).toBeLessThan(1e-9)
@@ -240,8 +254,8 @@ test('estimates: only the live main-loop route pays a cache rewrite up front', (
   expect(sub.switchCost).toBe(0)
   expect(sub.perTurnDelta).toBeLessThan(0)
   expect(rows.some(one => one.route === 'plan')).toBe(false)
-  expect(Math.abs(modeSwitchCost(DEFAULT_CONFIG, 100_000, opus) - 0.78)).toBeLessThan(1e-9)
-  expect(Math.abs(modeSwitchCost({ ...DEFAULT_CONFIG, cacheTtlMinutes: 5 }, 100_000, opus) - 0.48)).toBeLessThan(1e-9)
+  expect(Math.abs(modeSwitchCost(MINE, 100_000, opus) - 0.78)).toBeLessThan(1e-9)
+  expect(Math.abs(modeSwitchCost({ ...MINE, cacheTtlMinutes: 5 }, 100_000, opus) - 0.48)).toBeLessThan(1e-9)
 })
 
 test('pane edits stay a draft until Apply', async ($, on) => {
@@ -250,7 +264,8 @@ test('pane edits stay a draft until Apply', async ($, on) => {
   on('session.model', () => ({ value: opus }))
   const sent: Sent[] = []
   bottomStep(on, sent)
-  const ui = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'Pane', requestId: 'model-router', props: {} as never })
+  await useMine($)
+  const ui = await mountPane($, 'route')
   await ui.select({ key: 'm:main', value: 'sonnet' })
   expect(await ui.find({ key: 'apply' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^cache .* now$/ })).toBeDefined()
@@ -329,7 +344,7 @@ test('last is the whole prompt: main steps and its subagents, reset on the next 
   await step($, 's1', 'sub-1')
   await step($, 'p1')
   expect((await ui.find({ key: 'last-cost' }))?.text).toBe('last $0.02')
-  const breakdown = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'Pane', requestId: 'model-router-last', props: {} as never })
+  const breakdown = await mountPane($, 'last')
   expect(await breakdown.find({ type: 'Text', text: '2 requests · main $0.0080 · 1 subagent $0.0080' })).toBeUndefined()
   expect(await breakdown.find({ type: 'Text', text: '4 requests · main $0.0080 · 1 subagent $0.0080' })).toBeDefined()
   expect(await breakdown.find({ type: 'Text', text: 'Main loop' })).toBeDefined()
@@ -413,7 +428,7 @@ test('commands are labelled and ranked by average cost', () => {
 })
 
 test('finished prompts are saved across sessions and shown in Stats', async ($, on) => {
-  mock.store(on)
+  mock.store(on, { config: MINE })
   const usage = { model: opus, input_tokens: 250_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 0 }
   on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 1000, window: 1_000_000, percent: 0 }, rateLimits: [] } }))
   on('session.repo', () => ({ value: { root: '/x/my-app', remote: null, internal: true, name: 'my-app' } as never }))
@@ -434,7 +449,7 @@ test('finished prompts are saved across sessions and shown in Stats', async ($, 
   await $.prompt.submit({ text: 'fix typo', origin: { kind: 'composer' } } as Args<'prompt.submit'>)
   await $.turn.start({ text: 'fix typo', turnId: 'b' })
 
-  const ui = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'Pane', requestId: 'model-router-stats', props: {} as never })
+  const ui = await mountPane($, 'stats')
   expect(await ui.find({ type: 'Text', text: 'Stats · my-app' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '/simplify' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /1 run · total \$1\.00/ })).toBeDefined()
@@ -519,7 +534,7 @@ test('the guard skips small contexts, and can warn or be switched off', async ($
 })
 
 test('cache rewrites are tallied by cause and shown in Last and Stats', async ($, on) => {
-  mock.store(on, { config: { ...DEFAULT_CONFIG, coldGuard: 'off' } })
+  mock.store(on, { config: { ...MINE, coldGuard: 'off' } })
   const clock = mock.clock(on, { now: T0 })
   const warm = usageOf(100_000)
   const rebuilt = usageOf(0, 100_000)
@@ -538,7 +553,7 @@ test('cache rewrites are tallied by cause and shown in Last and Stats', async ($
   await prompt('a', warm)
   await clock.advance(61 * 60_000)
   await prompt('cold', rebuilt)
-  const last = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'Pane', requestId: 'model-router-last', props: {} as never })
+  const last = await mountPane($, 'last')
   expect(await last.find({ type: 'Text', text: 'includes a cold cache rewrite of 100k tokens, $0.78' })).toBeDefined()
   await last.unmount()
 
@@ -551,7 +566,7 @@ test('cache rewrites are tallied by cause and shown in Last and Stats', async ($
   await prompt('after-compact', rebuilt)
   await prompt('done', warm)
 
-  const stats = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'Pane', requestId: 'model-router-stats', props: {} as never })
+  const stats = await mountPane($, 'stats')
   expect(await stats.find({ type: 'Text', text: / · 2 cache rewrites \$1\.56/ })).toBeDefined()
   expect(await stats.find({ type: 'Text', text: / · route switch rewrite of 100k tokens, \$0\.78/ })).toBeDefined()
   await stats.unmount()
@@ -606,7 +621,7 @@ test('only a person can change routes; anyone can open a pane; stats clear empti
   const run = (args: string, kind: string) => $.command.run({ command: 'route', args, origin: { kind } } as unknown as Args<'command.run'>)
   expect((await run('off', 'peer')).text).toMatch(/only runs when you type it/)
   expect((await run('stats', 'peer')).text).toBe('Stats pane opened.')
-  const mountStats = () => $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'Pane', requestId: 'model-router-stats', props: {} as never })
+  const mountStats = () => mountPane($, 'stats')
   const before = await mountStats()
   expect(await before.find({ type: 'Text', text: / · 1 prompt$/ })).toBeDefined()
   await before.unmount()
@@ -614,4 +629,47 @@ test('only a person can change routes; anyone can open a pane; stats clear empti
   const after = await mountStats()
   expect(await after.find({ type: 'Text', text: 'Nothing recorded yet.' })).toBeDefined()
   await after.unmount()
+})
+
+test('prompt text can be switched off, which also blanks what was kept', async ($, on) => {
+  const kept = { at: T0, repo: 'unknown', label: 'prompt', text: 'secret plan', usd: 1, requests: 1, agents: 0 }
+  mock.store(on, { history: [kept] })
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  expect((await route($, 'stats text off')).text).toMatch(/saved prompt text was removed/)
+  for (const text of ['another secret', 'next']) {
+    await submit($, text)
+    await $.turn.start({ text, turnId: text })
+    await step($, text)
+  }
+  const stats = await mountPane($, 'stats')
+  expect(await stats.find({ type: 'Text', text: / · 3 prompts$/ })).toBeDefined()
+  expect(await stats.find({ type: 'Text', text: /secret/ })).toBeUndefined()
+  await stats.unmount()
+})
+
+test('an install with history but no saved config keeps routing as mine', async ($, on) => {
+  mock.store(on, { history: [{ at: T0, repo: 'r', label: 'prompt', text: '', usd: 1, requests: 1, agents: 0 }] })
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  const sent: Sent[] = []
+  bottomStep(on, sent)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await step($, 'a')
+  expect(sent.map(one => [one.model, one.effort])).toEqual([[opus, 'medium']])
+})
+
+test('Apply takes only the routing from the draft', async ($, on) => {
+  mock.store(on, { config: MINE })
+  guardSession(on, { context: 100_000, usage: usageOf(100_000) })
+  on('session.model', () => ({ value: opus }))
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const ui = await mountPane($, 'route')
+  await ui.select({ key: 'm:main', value: 'sonnet' })
+  await route($, 'ttl 5')
+  await ui.press({ key: 'apply' })
+  expect(await ui.find({ key: 'apply' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /5-minute/ })).toBeDefined()
+  expect(await ui.find({ key: 'm:main' })).toMatchObject({ props: { value: 'sonnet' } })
+  await ui.unmount()
 })
