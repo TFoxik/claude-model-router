@@ -2,6 +2,6 @@
   "name": "model-router",
   "version": "0.4.0",
   "author": { "name": "liska" },
-  "description": "Pick model and effort per kind of work (main, plan mode, each subagent type), with a cache-aware auto mode and per-route cost",
+  "description": "Model and effort routing per kind of work, with prompt-cache and cost tracking, a cold-cache guard, and an optional learn mode that explains what each choice cost",
   "types": "./types/index.d.ts"
 }

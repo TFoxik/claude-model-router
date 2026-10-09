@@ -1,6 +1,6 @@
 # model-router
 
-A Claude Code mod that picks the model and effort per kind of work: plan mode, normal work, and each subagent type. It includes a cache-aware auto mode and per-route cost tracking.
+A Claude Code mod that picks the model and effort per kind of work (plan mode, normal work, each subagent type) and shows what those choices cost. It tracks prompt-cache health and spend per route and per prompt, holds a send that would re-write a cold cache, and has an optional learn mode that explains cache misses and model costs with your own numbers.
 
 ![Two-row band above the prompt and today's spend below it](docs/band-and-footer.svg)
 

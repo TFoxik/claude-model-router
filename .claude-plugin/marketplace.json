@@ -1,6 +1,6 @@
 {
   "name": "claude-model-router",
-  "description": "Per-work-type model and effort routing for Claude Code",
+  "description": "Model routing, prompt-cache and cost tracking, and cost coaching for Claude Code",
   "owner": {
     "name": "TFoxik"
   },
