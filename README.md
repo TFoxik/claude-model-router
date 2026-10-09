@@ -86,6 +86,16 @@ Models: `opus`, `sonnet`, `haiku`, `fable`, `inherit`. Efforts: `low` through `m
 - The guard prices a cold send from the band's clock, not a server check. It doesn't keep the cache warm while you're away; [cache-tax](https://github.com/karanb192/cache-tax) does that with idle pings. With both installed, two guards fire on every cold send, so run `/route guard off` to leave it to cache-tax.
 - Prices are hard-coded in `hooks/routes.ts` (as of 2026-10-06). Cache writes are priced by the `/route ttl` setting: 2× input for the 1-hour cache (default), 1.25× for the 5-minute one. The costs shown are estimates.
 
+## Overhead
+
+The mod adds almost nothing of its own; what moves your bill is the routing it does.
+
+- **Tokens**: it adds nothing to the model's context. No system prompt, no attachments; a message the cold-send guard holds is dropped, not sent. Toasts, the band and the panes stay in the UI. Text a `/route …` command prints (say the `/route away` table) can land in the transcript like any local command output.
+- **Its one model call**: with `auto` effort on the main or plan route (presets `balanced` and `frugal`), each prompt you type is classified by Haiku first: up to 4,000 characters, about 1k tokens, roughly $0.0001. With a fixed effort (`mine`, `max`, or any route set to `low` through `max`) there is no such call.
+- **What routing costs**: changing the main loop's model or effort rewrites the whole cache once, at 1.25-2× input over the full context. With plan and main routed differently, entering and leaving plan mode each pay that. `auto` effort holds a switch whose rewrite would cost more than it saves. Rerouting subagents costs nothing: they start with a fresh context.
+- **Latency**: each request reads in-memory state and may change the model or effort before it goes out, with no network call. Spend, history and band updates run after the response, so nothing waits on them. The Haiku classify of `auto` effort is the one real delay: one round trip, a few hundred milliseconds to a second, before the first request of each prompt you type.
+- **Background**: a 60-second timer refreshes the band, a detailed context breakdown is read at most every 10 minutes, and settings, history and lessons are saved to the plugin store when a prompt ends.
+
 ## What it sees and keeps
 
 - **Changes no model on install**: the default `inherit` preset only tracks costs, draws the band and guards cold sends. Pick a preset (`/route preset mine`) or set routes to start routing. An install from before this default that never saved its settings keeps routing as `mine`; saved settings always carry over on update.
