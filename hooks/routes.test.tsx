@@ -37,7 +37,7 @@ const opus = MODELS.opus.id
 const sonnet = MODELS.sonnet.id
 const haiku = MODELS.haiku.id
 const MINE = withPreset(DEFAULT_CONFIG, 'mine')!
-const PANE_IDS = { route: 'model-router', last: 'model-router-last', context: 'model-router-ctx', stats: 'model-router-stats' } as const
+const PANE_IDS = { route: 'model-router', last: 'model-router-last', context: 'model-router-ctx', stats: 'model-router-stats', learn: 'model-router-learn' } as const
 const mountPane = ($: Engine, pane: keyof typeof PANE_IDS, surface: 'terminal' | 'desktop' = 'terminal') =>
   $.ui.mount({ plugin: 'model-router', surface, component: 'Pane', requestId: PANE_IDS[pane], props: {} as never })
 const useMine = ($: Engine) => $.command.run({ command: 'route', args: 'preset mine', origin: { kind: 'composer' } } as unknown as Args<'command.run'>)
@@ -489,6 +489,7 @@ function guardSession(on: On, facts: { context: number; usage: StepUsage }) {
   on('command.run', () => ({ text: 'engine' }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('prompt.submit', (_$, e) => ({ text: e.text }))
   on('turn.step', async function* (_$, e) {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: facts.usage }
@@ -581,6 +582,7 @@ test('stored config is kept only where this version understands it', () => {
     routes: { main: { model: 'sonnet', effort: 'low' }, plan: { model: 'gpt', effort: 'low' }, 'sub:x': { model: 'haiku', effort: 'bogus' }, nope: { model: 'opus', effort: 'low' } },
     cacheTtlMinutes: 7,
     coldGuard: 'maybe',
+    isLearning: 'yes',
   })
   expect(cfg).toEqual({ ...DEFAULT_CONFIG, isEnabled: false, routes: { main: { model: 'sonnet', effort: 'low' } } })
   expect(sanitizeConfig({ routes: { main: { model: 'constructor', effort: 'low' } } }).routes).toEqual(DEFAULT_CONFIG.routes)
@@ -854,4 +856,113 @@ test('an agent no list names is left on its model, even while a workflow spawn i
   await $.agent.spawn({ tool_use_id: 'tu', prompt: 'p', description: 'd', subagentType: 'general-purpose', provider: { plugin: 'engine', tier: 'core' }, parentModel: opus, background: false, fork: false, workflow: { runId: 'wf_1', agentIndex: 1 } } as Args<'agent.spawn'>)
   await step($, 'w', 'wf-1')
   expect(sent.map(one => [one.agentId, one.model])).toEqual([['engine-fork', sonnet], ['wf-1', haiku]])
+})
+
+const complete = ($: Engine, turnId: string, agentId?: string) =>
+  $.turn.complete({ turnId, answer: '', durationMs: 1, isAborted: false, reason: 'answer', ...(agentId ? { agentId } : {}) } as unknown as Args<'turn.complete'>)
+
+/** A session with learn mode set as given, two prompts apart by more than the cache TTL, the second rebuilding the cache. */
+async function coldPrompts($: Engine, on: On, isLearning: boolean) {
+  mock.store(on, { config: { ...MINE, coldGuard: 'off', isLearning } })
+  const clock = mock.clock(on, { now: T0 })
+  const facts = { context: 100_000, usage: usageOf(100_000) }
+  guardSession(on, facts)
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined } as never
+  })
+  on('ui.open', () => ({ value: undefined }) as never)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const prompt = async (id: string, usage: StepUsage) => {
+    facts.usage = usage
+    await submit($, id)
+    await $.turn.start({ text: id, turnId: id })
+    await step($, id)
+    await complete($, id)
+  }
+  await prompt('a', usageOf(100_000))
+  await clock.advance(61 * 60_000)
+  return { toasts, prompt, clock, facts }
+}
+
+test('learn mode: a cold rewrite toasts once per turn, lands in the pane, and the band counts it until opened', async ($, on) => {
+  const { toasts, prompt } = await coldPrompts($, on, true)
+  await prompt('cold', usageOf(0, 100_000))
+  expect(toasts).toEqual([
+    'Cache went cold: The cache had expired after 1h01m idle, so this send re-wrote 100k tokens on Opus 5.5 for $0.80; read warm they would have cost $0.02. · /route learn',
+  ])
+  const band = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
+  expect(await band.find({ type: 'Button', text: 'Learn ●2' })).toBeDefined()
+  await band.press({ key: 'band-learn' })
+  await band.unmount()
+  const after = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
+  expect(await after.find({ type: 'Button', text: /^Learn/ })).toBeUndefined()
+  await after.unmount()
+  const pane = await mountPane($, 'learn')
+  expect(await pane.find({ type: 'Text', text: /re-wrote 100k tokens on Opus 5\.5 for \$0\.80/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /The same tokens on Sonnet 5\.5 would cost about \$0\.40/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('learn mode off: no lessons, no toast, and switching off drops pending ones', async ($, on) => {
+  const { toasts, prompt, clock } = await coldPrompts($, on, false)
+  await prompt('cold', usageOf(0, 100_000))
+  expect(toasts).toEqual([])
+  await route($, 'learn on')
+  await clock.advance(61 * 60_000)
+  await submit($, 'x')
+  await $.turn.start({ text: 'x', turnId: 'x' })
+  await step($, 'x')
+  await route($, 'learn off')
+  await complete($, 'x')
+  expect(toasts).toEqual([])
+  const pane = await mountPane($, 'learn')
+  expect(await pane.find({ type: 'Text', text: /^No lessons yet/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('a subagent turn ending does not flush the main loop lessons', async ($, on) => {
+  const { toasts, facts } = await coldPrompts($, on, true)
+  facts.usage = usageOf(0, 100_000)
+  await submit($, 'c')
+  await $.turn.start({ text: 'c', turnId: 'c' })
+  await step($, 'c')
+  await complete($, 's1', 'sub-1')
+  expect(toasts).toEqual([])
+  await complete($, 'c')
+  expect(toasts.length).toBe(1)
+})
+
+test('/route learn opens the pane from anywhere; on and off only when typed', async ($, on) => {
+  mock.store(on)
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  on('ui.open', () => ({ value: undefined }) as never)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const run = (args: string, kind: string) => $.command.run({ command: 'route', args, origin: { kind } } as unknown as Args<'command.run'>)
+  expect((await run('learn', 'peer')).text).toBe('Learn pane opened.')
+  expect((await run('learn on', 'peer')).text).toMatch(/only runs when you type it/)
+  expect((await run('learn on', 'composer')).text).toMatch(/^Learn mode on/)
+  expect((await run('learn off', 'composer')).text).toMatch(/^Learn mode off/)
+})
+
+test('a failed lessons read never saves over them', async ($, on) => {
+  const kept = [{ kind: 'cold-rewrite', at: T0, repo: 'r', fact: 'kept' }]
+  const data: Record<string, unknown> = { config: { ...MINE, coldGuard: 'off', isLearning: true }, lessons: kept }
+  sharedStore(on, data, new Set(['lessons']))
+  const clock = mock.clock(on, { now: T0 })
+  const facts = { context: 100_000, usage: usageOf(100_000) }
+  guardSession(on, facts)
+  on('ui.toast', () => ({ value: undefined }) as never)
+  on('ui.log', () => ({ value: undefined }) as never)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  for (const [id, usage] of [['a', usageOf(100_000)], ['cold', usageOf(0, 100_000)]] as const) {
+    if (id === 'cold') await clock.advance(61 * 60_000)
+    facts.usage = usage
+    await submit($, id)
+    await $.turn.start({ text: id, turnId: id })
+    await step($, id)
+    await complete($, id)
+  }
+  expect(data.lessons).toEqual(kept)
 })

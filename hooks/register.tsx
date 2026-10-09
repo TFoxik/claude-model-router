@@ -1,7 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, Register, Timer } from 'claude-code'
 
-import type { ActiveRoute, ColdGuard, Effort, Health, LastUsage, PromptCost, PromptRecord, RouteSpend, RouterConfig, Scope } from '../types'
+import type { ActiveRoute, ColdGuard, Effort, Health, LastUsage, Lesson, LessonKind, PromptCost, PromptRecord, RouteSpend, RouterConfig, Scope } from '../types'
+import { TOAST_MS, capLessons, lessonFromCompact, lessonFromContext, lessonFromRewrite, lessonsFromPrompt, pickToast, sanitizeLessons, toastText } from './lessons'
+import type { LessonDraft } from './lessons'
 import {
   AUTO_LABELS,
   DEFAULT_CONFIG,
@@ -68,12 +70,15 @@ const history = atom({ plugin: 'model-router', key: 'history' } as const, [] as 
 const statsScope = atom({ plugin: 'model-router', key: 'statsScope' } as const, 'repo' as 'repo' | 'all')
 const promptCost = atom({ plugin: 'model-router', key: 'promptCost' } as const, null as PromptCost | null)
 const isBandShown = atom({ plugin: 'model-router', key: 'isBandShown' } as const, true)
+const lessons = atom({ plugin: 'model-router', key: 'lessons' } as const, [] as Lesson[])
+const lessonsReadAt = atom({ plugin: 'model-router', key: 'lessonsReadAt' } as const, 0)
+const learnOpen = atom({ plugin: 'model-router', key: 'learnOpen' } as const, [] as LessonKind[])
 
 type $ = EngineInterface
 
 // The store keys the atoms kept across sessions are saved under. The engine's
 // scan needs each update() to name its atom, so callers update, then save().
-const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown', modelCommands: 'modelCommands' } as const
+const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown', modelCommands: 'modelCommands', lessons: 'lessons', lessonsReadAt: 'lessonsReadAt' } as const
 
 /** Saves a value kept across sessions; a failed save keeps the session going. */
 async function save<T>($: $, key: string, value: T): Promise<T> {
@@ -133,6 +138,38 @@ async function setHistory($: $, fn: (records: PromptRecord[]) => PromptRecord[])
   return next
 }
 
+async function setLessons($: $, fn: (all: Lesson[]) => Lesson[]): Promise<Lesson[]> {
+  const stored = await load($, STORE.lessons)
+  const next = await update($, lessons, all => fn(stored === UNREADABLE || stored === undefined ? all : sanitizeLessons(stored)))
+  if (stored !== UNREADABLE) await save($, STORE.lessons, next)
+  return next
+}
+
+/** Keeps what the finished main-loop turn taught, and toasts the one most worth it. */
+async function flushLessons($: $) {
+  const drafts = mem.pendingLessons
+  mem.pendingLessons = []
+  const cfg = await read($, config)
+  if (!cfg.isLearning) return
+  const p = await read($, promptCost)
+  const all: LessonDraft[] = [...drafts, ...(p === null ? [] : lessonsFromPrompt(p, cfg.cacheTtlMinutes))]
+  if (all.length === 0) return
+  const now = await nowOf($)
+  let toast: string | undefined
+  await setLessons($, earlier => {
+    const fresh: Lesson[] = all.map(d => ({ ...d, at: now, repo: mem.repo }))
+    const pick = pickToast(fresh, earlier, now)
+    toast = pick && toastText(pick, earlier)
+    return capLessons([...earlier, ...fresh.map(one => (one === pick ? { ...one, isToasted: true } : one))])
+  })
+  if (toast !== undefined) $.ui.toast(toast, { timeoutMs: TOAST_MS })
+}
+
+async function markLessonsRead($: $) {
+  const newest = Math.max(0, ...(await read($, lessons)).map(one => one.at))
+  await save($, STORE.lessonsReadAt, await update($, lessonsReadAt, () => newest))
+}
+
 const nowOf = ($: $) => $.clock.now().catch(() => Date.now())
 
 const mainRoute = async ($: $) => ((await read($, isPlan)) ? 'plan' : 'main')
@@ -171,6 +208,7 @@ async function refreshStatus($: $) {
   const now = await nowOf($)
   const cfg = await read($, config)
   const ttl = cfg.cacheTtlMinutes
+  const prevLevel = (await read($, health))?.ctxLevel
   const warmMinutes = Math.max(0, Math.ceil(-coldForMs(last.at, now, ttl) / 60_000))
   if (mem.compactCheckedAt === undefined || now - mem.compactCheckedAt > 10 * 60_000) {
     const { context: detailed } = await $.session.usage({ breakdown: 'summary' })
@@ -189,6 +227,10 @@ async function refreshStatus($: $) {
       : {}),
     ...(five ? { fiveHour: Math.round(five.percentUsed) } : {}),
     ...(seven ? { sevenDay: Math.round(seven.percentUsed) } : {}),
+  }
+  if (cfg.isLearning) {
+    const draft = lessonFromContext(prevLevel, next.ctxLevel, tokens, await routedMainModel($, cfg, last.model), ttl)
+    if (draft !== undefined) mem.pendingLessons.push(draft)
   }
   await update($, health, was => (JSON.stringify(was) === JSON.stringify(next) ? was : next))
 }
@@ -220,7 +262,17 @@ async function renderLastPane($: $, e: Args<'ui.render'>) {
   return lastPaneView($.ui.resolve(e), await read($, promptCost))
 }
 
-const openPane = ($: $): Open => pane => void $.ui.open(PANES[pane])
+const openPane = ($: $): Open => pane => {
+  if (pane === 'learn') void markLessonsRead($).catch(() => undefined)
+  void $.ui.open(PANES[pane])
+}
+
+async function renderLearnPane($: $, e: Args<'ui.render'>) {
+  const { Box, Text } = $.ui.resolve(e)
+  const all = await read($, lessons)
+  if (all.length === 0) return <Text dimColor>No lessons yet.</Text>
+  return <Box flexDirection="column">{all.map((one, i) => <Text key={`l:${i}`}>{one.fact}</Text>)}</Box>
+}
 
 /** Saved history plus the prompt still running, every repo; the Stats pane narrows it to one. */
 async function allRecords($: $): Promise<{ records: PromptRecord[]; now: number }> {
@@ -244,8 +296,17 @@ async function renderStatsPane($: $, e: Args<'ui.render'>) {
 const setBand = async ($: $, isShown: boolean) => save($, STORE.bandShown, await update($, isBandShown, () => isShown))
 
 async function renderBand($: $, e: Args<'ui.render'>) {
-  const [cfg, now, pending, costs, hp] = await Promise.all([read($, config), read($, active), read($, draft), read($, spend), read($, health)])
-  const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp }
+  const [cfg, now, pending, costs, hp, kept, readAt] = await Promise.all([
+    read($, config),
+    read($, active),
+    read($, draft),
+    read($, spend),
+    read($, health),
+    read($, lessons),
+    read($, lessonsReadAt),
+  ])
+  const learnUnread = cfg.isLearning ? kept.filter(one => one.at > readAt).length : 0
+  const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp, learnUnread }
   return bandView($.ui.resolve(e), data, { open: openPane($), hide: () => void setBand($, false) })
 }
 
@@ -292,10 +353,13 @@ const GUARD_TEXT: Record<ColdGuard, string> = {
   off: 'Cold-send guard off.',
 }
 
+const LEARN_ON_TEXT =
+  'Learn mode on: when a cache rewrite, a pricey model, a growing context or busy subagents cost you, a toast explains it with the numbers. /route learn lists them.'
+
 const asEffort = (effort: unknown): Effort | undefined =>
   typeof effort === 'string' ? (effort as Effort) : undefined
 
-const USAGE = '[stats [clear | text on|off] | context | last | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
+const USAGE = '[stats [clear | text on|off] | context | last | learn [on|off] | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
 
 // Origins a person typed or drove: only these may change the routes, and only these are held by the cold guard.
 const USER_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
@@ -321,6 +385,8 @@ const mem = {
   // Slash commands seen to start a model turn, and the command that ran last, until a turn shows whether it did.
   modelCommands: new Set<string>(),
   lastCommand: undefined as string | undefined,
+  // Lessons the running main-loop turn has taught so far; kept or dropped when it ends.
+  pendingLessons: [] as LessonDraft[],
 }
 
 async function routeOfAgent($: $, agentId: string): Promise<string | undefined> {
@@ -391,6 +457,16 @@ async function recordStep($: $, agentId: string | undefined, key: string, s: Ste
       ? rewriteCause({ isAfterCompact: s.isAfterCompact, prevAt: mem.lastMain?.at, now: stepAt, ttlMinutes: ttl, from: mem.lastMain, to: { model: s.model, effort: s.effort } })
       : undefined
     const rewrite = rewriteOf(usage, usage.model, cause, ttl)
+    if (isMain && rewrite !== undefined && s.cfg.isLearning) {
+      const draft = lessonFromRewrite(rewrite, {
+        model: usage.model,
+        ttlMinutes: ttl,
+        idleMs: mem.lastMain === undefined ? undefined : stepAt - mem.lastMain.at,
+        from: mem.lastMain,
+        to: { model: usage.model, effort: s.effort },
+      })
+      if (draft !== undefined) mem.pendingLessons.push(draft)
+    }
     await update($, spend, all => ({ ...all, [key]: addSpend(all[key] ?? EMPTY_SPEND, usage, usage.model, ttl) }))
     const promptAt = isMain ? undefined : mem.agents.get(agentId)?.promptAt
     if (promptAt !== undefined && promptAt !== mem.current?.at) {
@@ -419,13 +495,15 @@ async function recordStep($: $, agentId: string | undefined, key: string, s: Ste
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const [stored, saved, scope, band, learned, repo] = await Promise.all([
+    const [stored, saved, scope, band, learned, repo, storedLessons, readAt] = await Promise.all([
       load($, STORE.config),
       load($, STORE.history),
       load($, STORE.statsScope),
       load($, STORE.bandShown),
       load($, STORE.modelCommands),
       $.session.repo().catch(() => null),
+      load($, STORE.lessons),
+      load($, STORE.lessonsReadAt),
     ])
     if (Array.isArray(learned)) for (const one of learned) if (typeof one === 'string') mem.modelCommands.add(one)
     const kept = saved === UNREADABLE ? [] : sanitizeHistory(saved)
@@ -438,6 +516,8 @@ export const register: Register = on => {
       if (stored === undefined) await save($, STORE.config, cfg)
     }
     await update($, history, () => kept)
+    if (storedLessons !== UNREADABLE) await update($, lessons, () => sanitizeLessons(storedLessons))
+    if (typeof readAt === 'number') await update($, lessonsReadAt, () => readAt)
     if (scope === 'repo' || scope === 'all') await update($, statsScope, () => scope)
     if (typeof band === 'boolean') await update($, isBandShown, () => band)
     const root = repo?.root ?? (await $.session.root().catch(() => ''))
@@ -476,8 +556,12 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('session.compact', async ($, e, next) => {
+    const before = await read($, lastUsage)
     const done = await next(e)
-    if (e.agentId === undefined) mem.isAfterCompact = true
+    if (e.agentId === undefined) {
+      mem.isAfterCompact = true
+      if ((await read($, config)).isLearning) mem.pendingLessons.push(lessonFromCompact(before === null ? 0 : promptTokens(before)))
+    }
     return done
   }).catch(($, e, next) => next(e))
 
@@ -592,6 +676,12 @@ export const register: Register = on => {
     return result
   })
 
+  on('turn.complete', async ($, e, next) => {
+    const done = await next(e)
+    if (e.agentId === undefined) await flushLessons($).catch(() => undefined)
+    return done
+  }).catch(($, e, next) => next(e))
+
   on('command.run', { command: 'route' }, async ($, e) => {
     const [verb = 'route', ...rest] = e.args.trim().split(/\s+/).filter(Boolean)
     if (Object.hasOwn(PANES, verb) && rest.length === 0) {
@@ -600,6 +690,12 @@ export const register: Register = on => {
       return { text: `${PANES[pane].title} pane opened.` }
     }
     if (!USER_ORIGINS.has(e.origin.kind)) return { text: `model-router: /route ${verb} only runs when you type it.` }
+    if (verb === 'learn' && (rest[0] === 'on' || rest[0] === 'off')) {
+      const isOn = rest[0] === 'on'
+      await setConfig($, c => ({ ...c, isLearning: isOn }))
+      if (!isOn) mem.pendingLessons = []
+      return { text: isOn ? LEARN_ON_TEXT : 'Learn mode off. Lessons already kept stay in /route learn.' }
+    }
     if (verb === 'stats' && rest[0] === 'clear') {
       await setHistory($, () => [])
       return { text: 'Prompt history cleared.' }
@@ -658,6 +754,8 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANES.context.id }, ($, e) => renderCtxPane($, e))
 
   on('ui.render', { component: 'Pane', requestId: PANES.stats.id }, ($, e) => renderStatsPane($, e))
+
+  on('ui.render', { component: 'Pane', requestId: PANES.learn.id }, ($, e) => renderLearnPane($, e))
 
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     if (e.component !== 'SessionMode') return next(e)

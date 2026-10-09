@@ -10,6 +10,7 @@ export type RouterConfig = {
   cacheTtlMinutes: number
   coldGuard: ColdGuard
   keepPromptText: boolean
+  isLearning: boolean
 }
 export type ColdGuard = 'refuse' | 'warn' | 'off'
 export type Scope = 'repo' | 'all'
@@ -75,6 +76,9 @@ declare module 'claude-code' {
       promptCost: PromptCost | null
       history: PromptRecord[]
       statsScope: Scope
+      lessons: Lesson[]
+      lessonsReadAt: number
+      learnOpen: LessonKind[]
     }
   }
 }

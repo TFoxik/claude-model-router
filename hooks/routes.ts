@@ -114,6 +114,7 @@ export const DEFAULT_CONFIG: RouterConfig = {
   cacheTtlMinutes: 60,
   coldGuard: 'refuse',
   keepPromptText: true,
+  isLearning: false,
 }
 
 /**
@@ -167,6 +168,7 @@ export function sanitizeConfig(stored: unknown): RouterConfig {
     cacheTtlMinutes: s.cacheTtlMinutes === 5 || s.cacheTtlMinutes === 60 ? s.cacheTtlMinutes : DEFAULT_CONFIG.cacheTtlMinutes,
     coldGuard: GUARDS.includes(s.coldGuard as ColdGuard) ? (s.coldGuard as ColdGuard) : DEFAULT_CONFIG.coldGuard,
     keepPromptText: typeof s.keepPromptText === 'boolean' ? s.keepPromptText : DEFAULT_CONFIG.keepPromptText,
+    isLearning: typeof s.isLearning === 'boolean' ? s.isLearning : DEFAULT_CONFIG.isLearning,
   }
 }
 

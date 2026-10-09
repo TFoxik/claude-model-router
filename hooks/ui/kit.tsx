@@ -8,6 +8,7 @@ export const PANES = {
   stats: { id: 'model-router-stats', title: 'Stats' },
   context: { id: 'model-router-ctx', title: 'Context' },
   last: { id: 'model-router-last', title: 'Last prompt cost' },
+  learn: { id: 'model-router-learn', title: 'Learn' },
 } as const
 
 /** Opens a pane by name; the view gets it from the hooks module, which holds `$`. */
