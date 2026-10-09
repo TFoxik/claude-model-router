@@ -569,8 +569,8 @@ test('cache rewrites are tallied by cause and shown in Last and Stats', async ($
   await prompt('done', warm)
 
   const stats = await mountPane($, 'stats')
-  expect(await stats.find({ type: 'Text', text: / · 2 cache rewrites \$1\.56/ })).toBeDefined()
-  expect(await stats.find({ type: 'Text', text: / · route switch rewrite of 100k tokens, \$0\.78/ })).toBeDefined()
+  expect(await stats.find({ type: 'Text', text: /^↻ 2 cache rewrites \$1\.56$/ })).toBeDefined()
+  expect(await stats.find({ type: 'Text', text: /^↻ route switch rewrite of 100k tokens, \$0\.78$/ })).toBeDefined()
   await stats.unmount()
 })
 
@@ -625,7 +625,7 @@ test('only a person can change routes; anyone can open a pane; stats clear empti
   expect((await run('stats', 'peer')).text).toBe('Stats pane opened.')
   const mountStats = () => mountPane($, 'stats')
   const before = await mountStats()
-  expect(await before.find({ type: 'Text', text: / · 1 prompt$/ })).toBeDefined()
+  expect(await before.find({ type: 'Text', text: /^1 prompt$/ })).toBeDefined()
   await before.unmount()
   expect((await run('stats clear', 'composer')).text).toBe('Prompt history cleared.')
   const after = await mountStats()
@@ -645,7 +645,7 @@ test('prompt text can be switched off, which also blanks what was kept', async (
     await step($, text)
   }
   const stats = await mountPane($, 'stats')
-  expect(await stats.find({ type: 'Text', text: / · 3 prompts$/ })).toBeDefined()
+  expect(await stats.find({ type: 'Text', text: /^3 prompts$/ })).toBeDefined()
   expect(await stats.find({ type: 'Text', text: /secret/ })).toBeUndefined()
   await stats.unmount()
 })

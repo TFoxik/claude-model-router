@@ -1,5 +1,11 @@
 # Release notes
 
+## Unreleased
+
+### Changed
+
+- Stats is easier to scan: today, 7 days and all-time totals sit side by side, each command has a bar comparing its average cost to the priciest one, models are colour-coded, and each expensive prompt shows its date in its own column with cache rewrites on their own line.
+
 ## 0.3.1 — 2026-10-09
 
 ### Fixed

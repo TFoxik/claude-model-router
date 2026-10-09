@@ -1,6 +1,6 @@
-import type { PromptRecord, Scope } from '../../types'
-import { HISTORY_LIMIT, modelMix, money, plural, statsSummary, sumUsd } from '../routes'
-import { ledgerRow, rewriteText } from './kit'
+import type { PromptRecord, Rewrite, Scope } from '../../types'
+import { HISTORY_LIMIT, money, plural, statsSummary, sumUsd } from '../routes'
+import { rewriteText } from './kit'
 import type { Els, Open } from './kit'
 
 const day = (at: number) => {
@@ -8,9 +8,27 @@ const day = (at: number) => {
   return `${d.getDate()}.${d.getMonth() + 1}.`
 }
 
-const colorOfLabel = (label: string) => (label === 'prompt' ? 'subtle' : 'suggestion')
+const colorOfLabel = (label: string) => (label === 'prompt' ? undefined : 'suggestion')
 
 const shownText = (r: PromptRecord) => (r.label === 'prompt' ? r.text || 'prompt' : `${r.label} ${r.text.replace(r.label, '').trim()}`.trim())
+
+const MODEL_COLORS: ReadonlyArray<[string, string]> = [
+  ['Opus', 'claude'],
+  ['Sonnet', 'suggestion'],
+  ['Haiku', 'success'],
+  ['Fable', 'merged'],
+]
+const colorOfModel = (model: string) => MODEL_COLORS.find(([prefix]) => model.startsWith(prefix))?.[1] ?? 'subtle'
+
+const BAR_W = 8
+const COST_W = 8
+const DATE_W = 7
+
+/** `share` of BAR_W cells filled; anything above zero shows at least one. */
+function bar(share: number) {
+  const filled = share > 0 ? Math.max(1, Math.round(share * BAR_W)) : 0
+  return { filled: '━'.repeat(filled), empty: '─'.repeat(BAR_W - filled) }
+}
 
 export function statsFooterView({ Box, Text, Button }: Els, { modes, today }: { modes: readonly string[]; today: number }, { open }: { open: Open }) {
   return (
@@ -26,6 +44,39 @@ type StatsData = { records: readonly PromptRecord[]; scope: Scope; repo: string;
 export function statsPaneView(els: Els, { records, scope, repo, now }: StatsData, { setScope }: { setScope: (scope: Scope) => void }) {
   const { Box, Text, Button } = els
   const { today, week, rewrites, commands, priciest } = statsSummary(records, now)
+  const topAvg = Math.max(0, ...commands.map(c => c.avg))
+
+  const tile = (key: string, label: string, usd: number, color?: string) => (
+    <Box key={key} flexDirection="column">
+      <Text dimColor>{label}</Text>
+      <Text bold color={color}>{money(usd)}</Text>
+    </Box>
+  )
+
+  const models = (key: string, mix: Record<string, number> | undefined) => {
+    const rows = Object.entries(mix ?? {})
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+    if (rows.length === 0) return null
+    return (
+      <Box key={key} flexDirection="row" flexWrap="wrap" columnGap={2} paddingLeft={2}>
+        {rows.map(([model, usd]) => (
+          <Box key={`${key}:${model}`} flexDirection="row" gap={1}>
+            <Text color={colorOfModel(model)}>●</Text>
+            <Text dimColor>{`${model} ${money(usd)}`}</Text>
+          </Box>
+        ))}
+      </Box>
+    )
+  }
+
+  const rewriteLines = (key: string, list: readonly Rewrite[] | undefined) =>
+    (list ?? []).map((one, i) => (
+      <Box key={`${key}:rw${i}`} paddingLeft={2}>
+        <Text color="warning">{`↻ ${rewriteText(one)}`}</Text>
+      </Box>
+    ))
+
   return (
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="row" justifyContent="space-between">
@@ -35,43 +86,80 @@ export function statsPaneView(els: Els, { records, scope, repo, now }: StatsData
           <Button key="scope-all" label="All" plain dimColor={scope !== 'all'} onPress={() => setScope('all')} />
         </Box>
       </Box>
-      <Text dimColor>
-        today {money(today)} · 7 days {money(week)} · all {money(sumUsd(records))} · {plural(records.length, 'prompt')}
-        {rewrites.length > 0 ? ` · ${plural(rewrites.length, 'cache rewrite')} ${money(sumUsd(rewrites))}` : ''}
-      </Text>
+
+      <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
+        <Box flexDirection="row" columnGap={4} flexWrap="wrap">
+          {tile('t:today', 'today', today, 'claude')}
+          {tile('t:week', '7 days', week)}
+          {tile('t:all', 'all time', sumUsd(records))}
+        </Box>
+        <Text dimColor>{plural(records.length, 'prompt')}</Text>
+        {rewrites.length > 0 ? (
+          <Text color="warning">{`↻ ${plural(rewrites.length, 'cache rewrite')} ${money(sumUsd(rewrites))}`}</Text>
+        ) : null}
+      </Box>
+
       {records.length === 0 ? (
         <Text dimColor>Nothing recorded yet.</Text>
       ) : (
         <>
-          <Box flexDirection="column">
-            <Text bold dimColor>COMMANDS · AVERAGE PER RUN</Text>
-            {commands.map(c =>
-              ledgerRow(els, {
-                key: `c:${c.label}`,
-                color: colorOfLabel(c.label),
-                name: c.label,
-                usd: c.avg,
-                sub: [`${plural(c.runs, 'run')} · total ${money(c.total)} · max ${money(c.max)}`, modelMix(c.models, money)],
-              }),
-            )}
+          <Box flexDirection="column" gap={1}>
+            <Text bold dimColor>AVERAGE COST PER RUN</Text>
+            {commands.map(c => {
+              const { filled, empty } = bar(topAvg > 0 ? c.avg / topAvg : 0)
+              return (
+                <Box key={`c:${c.label}`} flexDirection="column">
+                  <Box flexDirection="row" gap={1}>
+                    <Box flexGrow={1} flexShrink={1}>
+                      <Text color={colorOfLabel(c.label)} bold wrap="truncate-end">{c.label}</Text>
+                    </Box>
+                    <Box flexShrink={0} flexDirection="row">
+                      <Text color="claude">{filled}</Text>
+                      <Text dimColor>{empty}</Text>
+                    </Box>
+                    <Box width={COST_W} flexShrink={0} justifyContent="flex-end">
+                      <Text bold>{money(c.avg)}</Text>
+                    </Box>
+                  </Box>
+                  <Box paddingLeft={2}>
+                    <Text dimColor>{`${plural(c.runs, 'run')} · total ${money(c.total)} · max ${money(c.max)}`}</Text>
+                  </Box>
+                  {models(`cm:${c.label}`, c.models)}
+                </Box>
+              )
+            })}
           </Box>
-          <Box flexDirection="column">
+
+          <Box flexDirection="column" gap={1}>
             <Text bold dimColor>MOST EXPENSIVE PROMPTS</Text>
-            {priciest.map((r, i) =>
-              ledgerRow(els, {
-                key: `p:${i}`,
-                color: colorOfLabel(r.label),
-                name: shownText(r),
-                usd: r.usd,
-                sub: [
-                  [day(r.at), scope === 'all' ? r.repo : undefined, `${r.requests} req`, plural(r.agents, 'subagent'), ...(r.rewrites ?? []).map(rewriteText)].filter(Boolean).join(' · '),
-                  modelMix(r.models, money),
-                ],
-              }),
-            )}
+            {priciest.map((r, i) => (
+              <Box key={`p:${i}`} flexDirection="column">
+                <Box flexDirection="row" gap={1}>
+                  <Box width={DATE_W} flexShrink={0}>
+                    <Text dimColor>{day(r.at)}</Text>
+                  </Box>
+                  <Box flexGrow={1} flexShrink={1}>
+                    <Text color={colorOfLabel(r.label)} wrap="truncate-end">{shownText(r)}</Text>
+                  </Box>
+                  <Box width={COST_W} flexShrink={0} justifyContent="flex-end">
+                    <Text bold>{money(r.usd)}</Text>
+                  </Box>
+                </Box>
+                <Box paddingLeft={2}>
+                  <Text dimColor>
+                    {[scope === 'all' ? r.repo : undefined, plural(r.requests, 'request'), r.agents > 0 ? plural(r.agents, 'subagent') : undefined]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </Text>
+                </Box>
+                {models(`pm:${i}`, r.models)}
+                {rewriteLines(`p:${i}`, r.rewrites)}
+              </Box>
+            ))}
           </Box>
         </>
       )}
+
       <Text dimColor>estimate · kept across sessions, last {HISTORY_LIMIT} prompts</Text>
     </Box>
   )
