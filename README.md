@@ -6,6 +6,8 @@ A Claude Code mod that picks the model and effort per kind of work: plan mode, n
 
 ## Install
 
+Needs Claude Code 2.1.287 or later, the first release with mods. Tested with 2.1.294; the hook events and engine calls a mod uses can change between releases, so a newer Claude Code may need an update here.
+
 At the prompt of a terminal Claude Code session:
 
 ```
