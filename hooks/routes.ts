@@ -197,6 +197,19 @@ export const sanitizeHistory = (stored: unknown): PromptRecord[] => (Array.isArr
 /** Terminal control characters stripped from text the panes show but didn't write. */
 export const printable = (text: string) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
 
+/**
+ * What a prompt says, out of the tags Claude Code wraps some prompts in: a slash command as `/name args`,
+ * a message from an agent or the app by its tag (`agent message`), reminders dropped. Also takes text cut short mid-tag.
+ */
+export function typedText(raw: string): string {
+  const text = raw.replace(/<system-reminder\b[\s\S]*?(<\/system-reminder>|$)/g, '').trim()
+  const name = /<command-name>([\s\S]*?)<\/command-name>/.exec(text)?.[1]
+  if (name !== undefined) return `${name} ${/<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1] ?? ''}`.trim()
+  if (text.startsWith('<command-')) return ''
+  const wrapper = /^<([a-z]+(?:-[a-z]+)+)[\s>]/.exec(text)?.[1]
+  return wrapper === undefined ? text : wrapper.replace(/-/g, ' ')
+}
+
 function parentOf(route: string): string | undefined {
   const row = ROUTES.find(one => one.key === route)
   if (row) return row.parent

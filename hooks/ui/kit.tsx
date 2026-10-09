@@ -56,7 +56,8 @@ export function ledgerRow({ Box, Text }: Els, r: Row) {
         <Box width={2} flexShrink={0}>
           <Text color={r.color ?? routeColor}>●</Text>
         </Box>
-        <Box flexGrow={1} flexShrink={1}>
+        {/* minWidth 0 on every shrinking text Box: the desktop lays Boxes out as CSS flex, where a Box never shrinks below its text without it, so the text pushes the cost off the row. */}
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
           <Text color={routeColor} wrap="truncate-end">{r.name}</Text>
         </Box>
         <Box width={8} flexShrink={0} justifyContent="flex-end">

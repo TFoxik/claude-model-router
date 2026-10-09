@@ -1,5 +1,13 @@
 # Release notes
 
+## 0.5.1 — 2026-10-09
+
+### Fixed
+
+- Stats in the desktop app: a long prompt no longer pushes its cost off the row; it ends in "…" instead. The same holds for long names in the other panes.
+- Stats shows slash commands as typed (`/simplify and commit`) and a message from an agent as `agent message`, not the tags Claude Code wraps them in. Prompts recorded earlier are cleaned up too.
+- Stats keeps its gap between the average-cost and most-expensive sections in the desktop app.
+
 ## 0.5.0 — 2026-10-09
 
 ### Added

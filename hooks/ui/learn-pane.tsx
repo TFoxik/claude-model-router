@@ -16,7 +16,7 @@ function factRow({ Box, Text }: Els, key: string, one: Lesson, isOlder: boolean)
       <Box width={DATE_W} flexShrink={0}>
         <Text dimColor>{day(one.at)}</Text>
       </Box>
-      <Box flexGrow={1} flexShrink={1}>
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
         <Text dimColor={isOlder} wrap={isOlder ? 'truncate-end' : 'wrap'}>{one.fact}</Text>
       </Box>
     </Box>
@@ -42,7 +42,7 @@ export function learnPaneView(els: Els, { lessons, isLearning, muted, expanded }
         return (
           <Box key={`k:${kind}`} flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
             <Box flexDirection="row" justifyContent="space-between" gap={2}>
-              <Box flexShrink={1}>
+              <Box flexShrink={1} minWidth={0}>
                 <Text bold>{CONCEPTS[kind].title}</Text>
               </Box>
               <Box flexDirection="row" gap={2} flexShrink={0}>

@@ -147,7 +147,7 @@ export function routesPaneView(els: InputEls, data: PaneData, actions: PaneActio
       </Box>
 
       <Box flexDirection="row" gap={1} alignItems="center">
-        <Box flexGrow={1} flexShrink={1}>
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
           <Text bold dimColor>PRESET</Text>
         </Box>
         <Box width={MODEL_W + EFFORT_W + 1} flexShrink={0}>
@@ -174,7 +174,7 @@ export function routesPaneView(els: InputEls, data: PaneData, actions: PaneActio
                   <Text color={changed.has(key) ? 'warning' : isLive ? colorOf(key) : 'subtle'}>
                     {changed.has(key) ? '●' : isLive ? '▸' : ' '}
                   </Text>
-                  <Box flexGrow={1} flexShrink={1}>
+                  <Box flexGrow={1} flexShrink={1} minWidth={0}>
                     <Text color={isChild ? undefined : colorOf(key)} bold={!isChild} wrap="truncate-end">
                       {isChild ? `└ ${row.label}` : row.label}
                     </Text>

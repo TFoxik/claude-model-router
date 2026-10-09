@@ -17,6 +17,7 @@ import {
   parseSetting,
   presetOf,
   printable,
+  typedText,
   sanitizeConfig,
   sanitizeHistory,
   startingConfig,
@@ -600,6 +601,15 @@ test('route, model, effort and preset names are checked as own keys', () => {
   expect([presetOf('constructor'), presetOf('__proto__')]).toEqual([undefined, undefined])
   expect(presetOf('max')?.label).toBe('Max quality')
   expect(printable('a\u001b[31mb\nc')).toBe('a [31mb c')
+})
+
+test('prompt text drops the tags Claude Code wraps commands, agent messages and reminders in', () => {
+  const command = '<command-message>simplify</command-message>\n<command-name>/simplify</command-name>\n<command-args>and commit</command-args>'
+  expect(typedText(command)).toBe('/simplify and commit')
+  expect(typedText(command.slice(0, 50))).toBe('')
+  expect(typedText('<agent-message from="a1b2"> [Subagent hand-back] The report')).toBe('agent message')
+  expect(typedText('<system-reminder>be brief</system-reminder>\nfix the <div> layout')).toBe('fix the <div> layout')
+  expect(typedText('go ahead')).toBe('go ahead')
 })
 
 test('a step adds to its item once, in place', () => {

@@ -1,11 +1,15 @@
 import type { PromptRecord, Rewrite, Scope } from '../../types'
-import { HISTORY_LIMIT, money, plural, statsSummary, sumUsd } from '../routes'
+import { HISTORY_LIMIT, money, plural, statsSummary, sumUsd, typedText } from '../routes'
 import { DATE_W, day, rewriteText } from './kit'
 import type { Els, Open } from './kit'
 
 const colorOfLabel = (label: string) => (label === 'prompt' ? undefined : 'suggestion')
 
-const shownText = (r: PromptRecord) => (r.label === 'prompt' ? r.text || 'prompt' : `${r.label} ${r.text.replace(r.label, '').trim()}`.trim())
+/** Cleans records kept before `typedText` ran at record time too. */
+const shownText = (r: PromptRecord) => {
+  const text = typedText(r.text)
+  return r.label === 'prompt' ? text || 'prompt' : `${r.label} ${text.replace(r.label, '').trim()}`.trim()
+}
 
 const MODEL_COLORS: ReadonlyArray<[string, string]> = [
   ['Opus', 'claude'],
@@ -96,7 +100,7 @@ export function statsPaneView(els: Els, { records, scope, repo, now }: StatsData
       {records.length === 0 ? (
         <Text dimColor>Nothing recorded yet.</Text>
       ) : (
-        <>
+        <Box flexDirection="column" gap={1}>
           <Box flexDirection="column" gap={1}>
             <Text bold dimColor>AVERAGE COST PER RUN</Text>
             {commands.map(c => {
@@ -104,7 +108,7 @@ export function statsPaneView(els: Els, { records, scope, repo, now }: StatsData
               return (
                 <Box key={`c:${c.label}`} flexDirection="column">
                   <Box flexDirection="row" gap={1}>
-                    <Box flexGrow={1} flexShrink={1}>
+                    <Box flexGrow={1} flexShrink={1} minWidth={0}>
                       <Text color={colorOfLabel(c.label)} bold wrap="truncate-end">{c.label}</Text>
                     </Box>
                     <Box flexShrink={0} flexDirection="row">
@@ -132,7 +136,7 @@ export function statsPaneView(els: Els, { records, scope, repo, now }: StatsData
                   <Box width={DATE_W} flexShrink={0}>
                     <Text dimColor>{day(r.at)}</Text>
                   </Box>
-                  <Box flexGrow={1} flexShrink={1}>
+                  <Box flexGrow={1} flexShrink={1} minWidth={0}>
                     <Text color={colorOfLabel(r.label)} wrap="truncate-end">{shownText(r)}</Text>
                   </Box>
                   <Box width={COST_W} flexShrink={0} justifyContent="flex-end">
@@ -151,7 +155,7 @@ export function statsPaneView(els: Els, { records, scope, repo, now }: StatsData
               </Box>
             ))}
           </Box>
-        </>
+        </Box>
       )}
 
       <Text dimColor>estimate · kept across sessions, last {HISTORY_LIMIT} prompts</Text>

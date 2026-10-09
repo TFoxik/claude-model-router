@@ -48,6 +48,7 @@ import {
   parseSetting,
   presetOf,
   printable,
+  typedText,
   resolve,
   rewriteCause,
   rewriteOf,
@@ -705,7 +706,7 @@ export const register: Register = on => {
       const label = mem.pendingPrompt
       mem.pendingPrompt = undefined
       await recordPrompt($).catch(() => undefined)
-      mem.current = { label, text: cfg.keepPromptText ? printable(e.text.slice(0, 120)) : '', at: await nowOf($) }
+      mem.current = { label, text: cfg.keepPromptText ? printable(typedText(e.text).slice(0, 120)) : '', at: await nowOf($) }
       await update($, promptCost, () => EMPTY_PROMPT)
     }
     const { effort } = resolve(cfg, route)

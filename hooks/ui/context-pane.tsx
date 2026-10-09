@@ -82,7 +82,7 @@ export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns }:
       <Box width={6} flexShrink={0} justifyContent="flex-end">
         <Text dimColor>{pct(tokens)}</Text>
       </Box>
-      <Box flexGrow={1} flexShrink={1}>
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
         <Text dimColor={isDim} wrap="truncate-end">{name}</Text>
       </Box>
     </Box>
