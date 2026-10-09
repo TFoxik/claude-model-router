@@ -183,6 +183,12 @@ async function teach($: $, all: readonly LessonDraft[], now: number) {
   if (toast !== undefined) $.ui.toast(toast, { timeoutMs: TOAST_MS })
 }
 
+/** Learn mode on or off; off drops what the running turn had drafted, so nothing is kept or toasted from it. */
+async function setLearning($: $, isOn: boolean) {
+  if (!isOn) mem.pendingLessons = []
+  await setConfig($, c => ({ ...c, isLearning: isOn }))
+}
+
 async function markLessonsRead($: $) {
   const newest = Math.max(0, ...(await read($, lessons)).map(one => one.at))
   await save($, STORE.lessonsReadAt, await update($, lessonsReadAt, () => newest))
@@ -323,7 +329,7 @@ const openPane = ($: $): Open => pane => {
 async function renderLearnPane($: $, e: Args<'ui.render'>) {
   const [cfg, all, expanded] = await Promise.all([read($, config), read($, lessons), read($, learnOpen)])
   return learnPaneView($.ui.resolve(e), { lessons: all, isLearning: cfg.isLearning, expanded }, {
-    turnOn: () => void setConfig($, c => ({ ...c, isLearning: true })),
+    setLearning: isOn => void setLearning($, isOn),
     toggle: kind => void update($, learnOpen, open => (open.includes(kind) ? open.filter(one => one !== kind) : [...open, kind])),
   })
 }
@@ -392,6 +398,8 @@ async function renderPane($: $, e: Args<'ui.render'>) {
         return JSON.stringify(next) === JSON.stringify(cfg) ? null : next
       }),
     toggle: () => void setConfig($, c => ({ ...c, isEnabled: !c.isEnabled })),
+    setLearning: isOn => void setLearning($, isOn),
+    openLearn: () => openPane($)('learn'),
     // Only the routes come from the draft, so on/off or a setting changed while it was open is kept.
     apply: async next => {
       await update($, draft, () => null)
@@ -751,8 +759,7 @@ export const register: Register = on => {
     if (!USER_ORIGINS.has(e.origin.kind)) return { text: `model-router: /route ${verb} only runs when you type it.` }
     if (verb === 'learn' && (rest[0] === 'on' || rest[0] === 'off')) {
       const isOn = rest[0] === 'on'
-      await setConfig($, c => ({ ...c, isLearning: isOn }))
-      if (!isOn) mem.pendingLessons = []
+      await setLearning($, isOn)
       return { text: isOn ? LEARN_ON_TEXT : 'Learn mode off. Lessons already kept stay in /route learn.' }
     }
     if (verb === 'stats' && rest[0] === 'clear') {

@@ -62,6 +62,8 @@ type PaneActions = {
   /** Sets the next draft from the current one (or the config); a draft equal to the config is dropped. */
   editDraft: (fn: (c: RouterConfig) => RouterConfig) => void
   toggle: () => void
+  setLearning: (isOn: boolean) => void
+  openLearn: () => void
   apply: (next: RouterConfig) => void
   discard: () => void
 }
@@ -82,7 +84,7 @@ type InputEls = Extract<Els, { Select: unknown }>
 
 export function routesPaneView(els: InputEls, data: PaneData, actions: PaneActions) {
   const { cfg, costs, now, isPlanning, pending, lastPrompt, contextTokens, sessionModel } = data
-  const { editDraft, toggle, apply, discard } = actions
+  const { editDraft, toggle, setLearning, openLearn, apply, discard } = actions
   const { Box, Text, Button, Select } = els
   const shown = pending ?? cfg
   const ttlMinutes = cfg.cacheTtlMinutes
@@ -108,6 +110,19 @@ export function routesPaneView(els: InputEls, data: PaneData, actions: PaneActio
         <Box flexDirection="row" gap={1} alignItems="center">
           <Text color={cfg.isEnabled ? 'success' : 'subtle'}>{cfg.isEnabled ? '● on' : '○ off'}</Text>
           <Button key="toggle" label={cfg.isEnabled ? 'Turn off' : 'Turn on'} onPress={toggle} />
+        </Box>
+      </Box>
+
+      <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
+        <Box flexDirection="column" flexShrink={1}>
+          <Text>
+            Learn mode <Text color={cfg.isLearning ? 'success' : 'subtle'}>{cfg.isLearning ? '● on' : '○ off'}</Text>
+          </Text>
+          {cfg.isLearning ? null : <Text dimColor>explains cache misses and model costs with your own numbers, when they happen</Text>}
+        </Box>
+        <Box flexDirection="row" gap={1} flexShrink={0}>
+          <Button key="learn-toggle" label={cfg.isLearning ? 'Turn off' : 'Turn on'} onPress={() => setLearning(!cfg.isLearning)} />
+          <Button key="learn-open" label="Open" onPress={openLearn} />
         </Box>
       </Box>
 
