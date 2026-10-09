@@ -22,6 +22,9 @@ export const day = (at: number) => {
   return `${d.getDate()}.${d.getMonth() + 1}.`
 }
 
+/** Columns for a `day()` gutter: the widest date and a space. */
+export const DATE_W = 7
+
 const ROUTE_COLOR: Record<string, string> = { plan: 'planMode', main: 'claude' }
 export const colorOf = (route: string) => ROUTE_COLOR[route] ?? 'suggestion'
 

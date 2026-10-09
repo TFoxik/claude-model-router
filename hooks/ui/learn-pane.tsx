@@ -1,13 +1,27 @@
 import type { Lesson, LessonKind } from '../../types'
 import { CONCEPTS, SEEN_ENOUGH, byKind } from '../lessons'
 import { PRICES_AS_OF } from '../routes'
-import { day } from './kit'
+import { DATE_W, day } from './kit'
 import type { Els } from './kit'
 
 type LearnData = { lessons: readonly Lesson[]; isLearning: boolean; muted: readonly LessonKind[]; expanded: readonly LessonKind[] }
 type LearnActions = { setLearning: (isOn: boolean) => void; setMuted: (kind: LessonKind, isMuted: boolean) => void; toggle: (kind: LessonKind) => void }
 
 const OLDER_SHOWN = 2
+
+/** A dated fact with a hanging indent; an older one is one dim line, since it mostly repeats the latest. */
+function factRow({ Box, Text }: Els, key: string, one: Lesson, isOlder: boolean) {
+  return (
+    <Box key={key} flexDirection="row">
+      <Box width={DATE_W} flexShrink={0}>
+        <Text dimColor>{day(one.at)}</Text>
+      </Box>
+      <Box flexGrow={1} flexShrink={1}>
+        <Text dimColor={isOlder} wrap={isOlder ? 'truncate-end' : 'wrap'}>{one.fact}</Text>
+      </Box>
+    </Box>
+  )
+}
 
 export function learnPaneView(els: Els, { lessons, isLearning, muted, expanded }: LearnData, { setLearning, setMuted, toggle }: LearnActions) {
   const { Box, Text, Button } = els
@@ -26,20 +40,28 @@ export function learnPaneView(els: Els, { lessons, isLearning, muted, expanded }
         const isOpen = list.length < SEEN_ENOUGH !== expanded.includes(kind)
         const [latest, ...older] = list
         return (
-          <Box key={`k:${kind}`} flexDirection="column">
-            <Box flexDirection="row" justifyContent="space-between">
-              <Text bold>{CONCEPTS[kind].title}</Text>
-              <Box flexDirection="row" gap={1}>
+          <Box key={`k:${kind}`} flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
+            <Box flexDirection="row" justifyContent="space-between" gap={2}>
+              <Box flexShrink={1}>
+                <Text bold>{CONCEPTS[kind].title}</Text>
+              </Box>
+              <Box flexDirection="row" gap={2} flexShrink={0}>
                 <Button key={`why:${kind}`} label={isOpen ? 'hide why' : 'why?'} plain dimColor onPress={() => toggle(kind)} />
                 <Button key={`mute:${kind}`} label="mute" plain dimColor onPress={() => setMuted(kind, true)} />
               </Box>
             </Box>
-            {isOpen ? <Text dimColor>{CONCEPTS[kind].body}</Text> : null}
-            <Text>{`${day(latest!.at)}  ${latest!.fact}`}</Text>
-            {older.slice(0, OLDER_SHOWN).map((one, i) => (
-              <Text key={`o:${kind}:${i}`} dimColor>{`${day(one.at)}  ${one.fact}`}</Text>
-            ))}
-            {older.length > OLDER_SHOWN ? <Text dimColor>{`+${older.length - OLDER_SHOWN} earlier`}</Text> : null}
+            {factRow(els, `l:${kind}`, latest!, false)}
+            {older.length === 0 ? null : (
+              <Box flexDirection="column" marginTop={1}>
+                <Text dimColor>{older.length > OLDER_SHOWN ? `Earlier, ${older.length - OLDER_SHOWN} more not shown` : 'Earlier'}</Text>
+                {older.slice(0, OLDER_SHOWN).map((one, i) => factRow(els, `o:${kind}:${i}`, one, true))}
+              </Box>
+            )}
+            {isOpen ? (
+              <Box marginTop={1}>
+                <Text dimColor italic>{CONCEPTS[kind].body}</Text>
+              </Box>
+            ) : null}
           </Box>
         )
       })}

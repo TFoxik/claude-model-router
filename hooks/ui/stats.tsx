@@ -1,6 +1,6 @@
 import type { PromptRecord, Rewrite, Scope } from '../../types'
 import { HISTORY_LIMIT, money, plural, statsSummary, sumUsd } from '../routes'
-import { day, rewriteText } from './kit'
+import { DATE_W, day, rewriteText } from './kit'
 import type { Els, Open } from './kit'
 
 const colorOfLabel = (label: string) => (label === 'prompt' ? undefined : 'suggestion')
@@ -17,7 +17,6 @@ const colorOfModel = (model: string) => MODEL_COLORS.find(([prefix]) => model.st
 
 const BAR_W = 8
 const COST_W = 8
-const DATE_W = 7
 
 /** `share` of BAR_W cells filled; anything above zero shows at least one. */
 function bar(share: number) {

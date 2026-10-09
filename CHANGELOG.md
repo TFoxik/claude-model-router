@@ -8,6 +8,7 @@
 
 ### Changed
 
+- The Learn pane is easier to scan: each topic sits in its own card, the latest fact leads with its date in a column of its own, earlier facts take one line each, and the "why" comes after the facts.
 - The band's **Learn ●N** counts lessons that toasted and the first of each topic, not every quiet repeat: with Opus routed on the main loop, the expensive-model lesson no longer grows the count on each prompt.
 
 ## 0.4.0 — 2026-10-09
