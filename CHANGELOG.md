@@ -1,5 +1,11 @@
 # Release notes
 
+## 0.3.1 — 2026-10-09
+
+### Fixed
+
+- Every hook that passes an event on now fails open explicitly: if the router's own code throws, the prompt, command, spawn, compaction or plan-mode tool call goes on as if the router weren't there. `claude plugin validate` lists them as gating hooks with `.catch`.
+
 ## 0.3.0 — 2026-10-09
 
 ### Fixed

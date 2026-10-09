@@ -454,31 +454,32 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // Hooks that pass events on fail open: if our own code throws, the event goes on as if we weren't here.
   on('prompt.attachment', async ($, e, next) => {
     if (e.agentId === undefined) {
       if (e.type === 'plan_mode' || e.type === 'plan_mode_reentry') await update($, isPlan, () => true)
       if (e.type === 'plan_mode_exit') await update($, isPlan, () => false)
     }
     return next(e)
-  })
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'EnterPlanMode' }, async ($, e, next) => {
     const ran = await next(e)
     if (e.agentId === undefined && ran.deny === undefined && !ran.isError) await update($, isPlan, () => true)
     return ran
-  })
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'ExitPlanMode' }, async ($, e, next) => {
     const ran = await next(e)
     if (e.agentId === undefined && ran.deny === undefined && !ran.isError) await update($, isPlan, () => false)
     return ran
-  })
+  }).catch(($, e, next) => next(e))
 
   on('session.compact', async ($, e, next) => {
     const done = await next(e)
     if (e.agentId === undefined) mem.isAfterCompact = true
     return done
-  })
+  }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
     const route = routeForSpawn(e)
@@ -489,7 +490,7 @@ export const register: Register = on => {
       mem.agents.set(started.agentId, { route, label: printable(`${e.subagentType} · ${e.description}`), promptAt: mem.current?.at })
     }
     return started
-  })
+  }).catch(($, e, next) => next(e))
 
   on('prompt.submit', async ($, e, next) => {
     if (e.turnId === undefined) {
@@ -508,7 +509,7 @@ export const register: Register = on => {
       if (!e.text.trimStart().startsWith('/')) mem.lastCommand = undefined
     }
     return next(e)
-  })
+  }).catch(($, e, next) => next(e))
 
   on('command.run', async ($, e, next) => {
     if (e.origin.kind === 'plugin' || e.command === 'route') return next(e)
@@ -526,7 +527,7 @@ export const register: Register = on => {
     mem.pendingPrompt = `/${e.command}`
     mem.lastCommand = e.command
     return next(e)
-  })
+  }).catch(($, e, next) => next(e))
 
   on('session.end', async ($, e, next) => {
     await recordPrompt($).catch(() => undefined)

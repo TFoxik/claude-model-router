@@ -1,6 +1,6 @@
 {
   "name": "model-router",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": { "name": "liska" },
   "description": "Pick model and effort per kind of work (main, plan mode, each subagent type), with a cache-aware auto mode and per-route cost",
   "types": "./types/index.d.ts"
