@@ -4,14 +4,14 @@ import { PRICES_AS_OF } from '../routes'
 import { day } from './kit'
 import type { Els } from './kit'
 
-type LearnData = { lessons: readonly Lesson[]; isLearning: boolean; expanded: readonly LessonKind[] }
-type LearnActions = { setLearning: (isOn: boolean) => void; toggle: (kind: LessonKind) => void }
+type LearnData = { lessons: readonly Lesson[]; isLearning: boolean; muted: readonly LessonKind[]; expanded: readonly LessonKind[] }
+type LearnActions = { setLearning: (isOn: boolean) => void; setMuted: (kind: LessonKind, isMuted: boolean) => void; toggle: (kind: LessonKind) => void }
 
 const OLDER_SHOWN = 2
 
-export function learnPaneView(els: Els, { lessons, isLearning, expanded }: LearnData, { setLearning, toggle }: LearnActions) {
+export function learnPaneView(els: Els, { lessons, isLearning, muted, expanded }: LearnData, { setLearning, setMuted, toggle }: LearnActions) {
   const { Box, Text, Button } = els
-  const groups = byKind(lessons)
+  const groups = byKind(lessons.filter(one => !muted.includes(one.kind)))
   return (
     <Box flexDirection="column" gap={1}>
       <Text bold color="claude">Learn</Text>
@@ -29,7 +29,10 @@ export function learnPaneView(els: Els, { lessons, isLearning, expanded }: Learn
           <Box key={`k:${kind}`} flexDirection="column">
             <Box flexDirection="row" justifyContent="space-between">
               <Text bold>{CONCEPTS[kind].title}</Text>
-              <Button key={`why:${kind}`} label={isOpen ? 'hide why' : 'why?'} plain dimColor onPress={() => toggle(kind)} />
+              <Box flexDirection="row" gap={1}>
+                <Button key={`why:${kind}`} label={isOpen ? 'hide why' : 'why?'} plain dimColor onPress={() => toggle(kind)} />
+                <Button key={`mute:${kind}`} label="mute" plain dimColor onPress={() => setMuted(kind, true)} />
+              </Box>
             </Box>
             {isOpen ? <Text dimColor>{CONCEPTS[kind].body}</Text> : null}
             <Text>{`${day(latest!.at)}  ${latest!.fact}`}</Text>
@@ -40,6 +43,14 @@ export function learnPaneView(els: Els, { lessons, isLearning, expanded }: Learn
           </Box>
         )
       })}
+      {muted.length === 0 ? null : (
+        <Box flexDirection="row" gap={1} flexWrap="wrap">
+          <Text dimColor>Muted, press to unmute:</Text>
+          {muted.map(kind => (
+            <Button key={`unmute:${kind}`} label={CONCEPTS[kind].title} plain dimColor onPress={() => setMuted(kind, false)} />
+          ))}
+        </Box>
+      )}
       <Box flexDirection="row" gap={1}>
         <Text dimColor>{`${isLearning ? 'learn mode on' : '/route learn on'} · prices as of ${PRICES_AS_OF}, estimates`}</Text>
         {isLearning ? <Button key="learn-off" label="Turn off" plain dimColor onPress={() => setLearning(false)} /> : null}

@@ -5,6 +5,7 @@ import type { ActiveRoute, ColdGuard, Effort, Health, LastUsage, Lesson, LessonK
 import {
   CONCEPTS,
   TOAST_MS,
+  TOPICS,
   awayText,
   capLessons,
   lessonFromCompact,
@@ -16,6 +17,7 @@ import {
   pickToast,
   sanitizeLessons,
   toastText,
+  unreadCount,
 } from './lessons'
 import type { LessonDraft } from './lessons'
 import {
@@ -38,6 +40,7 @@ import {
   costOf,
   effortForLabel,
   fmtAge,
+  isLessonKind,
   kTokens,
   labelOf,
   modelsOf,
@@ -170,8 +173,10 @@ async function flushLessons($: $) {
   await teach($, [...drafts, ...(p === null ? [] : lessonsFromPrompt(p, cfg.cacheTtlMinutes))], await nowOf($))
 }
 
-/** Keeps the lessons and toasts the one most worth it, if any is due. */
-async function teach($: $, all: readonly LessonDraft[], now: number) {
+/** Keeps the lessons of topics not muted and toasts the one most worth it, if any is due. */
+async function teach($: $, drafts: readonly LessonDraft[], now: number) {
+  const { learnMuted } = await read($, config)
+  const all = drafts.filter(d => !learnMuted.includes(d.kind))
   if (all.length === 0) return
   let toast: string | undefined
   await setLessons($, earlier => {
@@ -187,6 +192,10 @@ async function teach($: $, all: readonly LessonDraft[], now: number) {
 async function setLearning($: $, isOn: boolean) {
   if (!isOn) mem.pendingLessons = []
   await setConfig($, c => ({ ...c, isLearning: isOn }))
+}
+
+async function setMuted($: $, kind: LessonKind, isMuted: boolean) {
+  await setConfig($, c => ({ ...c, learnMuted: isMuted ? [...new Set([...c.learnMuted, kind])] : c.learnMuted.filter(one => one !== kind) }))
 }
 
 async function markLessonsRead($: $) {
@@ -328,8 +337,9 @@ const openPane = ($: $): Open => pane => {
 
 async function renderLearnPane($: $, e: Args<'ui.render'>) {
   const [cfg, all, expanded] = await Promise.all([read($, config), read($, lessons), read($, learnOpen)])
-  return learnPaneView($.ui.resolve(e), { lessons: all, isLearning: cfg.isLearning, expanded }, {
+  return learnPaneView($.ui.resolve(e), { lessons: all, isLearning: cfg.isLearning, muted: cfg.learnMuted, expanded }, {
     setLearning: isOn => void setLearning($, isOn),
+    setMuted: (kind, isMuted) => void setMuted($, kind, isMuted),
     toggle: kind => void update($, learnOpen, open => (open.includes(kind) ? open.filter(one => one !== kind) : [...open, kind])),
   })
 }
@@ -365,7 +375,7 @@ async function renderBand($: $, e: Args<'ui.render'>) {
     read($, lessons),
     read($, lessonsReadAt),
   ])
-  const learnUnread = cfg.isLearning ? kept.filter(one => one.at > readAt).length : 0
+  const learnUnread = cfg.isLearning ? unreadCount(kept, readAt, cfg.learnMuted) : 0
   const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp, learnUnread }
   return bandView($.ui.resolve(e), data, { open: openPane($), hide: () => void setBand($, false) })
 }
@@ -417,7 +427,7 @@ const GUARD_TEXT: Record<ColdGuard, string> = {
 
 /** The cold guard's line: the price, what happens next, and with learn mode on, why. */
 const guardText = (cfg: RouterConfig, cold: { text: string }, tail: string) =>
-  `model-router: ${cold.text} ${tail}${cfg.isLearning ? `\n\nWhy: ${CONCEPTS['cold-rewrite'].body}` : ''}`
+  `model-router: ${cold.text} ${tail}${cfg.isLearning && !cfg.learnMuted.includes('cold-rewrite') ? `\n\nWhy: ${CONCEPTS['cold-rewrite'].body}` : ''}`
 
 const LEARN_ON_TEXT =
   'Learn mode on: when a cache rewrite, a pricey model, a growing context or busy subagents cost you, a toast explains it with the numbers. /route learn lists them.'
@@ -425,7 +435,7 @@ const LEARN_ON_TEXT =
 const asEffort = (effort: unknown): Effort | undefined =>
   typeof effort === 'string' ? (effort as Effort) : undefined
 
-const USAGE = '[stats [clear | text on|off] | context | last | learn [on|off] | away | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
+const USAGE = '[stats [clear | text on|off] | context | last | learn [on|off | mute|unmute <topic>] | away | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
 
 // Origins a person typed or drove: only these may change the routes, and only these are held by the cold guard.
 const USER_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
@@ -761,6 +771,14 @@ export const register: Register = on => {
       const isOn = rest[0] === 'on'
       await setLearning($, isOn)
       return { text: isOn ? LEARN_ON_TEXT : 'Learn mode off. Lessons already kept stay in /route learn.' }
+    }
+    if (verb === 'learn' && (rest[0] === 'mute' || rest[0] === 'unmute')) {
+      const kind = rest[1]
+      if (!isLessonKind(kind)) return { text: `Usage: /route learn mute|unmute <topic>, topics: ${TOPICS.join(', ')}` }
+      const isMuted = rest[0] === 'mute'
+      await setMuted($, kind, isMuted)
+      const title = CONCEPTS[kind].title
+      return { text: isMuted ? `Learn mode stays quiet about "${title}" now. /route learn unmute ${kind} brings it back.` : `Learn mode explains "${title}" again.` }
     }
     if (verb === 'stats' && rest[0] === 'clear') {
       await setHistory($, () => [])

@@ -1,5 +1,15 @@
 # Release notes
 
+## 0.5.0 — 2026-10-09
+
+### Added
+
+- Learn mode topics can be muted: **mute** beside each topic in the Learn pane, or `/route learn mute <topic>`. A muted topic is not kept, toasted or counted, and a muted `cold-rewrite` drops the "Why" from the cold-send guard. Muted topics are listed at the bottom of the pane to unmute.
+
+### Changed
+
+- The band's **Learn ●N** counts lessons that toasted and the first of each topic, not every quiet repeat: with Opus routed on the main loop, the expensive-model lesson no longer grows the count on each prompt.
+
 ## 0.4.0 — 2026-10-09
 
 ### Added

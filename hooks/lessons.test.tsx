@@ -14,6 +14,7 @@ import {
   pickToast,
   sanitizeLessons,
   toastText,
+  unreadCount,
 } from './lessons'
 import { MODELS } from './routes'
 
@@ -168,6 +169,17 @@ test('toastText leads with the concept title until the kind has toasted once', (
   expect(toastText(cold, [])).toBe('Cache went cold: X. · /route learn')
   expect(toastText(cold, [lesson({})])).toBe('Cache went cold: X. · /route learn')
   expect(toastText(cold, [lesson({ isToasted: true })])).toBe('▸ X. · /route learn')
+})
+
+test('unreadCount: new and toasted lessons, not quiet repeats or muted kinds', () => {
+  const toasted = lesson({ kind: 'pricey-model', at: T0, isToasted: true })
+  const repeats = [1, 2, 3].map(i => lesson({ kind: 'pricey-model', at: T0 + i }))
+  const neverToasted = lesson({ kind: 'subagents', at: T0 + 4 })
+  const all = [toasted, ...repeats, neverToasted]
+  expect(unreadCount(all, 0, [])).toBe(2)
+  expect(unreadCount(all, T0, [])).toBe(1)
+  expect(unreadCount(all, 0, ['subagents'])).toBe(1)
+  expect(unreadCount(all, 0, ['pricey-model', 'subagents'])).toBe(0)
 })
 
 test('capLessons keeps the last 20 of each kind, in order', () => {

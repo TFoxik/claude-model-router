@@ -1,5 +1,5 @@
 import type { Effort, Health, Lesson, LessonKind, PromptCost, PromptItem, Rewrite } from '../types'
-import { ENGINE, FORK, GUARD_MIN_TOKENS, MODELS, PRICES_AS_OF, costOf, fmtAge, isRouteKey, isSub, kTokens, labelOf, modelKeyOf, money, plural, printable, rewritePrice, routeText, sumUsd } from './routes'
+import { ENGINE, FORK, GUARD_MIN_TOKENS, MODELS, PRICES_AS_OF, costOf, fmtAge, isLessonKind, isRouteKey, isSub, kTokens, labelOf, modelKeyOf, money, plural, printable, rewritePrice, routeText, sumUsd } from './routes'
 
 export type LessonDraft = Pick<Lesson, 'kind' | 'fact' | 'usd'>
 type Level = Health['ctxLevel']
@@ -49,7 +49,7 @@ export const CONCEPTS: Record<LessonKind, { title: string; body: string }> = {
   },
 }
 
-const KINDS = Object.keys(CONCEPTS) as LessonKind[]
+export const TOPICS = Object.keys(CONCEPTS) as LessonKind[]
 const RANK: Record<Level, number> = { success: 0, warning: 1, error: 2 }
 const isPricey = (model: string) => {
   const key = modelKeyOf(model)
@@ -204,6 +204,15 @@ export function toastText(one: Lesson, earlier: readonly Lesson[]): string {
   return `${isFirst ? `${CONCEPTS[one.kind].title}: ` : '▸ '}${one.fact} · /route learn`
 }
 
+/**
+ * Lessons the band counts as unread: those that toasted, and those of a kind that has not toasted yet.
+ * Quiet repeats of a kind already taught (a routed Opus main loop teaches pricey-model every prompt) stay in the pane only.
+ */
+export function unreadCount(lessons: readonly Lesson[], readAt: number, muted: readonly LessonKind[]): number {
+  const taught = new Set(lessons.filter(one => one.isToasted).map(one => one.kind))
+  return lessons.filter(one => one.at > readAt && !muted.includes(one.kind) && (one.isToasted || !taught.has(one.kind))).length
+}
+
 /** The last PER_KIND lessons of each kind, so a lesson that fires every prompt can't crowd out the rest. */
 export function capLessons(list: readonly Lesson[]): Lesson[] {
   const counts = new Map<LessonKind, number>()
@@ -220,7 +229,7 @@ export function capLessons(list: readonly Lesson[]): Lesson[] {
 
 const isLesson = (l: unknown): l is Lesson => {
   const x = l as Lesson | null
-  return typeof x === 'object' && x !== null && KINDS.includes(x.kind) && typeof x.at === 'number' && typeof x.repo === 'string' && typeof x.fact === 'string'
+  return typeof x === 'object' && x !== null && isLessonKind(x.kind) && typeof x.at === 'number' && typeof x.repo === 'string' && typeof x.fact === 'string'
 }
 
 export const sanitizeLessons = (stored: unknown): Lesson[] => (Array.isArray(stored) ? capLessons(stored.filter(isLesson)) : [])

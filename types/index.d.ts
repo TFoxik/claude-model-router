@@ -11,6 +11,7 @@ export type RouterConfig = {
   coldGuard: ColdGuard
   keepPromptText: boolean
   isLearning: boolean
+  learnMuted: LessonKind[]
 }
 export type ColdGuard = 'refuse' | 'warn' | 'off'
 export type Scope = 'repo' | 'all'

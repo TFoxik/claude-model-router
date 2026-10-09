@@ -1,6 +1,7 @@
 import type {
   ColdGuard,
   Effort,
+  LessonKind,
   PromptCost,
   PromptItem,
   PromptRecord,
@@ -115,6 +116,7 @@ export const DEFAULT_CONFIG: RouterConfig = {
   coldGuard: 'refuse',
   keepPromptText: true,
   isLearning: false,
+  learnMuted: [],
 }
 
 /**
@@ -146,6 +148,17 @@ const isModel = (m: unknown): m is RouteSetting['model'] => m === 'inherit' || (
 const isEffort = (e: unknown): e is RouteEffort =>
   e === 'inherit' || e === 'auto' || (typeof e === 'string' && EFFORTS.includes(e as Effort))
 const GUARDS: readonly ColdGuard[] = ['refuse', 'warn', 'off']
+const LESSON_KINDS: Record<LessonKind, true> = {
+  'cold-rewrite': true,
+  'switch-rewrite': true,
+  'pricey-model': true,
+  'context-high': true,
+  compacted: true,
+  subagents: true,
+  'cache-expiring': true,
+  'plan-toggle': true,
+}
+export const isLessonKind = (kind: unknown): kind is LessonKind => typeof kind === 'string' && Object.hasOwn(LESSON_KINDS, kind)
 
 /**
  * The stored config, keeping only what this version understands; a route the
@@ -169,6 +182,7 @@ export function sanitizeConfig(stored: unknown): RouterConfig {
     coldGuard: GUARDS.includes(s.coldGuard as ColdGuard) ? (s.coldGuard as ColdGuard) : DEFAULT_CONFIG.coldGuard,
     keepPromptText: typeof s.keepPromptText === 'boolean' ? s.keepPromptText : DEFAULT_CONFIG.keepPromptText,
     isLearning: typeof s.isLearning === 'boolean' ? s.isLearning : DEFAULT_CONFIG.isLearning,
+    learnMuted: Array.isArray(s.learnMuted) ? [...new Set(s.learnMuted.filter(isLessonKind))] : DEFAULT_CONFIG.learnMuted,
   }
 }
 

@@ -933,6 +933,36 @@ test('learn mode off: no lessons, no toast, and switching off drops pending ones
   await pane.unmount()
 })
 
+test('muted learn topics are not kept, toasted or counted, and the Learn pane mutes and unmutes them', async ($, on) => {
+  const { toasts, prompt } = await coldPrompts($, on, true)
+  expect((await route($, 'learn mute nope')).text).toMatch(/^Usage: \/route learn mute\|unmute <topic>, topics: cold-rewrite, /)
+  expect((await route($, 'learn mute cold-rewrite')).text).toBe('Learn mode stays quiet about "Cache went cold" now. /route learn unmute cold-rewrite brings it back.')
+  const before = toasts.length
+  await prompt('cold', usageOf(0, 100_000))
+  expect(toasts.slice(before)).toEqual([expect.stringMatching(/^An expensive model did most of the work: /)])
+  const band = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
+  expect(await band.find({ type: 'Button', text: 'Learn ●2' })).toBeDefined()
+  await band.unmount()
+  const pane = await mountPane($, 'learn', 'desktop')
+  expect(await pane.find({ type: 'Text', text: /The cache had expired/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /would cost about/ })).toBeDefined()
+  await pane.press({ key: 'mute:pricey-model' })
+  expect(await pane.find({ type: 'Text', text: /would cost about/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Button', text: 'An expensive model did most of the work' })).toBeDefined()
+  await pane.press({ key: 'unmute:cold-rewrite' })
+  expect(await pane.find({ type: 'Button', text: 'Cache went cold' })).toBeUndefined()
+  await pane.unmount()
+  expect((await route($, 'learn unmute pricey-model')).text).toBe('Learn mode explains "An expensive model did most of the work" again.')
+})
+
+test('a muted cold-rewrite topic drops the why from the cold-send guard', async ($, on) => {
+  const { clock } = await learningSession($, on, 'refuse')
+  await route($, 'learn mute cold-rewrite')
+  await clock.advance(61 * 60_000)
+  const held = await submit($, 'recap')
+  expect(held.drop).not.toMatch(/Why:/)
+})
+
 test('a subagent turn ending does not flush the main loop lessons', async ($, on) => {
   const { toasts, facts } = await coldPrompts($, on, true)
   facts.usage = usageOf(0, 100_000)
