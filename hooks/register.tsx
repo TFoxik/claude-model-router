@@ -165,16 +165,14 @@ async function setLessons($: $, fn: (all: Lesson[]) => Lesson[]): Promise<Lesson
 async function flushLessons($: $) {
   const drafts = mem.pendingLessons
   mem.pendingLessons = []
-  const cfg = await read($, config)
+  const [cfg, p] = await Promise.all([read($, config), read($, promptCost)])
   if (!cfg.isLearning) return
-  const p = await read($, promptCost)
-  await teach($, [...drafts, ...(p === null ? [] : lessonsFromPrompt(p, cfg.cacheTtlMinutes))])
+  await teach($, [...drafts, ...(p === null ? [] : lessonsFromPrompt(p, cfg.cacheTtlMinutes))], await nowOf($))
 }
 
 /** Keeps the lessons and toasts the one most worth it, if any is due. */
-async function teach($: $, all: readonly LessonDraft[]) {
+async function teach($: $, all: readonly LessonDraft[], now: number) {
   if (all.length === 0) return
-  const now = await nowOf($)
   let toast: string | undefined
   await setLessons($, earlier => {
     const fresh: Lesson[] = all.map(d => ({ ...d, at: now, repo: mem.repo }))
@@ -194,27 +192,29 @@ const nowOf = ($: $) => $.clock.now().catch(() => Date.now())
 
 const mainRoute = async ($: $) => ((await read($, isPlan)) ? 'plan' : 'main')
 
-/**
- * Plan mode starts. The engine raises no event on the toggle itself, so the
- * cost of getting here is already being paid; the lesson warns of the way back.
- */
-async function enterPlan($: $) {
-  const was = await read($, isPlan)
-  await update($, isPlan, () => true)
-  const cfg = await read($, config)
-  if (was || !cfg.isLearning) return
-  const sessionModel = mem.lastMain?.model ?? (await $.session.model())
-  const routeOf = (route: string) => {
-    const r = resolve(cfg, route)
-    return { model: r.model ?? sessionModel, effort: r.effort ?? mem.lastMain?.effort }
-  }
-  const tokens = (await $.session.usage()).context.tokens ?? 0
-  const draft = lessonFromPlanToggle(routeOf('plan'), routeOf('main'), tokens, cfg.cacheTtlMinutes)
-  if (draft !== undefined) mem.pendingLessons.push(draft)
+/** A main-loop route's model and effort, falling back to what the session runs. */
+function loopRoute(cfg: RouterConfig, route: string, fallback: { model: string; effort?: string }) {
+  const r = resolve(cfg, route)
+  return { model: r.model ?? fallback.model, effort: r.effort ?? fallback.effort }
 }
 
 async function routedMainModel($: $, cfg: RouterConfig, fallback: string): Promise<string> {
-  return resolve(cfg, await mainRoute($)).model ?? fallback
+  return loopRoute(cfg, await mainRoute($), { model: fallback }).model
+}
+
+/**
+ * Plan mode on or off. The engine raises no event on the toggle itself, so on
+ * entering, the cost of getting here is already being paid; the lesson warns of the way back.
+ */
+async function setPlan($: $, isOn: boolean) {
+  const was = await read($, isPlan)
+  await update($, isPlan, () => isOn)
+  const cfg = await read($, config)
+  if (was || !isOn || !cfg.isLearning) return
+  const session = mem.lastMain ?? { model: await $.session.model() }
+  const tokens = (await $.session.usage()).context.tokens ?? 0
+  const draft = lessonFromPlanToggle(loopRoute(cfg, 'plan', session), loopRoute(cfg, 'main', session), tokens, cfg.cacheTtlMinutes)
+  if (draft !== undefined) mem.pendingLessons.push(draft)
 }
 
 const promptTokens = (last: LastUsage) => last.input + last.cacheRead + last.cacheWrite
@@ -257,8 +257,7 @@ async function refreshStatus($: $) {
   const now = await nowOf($)
   const cfg = await read($, config)
   const ttl = cfg.cacheTtlMinutes
-  const prev = await read($, health)
-  const model = await routedMainModel($, cfg, last.model)
+  const routed = () => routedMainModel($, cfg, last.model)
   const warmMinutes = warmMinutesLeft(last.at, now, ttl)
   if (mem.compactCheckedAt === undefined || now - mem.compactCheckedAt > 10 * 60_000) {
     const { context: detailed } = await $.session.usage({ breakdown: 'summary' })
@@ -273,19 +272,20 @@ async function refreshStatus($: $) {
     ctxLevel: contextLevel(tokens, context.window, mem.compactAt),
     last: (await read($, promptCost))?.usd ?? last.usd,
     ...(warmMinutes === 0 && tokens >= GUARD_MIN_TOKENS
-      ? { coldUsd: rewritePrice(model, tokens, ttl).write }
+      ? { coldUsd: rewritePrice(await routed(), tokens, ttl).write }
       : {}),
     ...(five ? { fiveHour: Math.round(five.percentUsed) } : {}),
     ...(seven ? { sevenDay: Math.round(seven.percentUsed) } : {}),
   }
-  if (cfg.isLearning) {
-    const draft = lessonFromContext(prev?.ctxLevel, next.ctxLevel, tokens, model, ttl, mem.compactAt !== undefined)
-    if (draft !== undefined) mem.pendingLessons.push(draft)
-    // The one lesson that can't wait for a turn to end: by then the cache has gone cold.
-    const expiring = lessonFromExpiry(prev?.warmMinutes, warmMinutes, ttl, tokens, model)
-    if (expiring !== undefined) await teach($, [expiring]).catch(() => undefined)
-  }
+  const prev = await read($, health)
   await update($, health, was => (JSON.stringify(was) === JSON.stringify(next) ? was : next))
+  if (!cfg.isLearning) return
+  const model = await routed()
+  const draft = lessonFromContext(prev?.ctxLevel, next.ctxLevel, tokens, model, ttl, mem.compactAt !== undefined)
+  if (draft !== undefined) mem.pendingLessons.push(draft)
+  // The one lesson that can't wait for a turn to end: by then the cache has gone cold.
+  const expiring = lessonFromExpiry(prev?.warmMinutes, warmMinutes, ttl, tokens, model)
+  if (expiring !== undefined) await teach($, [expiring], now).catch(() => undefined)
 }
 
 function recordOf(meta: { label: string; text: string; at: number }, p: PromptCost): PromptRecord {
@@ -407,8 +407,9 @@ const GUARD_TEXT: Record<ColdGuard, string> = {
   off: 'Cold-send guard off.',
 }
 
-/** With learn mode on, why a cold send costs what the guard just said. */
-const coldWhy = (cfg: RouterConfig) => (cfg.isLearning ? `\n\nWhy: ${CONCEPTS['cold-rewrite'].body}` : '')
+/** The cold guard's line: the price, what happens next, and with learn mode on, why. */
+const guardText = (cfg: RouterConfig, cold: { text: string }, tail: string) =>
+  `model-router: ${cold.text} ${tail}${cfg.isLearning ? `\n\nWhy: ${CONCEPTS['cold-rewrite'].body}` : ''}`
 
 const LEARN_ON_TEXT =
   'Learn mode on: when a cache rewrite, a pricey model, a growing context or busy subagents cost you, a toast explains it with the numbers. /route learn lists them.'
@@ -594,30 +595,30 @@ export const register: Register = on => {
   // Hooks that pass events on fail open: if our own code throws, the event goes on as if we weren't here.
   on('prompt.attachment', async ($, e, next) => {
     if (e.agentId === undefined) {
-      if (e.type === 'plan_mode' || e.type === 'plan_mode_reentry') await enterPlan($)
-      if (e.type === 'plan_mode_exit') await update($, isPlan, () => false)
+      if (e.type === 'plan_mode' || e.type === 'plan_mode_reentry') await setPlan($, true)
+      if (e.type === 'plan_mode_exit') await setPlan($, false)
     }
     return next(e)
   }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'EnterPlanMode' }, async ($, e, next) => {
     const ran = await next(e)
-    if (e.agentId === undefined && ran.deny === undefined && !ran.isError) await enterPlan($)
+    if (e.agentId === undefined && ran.deny === undefined && !ran.isError) await setPlan($, true)
     return ran
   }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'ExitPlanMode' }, async ($, e, next) => {
     const ran = await next(e)
-    if (e.agentId === undefined && ran.deny === undefined && !ran.isError) await update($, isPlan, () => false)
+    if (e.agentId === undefined && ran.deny === undefined && !ran.isError) await setPlan($, false)
     return ran
   }).catch(($, e, next) => next(e))
 
   on('session.compact', async ($, e, next) => {
-    const before = await read($, lastUsage)
+    const before = (await read($, config)).isLearning ? await read($, lastUsage) : undefined
     const done = await next(e)
     if (e.agentId === undefined) {
       mem.isAfterCompact = true
-      if ((await read($, config)).isLearning) mem.pendingLessons.push(lessonFromCompact(before === null ? 0 : promptTokens(before)))
+      if (before !== undefined) mem.pendingLessons.push(lessonFromCompact(before === null ? 0 : promptTokens(before)))
     }
     return done
   }).catch(($, e, next) => next(e))
@@ -640,10 +641,10 @@ export const register: Register = on => {
       // Only a person can resend a dropped message; a notification, trigger or peer message would be lost.
       if (guard !== 'off' && USER_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) {
         const cold = await coldSend($, cfg).catch(() => undefined)
-        if (cold !== undefined && guard === 'warn') $.ui.log(`model-router: ${cold.text} Sending anyway.${coldWhy(cfg)}`)
+        if (cold !== undefined && guard === 'warn') $.ui.log(guardText(cfg, cold, 'Sending anyway.'))
         if (cold !== undefined && guard === 'refuse' && mem.coldAckedAt !== cold.at) {
           mem.coldAckedAt = cold.at
-          return { drop: `model-router: ${cold.text} Send it again to pay it, or /clear and start from a note.${coldWhy(cfg)}` }
+          return { drop: guardText(cfg, cold, 'Send it again to pay it, or /clear and start from a note.') }
         }
       }
       mem.pendingPrompt = commandLabel(e.text)
@@ -658,10 +659,10 @@ export const register: Register = on => {
     if (cfg.coldGuard !== 'off' && USER_ORIGINS.has(e.origin.kind)) {
       const cold = await coldSend($, cfg).catch(() => undefined)
       if (cold !== undefined && (await reachesModel($, e.command))) {
-        if (cfg.coldGuard === 'warn') $.ui.log(`model-router: ${cold.text} Running /${e.command} anyway.${coldWhy(cfg)}`)
+        if (cfg.coldGuard === 'warn') $.ui.log(guardText(cfg, cold, `Running /${e.command} anyway.`))
         else if (mem.coldAckedAt !== cold.at) {
           mem.coldAckedAt = cold.at
-          return { text: `model-router: ${cold.text} Run /${e.command} again to pay it, or /clear and start from a note.${coldWhy(cfg)}` }
+          return { text: guardText(cfg, cold, `Run /${e.command} again to pay it, or /clear and start from a note.`) }
         }
       }
     }

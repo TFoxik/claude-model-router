@@ -336,7 +336,13 @@ type StepFacts = { id: string; route: string; label: string; effort?: Effort; us
 export function addStep(p: PromptCost, s: StepFacts): PromptCost {
   const at = p.items.findIndex(one => one.id === s.id)
   const old: PromptItem = at >= 0 ? p.items[at]! : { id: s.id, route: s.route, label: s.label, model: s.usage.model, ...EMPTY_SPEND }
-  const item: PromptItem = { ...old, ...addSpend(old, s.usage, s.usage.model, s.ttlMinutes), model: s.usage.model, ...(s.effort ? { effort: s.effort } : {}) }
+  const item: PromptItem = {
+    ...old,
+    ...addSpend(old, s.usage, s.usage.model, s.ttlMinutes),
+    model: s.usage.model,
+    ...(s.effort ? { effort: s.effort } : {}),
+    ...(old.isMixed || old.model !== s.usage.model ? { isMixed: true } : {}),
+  }
   const items = at >= 0 ? p.items.with(at, item) : [...p.items, item]
   return {
     usd: p.usd + item.usd - old.usd,

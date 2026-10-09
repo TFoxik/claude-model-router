@@ -40,6 +40,8 @@ export type PromptItem = RouteSpend & {
   label: string
   model: string
   effort?: Effort
+  /** Its requests ran on more than one model; `model` is the last one. */
+  isMixed?: boolean
 }
 export type PromptCost = { usd: number; requests: number; items: PromptItem[]; rewrites?: Rewrite[] }
 export type PromptRecord = {

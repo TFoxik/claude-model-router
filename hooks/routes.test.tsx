@@ -609,6 +609,9 @@ test('a step adds to its item once, in place', () => {
   expect(two.items).toHaveLength(1)
   expect(two.items[0]).toMatchObject({ requests: 2, input: 2_000_000, usd: 8, effort: 'high' })
   expect([two.usd, two.requests]).toEqual([8, 2])
+  expect(two.items[0]!.isMixed).toBeUndefined()
+  const three = addStep(two, { id: 'main', route: 'main', label: 'Main loop', usage: { ...usage, model: sonnet }, ttlMinutes: 60 })
+  expect(three.items[0]).toMatchObject({ model: sonnet, isMixed: true })
 })
 
 test('today sums only the tail of time-ordered history', () => {
@@ -861,17 +864,23 @@ test('an agent no list names is left on its model, even while a workflow spawn i
 const complete = ($: Engine, turnId: string, agentId?: string) =>
   $.turn.complete({ turnId, answer: '', durationMs: 1, isAborted: false, reason: 'answer', ...(agentId ? { agentId } : {}) } as unknown as Args<'turn.complete'>)
 
+/** Learn-mode toasts the session shows; the router's own `Route …` switch toasts are left out. */
+function collectToasts(on: On): string[] {
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    if (!e.text.startsWith('Route ')) toasts.push(e.text)
+    return { value: undefined } as never
+  })
+  return toasts
+}
+
 /** A session with learn mode set as given, two prompts apart by more than the cache TTL, the second rebuilding the cache. */
 async function coldPrompts($: Engine, on: On, isLearning: boolean) {
   mock.store(on, { config: { ...MINE, coldGuard: 'off', isLearning } })
   const clock = mock.clock(on, { now: T0 })
   const facts = { context: 100_000, usage: usageOf(100_000) }
   guardSession(on, facts)
-  const toasts: string[] = []
-  on('ui.toast', (_$, e) => {
-    toasts.push(e.text)
-    return { value: undefined } as never
-  })
+  const toasts = collectToasts(on)
   on('ui.open', () => ({ value: undefined }) as never)
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   const prompt = async (id: string, usage: StepUsage) => {
@@ -995,11 +1004,7 @@ async function learningSession($: Engine, on: On, coldGuard: 'refuse' | 'off' = 
   mock.store(on, { config: { ...MINE, coldGuard, isLearning: true } })
   const clock = mock.clock(on, { now: T0 })
   guardSession(on, { context: 200_000, usage: usageOf(200_000) })
-  const toasts: string[] = []
-  on('ui.toast', (_$, e) => {
-    toasts.push(e.text)
-    return { value: undefined } as never
-  })
+  const toasts = collectToasts(on)
   on('prompt.attachment', (_$, e) => ({ text: e.text }))
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   const prompt = async (id: string, before?: () => Promise<void>) => {
@@ -1033,11 +1038,11 @@ test('learn mode explains why the cold-send guard held a message', async ($, on)
 test('learn mode warns that leaving plan mode will rewrite the cache too', async ($, on) => {
   const { toasts, prompt } = await learningSession($, on)
   await prompt('p', () => attach($, 'plan_mode'))
-  expect(toasts.filter(one => !one.startsWith('Route '))).toEqual([
+  expect(toasts).toEqual([
     'Plan mode switches rewrite the cache: Plan mode runs on Opus 5.5 high and normal work on Opus 5.5 medium, so each switch re-writes the cache: at 200k tokens, entering cost about $1.60 and leaving will cost about $1.60. Routing both the same avoids it; so does switching while the context is small. · /route learn',
   ])
   await prompt('p2', () => attach($, 'plan_mode'))
-  expect(toasts.filter(one => !one.startsWith('Route ')).length).toBe(1)
+  expect(toasts.length).toBe(1)
 })
 
 test('/route away prices stepping away for this session, from anywhere', async ($, on) => {

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { Lesson, PromptItem } from '../types'
+import type { Lesson, PromptCost, PromptItem } from '../types'
 import {
   awayText,
   byKind,
@@ -62,19 +62,20 @@ test('pricey-model lesson: a big Opus share, priced on Sonnet, only when Sonnet 
   expect(lessonsFromPrompt({ usd: 0.4, requests: 1, items: [readHeavy] }, 60)).toEqual([])
   const small = item({ output: 5_000, usd: 0.1 })
   expect(lessonsFromPrompt({ usd: 0.1, requests: 1, items: [small] }, 60)).toEqual([])
-  const mixed = item({ output: 10_000, cacheWrite: 50_000, usd: 0.45 })
+  const mixed = item({ output: 10_000, cacheWrite: 50_000, usd: 0.6, isMixed: true })
   expect(lessonsFromPrompt({ usd: 0.45, requests: 2, items: [mixed] }, 60)).toEqual([])
   const unknown = item({ model: 'gpt-something', output: 100_000, usd: 2 })
   expect(lessonsFromPrompt({ usd: 2, requests: 1, items: [unknown] }, 60)).toEqual([])
 })
 
 test('subagents lesson: share, the busiest route, and a reroute hint only for sub: routes on a pricey model', () => {
+  const subagentLessons = (p: PromptCost, ttl: number) => lessonsFromPrompt(p, ttl).filter(one => one.kind === 'subagents')
   const items = [
     item({ usd: 0.2 }),
     item({ id: 'a-1', route: 'sub:Explore', label: 'Explore · find', usd: 0.5 }),
     item({ id: 'a-2', route: 'sub:Explore', label: 'Explore · grep', usd: 0.3 }),
   ]
-  expect(cents(lessonsFromPrompt({ usd: 1, requests: 3, items }, 60))).toEqual([
+  expect(cents(subagentLessons({ usd: 1, requests: 3, items }, 60))).toEqual([
     {
       kind: 'subagents',
       usd: 0.8,
@@ -82,16 +83,16 @@ test('subagents lesson: share, the busiest route, and a reroute hint only for su
     },
   ])
   const onHaiku = items.map(one => (one.id === 'main' ? one : { ...one, model: MODELS.haiku.id }))
-  expect(lessonsFromPrompt({ usd: 1, requests: 3, items: onHaiku }, 60)[0]!.fact).toBe(
+  expect(subagentLessons({ usd: 1, requests: 3, items: onHaiku }, 60)[0]!.fact).toBe(
     '2 subagents made up 80% of this prompt ($0.80), most of it sub:Explore on Haiku 5.5. Subagents start with a fresh context, so they never pay a cache rewrite when rerouted.',
   )
   const weird = items.map(one => (one.id === 'main' ? one : { ...one, route: 'sub:x\u001b[2J' }))
-  expect(lessonsFromPrompt({ usd: 1, requests: 3, items: weird }, 60)[0]!.fact).not.toContain('\u001b')
-  expect(lessonsFromPrompt({ usd: 1, requests: 2, items: items.slice(0, 2) }, 60)).toEqual([])
+  expect(subagentLessons({ usd: 1, requests: 3, items: weird }, 60)[0]!.fact).not.toContain('\u001b')
+  expect(subagentLessons({ usd: 1, requests: 2, items: items.slice(0, 2) }, 60)).toEqual([])
   const cheap = items.map(one => ({ ...one, usd: one.usd / 100 }))
-  expect(lessonsFromPrompt({ usd: 0.01, requests: 3, items: cheap }, 60)).toEqual([])
+  expect(subagentLessons({ usd: 0.01, requests: 3, items: cheap }, 60)).toEqual([])
   const notRoutable = [item({ usd: 0.2 }), item({ id: 'compact-1', route: 'engine', usd: 0.5 }), item({ id: 'f-1', route: 'fork', usd: 0.3 })]
-  expect(lessonsFromPrompt({ usd: 1, requests: 3, items: notRoutable }, 60)).toEqual([])
+  expect(subagentLessons({ usd: 1, requests: 3, items: notRoutable }, 60)).toEqual([])
 })
 
 test('context lesson: a heads-up when the level rises, never on the first reading or an unknown model', () => {

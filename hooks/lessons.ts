@@ -1,13 +1,13 @@
-import type { Effort, Lesson, LessonKind, PromptCost, PromptItem, Rewrite } from '../types'
-import { GUARD_MIN_TOKENS, MODELS, PRICES_AS_OF, costOf, fmtAge, isSub, kTokens, labelOf, modelKeyOf, money, plural, printable, rewritePrice, routeText } from './routes'
+import type { Effort, Health, Lesson, LessonKind, PromptCost, PromptItem, Rewrite } from '../types'
+import { ENGINE, FORK, GUARD_MIN_TOKENS, MODELS, PRICES_AS_OF, costOf, fmtAge, isRouteKey, isSub, kTokens, labelOf, modelKeyOf, money, plural, printable, rewritePrice, routeText, sumUsd } from './routes'
 
 export type LessonDraft = Pick<Lesson, 'kind' | 'fact' | 'usd'>
-type Level = 'success' | 'warning' | 'error'
+type Level = Health['ctxLevel']
 
 export const SEEN_ENOUGH = 3
-export const TOAST_COOLDOWN_MS = 3_600_000
+const TOAST_COOLDOWN_MS = 3_600_000
 export const TOAST_MS = 8000
-export const PER_KIND = 20
+const PER_KIND = 20
 const MIN_REWRITE_USD = 0.05
 const MIN_PROMPT_USD = 0.25
 const PRICEY_SHARE = 0.7
@@ -91,13 +91,10 @@ export function lessonFromRewrite(rw: Rewrite, f: RewriteLessonFacts): LessonDra
   }
 }
 
-// An item's tokens priced on its model, matching what it was charged: false once it ran on more than one model.
-const isOneModel = (one: PromptItem, ttlMinutes: number) => Math.abs(costOf(usageOf(one), one.model, ttlMinutes) - one.usd) <= 0.01 * one.usd
-
 function priceyLesson(p: PromptCost, ttlMinutes: number): LessonDraft | undefined {
   const pricey = p.items.filter(one => isPricey(one.model))
-  if (!pricey.every(one => isOneModel(one, ttlMinutes))) return undefined
-  const actual = pricey.reduce((acc, one) => acc + one.usd, 0)
+  if (pricey.some(one => one.isMixed)) return undefined
+  const actual = sumUsd(pricey)
   const onSonnet = pricey.reduce((acc, one) => acc + costOf(usageOf(one), MODELS.sonnet.id, ttlMinutes), 0)
   if (p.usd < MIN_PROMPT_USD || actual < PRICEY_SHARE * p.usd || onSonnet > (1 - PRICEY_SAVING) * actual) return undefined
   const labels = [...new Set(pricey.map(one => labelOf(one.model)))].join(' and ')
@@ -108,19 +105,17 @@ function priceyLesson(p: PromptCost, ttlMinutes: number): LessonDraft | undefine
   }
 }
 
-// Agents that start fresh and that a route can move; forks share the parent's context and engine agents are not routed.
-const isRoutable = (route: string) => route.startsWith('sub:') || route === 'workflow' || route === 'teammate'
-
 function subagentLesson(p: PromptCost): LessonDraft | undefined {
-  const subs = p.items.filter(one => isSub(one) && isRoutable(one.route))
-  const subUsd = subs.reduce((acc, one) => acc + one.usd, 0)
+  // Forks share the parent's context and the engine's own agents are not routed: neither is a reroutable subagent.
+  const subs = p.items.filter(one => isSub(one) && one.route !== FORK && one.route !== ENGINE)
+  const subUsd = sumUsd(subs)
   if (subs.length < 2 || p.usd < MIN_PROMPT_USD || subUsd < SUB_SHARE * p.usd) return undefined
   const byRoute = new Map<string, number>()
   for (const one of subs) byRoute.set(one.route, (byRoute.get(one.route) ?? 0) + one.usd)
   const route = [...byRoute.entries()].sort((a, b) => b[1] - a[1])[0]![0]
   const top = subs.filter(one => one.route === route).sort((a, b) => b.usd - a.usd)[0]!
   const shown = printable(route)
-  const hint = route.startsWith('sub:') && isPricey(top.model)
+  const hint = route.startsWith('sub:') && isRouteKey(route) && isPricey(top.model)
     ? `Subagents start with a fresh context, so moving ${shown} to a cheaper model costs no cache rewrite: /route set ${shown} sonnet`
     : 'Subagents start with a fresh context, so they never pay a cache rewrite when rerouted.'
   return {
@@ -233,7 +228,11 @@ export const sanitizeLessons = (stored: unknown): Lesson[] => (Array.isArray(sto
 /** Kinds ordered by their newest lesson, each with its lessons newest first. */
 export function byKind(lessons: readonly Lesson[]): Array<[LessonKind, Lesson[]]> {
   const groups = new Map<LessonKind, Lesson[]>()
-  for (const one of [...lessons].sort((a, b) => b.at - a.at)) groups.set(one.kind, [...(groups.get(one.kind) ?? []), one])
+  for (const one of [...lessons].sort((a, b) => b.at - a.at)) {
+    const group = groups.get(one.kind)
+    if (group === undefined) groups.set(one.kind, [one])
+    else group.push(one)
+  }
   return [...groups.entries()]
 }
 
