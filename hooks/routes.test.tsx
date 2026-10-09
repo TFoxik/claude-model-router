@@ -13,6 +13,10 @@ import {
   contextLevel,
   costOf,
   effortForLabel,
+  fmtAge,
+  rewriteCause,
+  rewriteOf,
+  rewritePrice,
   estimateChanges,
   modeSwitchCost,
   resolve,
@@ -429,4 +433,119 @@ test('finished prompts are saved across sessions and shown in Stats', async ($, 
   expect(await ui.find({ type: 'Text', text: /1 run · total \$1\.00/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Opus 5\.5 medium \$1\.00/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('rewrites: only a big write with a cause counts, priced above a warm read', () => {
+  const write = { input_tokens: 1000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 100_000 }
+  expect(rewriteOf(write, opus, 'cold')).toEqual({ cause: 'cold', tokens: 100_000, usd: 0.78 })
+  expect(rewriteOf(write, opus, undefined)).toBeUndefined()
+  expect(rewriteOf({ ...write, cache_creation_input_tokens: 10_000 }, opus, 'cold')).toBeUndefined()
+  expect(rewriteOf({ ...write, cache_read_input_tokens: 150_000 }, opus, 'switch')).toBeUndefined()
+  expect(rewritePrice(sonnet, 200_000)).toEqual({ write: 0.8, warm: 0.04, premium: 0.76 })
+  expect(rewritePrice(sonnet, 200_000, 5).write).toBe(0.5)
+  expect([fmtAge(60_000), fmtAge(72 * 60_000)]).toEqual(['1m', '1h12m'])
+})
+
+test('rewrite cause: expiry, then a route change, never right after compaction', () => {
+  const hour = 60 * 60_000
+  const base = { isAfterCompact: false, now: 2 * hour, ttlMinutes: 60, to: { model: opus, effort: 'medium' as const } }
+  expect(rewriteCause({ ...base, prevAt: 0 })).toBe('cold')
+  expect(rewriteCause({ ...base, prevAt: 1.5 * hour, from: { model: sonnet, effort: 'medium' } })).toBe('switch')
+  expect(rewriteCause({ ...base, prevAt: 1.5 * hour, from: { model: opus, effort: 'high' } })).toBe('switch')
+  expect(rewriteCause({ ...base, prevAt: 1.5 * hour, from: base.to })).toBeUndefined()
+  expect(rewriteCause({ ...base, prevAt: 0, isAfterCompact: true })).toBeUndefined()
+})
+
+type StepUsage = { model: string; input_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number; output_tokens: number }
+
+const usageOf = (read: number, write = 0): StepUsage => ({ model: opus, input_tokens: 0, cache_read_input_tokens: read, cache_creation_input_tokens: write, output_tokens: 0 })
+
+/** A session whose context size and step usage the test can change as it goes. */
+function guardSession(on: On, facts: { context: number; usage: StepUsage }) {
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: facts.context, window: 1_000_000, percent: 20 }, rateLimits: [] } }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('command.run', () => ({ text: 'engine' }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('prompt.submit', (_$, e) => ({ text: e.text }))
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: facts.usage }
+  })
+}
+
+const submit = ($: Engine, text: string) => $.prompt.submit({ text, origin: { kind: 'composer' } } as Args<'prompt.submit'>)
+const route = ($: Engine, args: string) => $.command.run({ command: 'route', args, origin: { kind: 'composer' } } as unknown as Args<'command.run'>)
+const T0 = Date.parse('2026-10-08T10:00:00Z')
+
+test('a cold send over a big context is dropped once, priced on the routed model', async ($, on) => {
+  mock.store(on, { config: { ...DEFAULT_CONFIG, routes: { ...DEFAULT_CONFIG.routes, main: { model: 'sonnet', effort: 'medium' } } } })
+  const clock = mock.clock(on, { now: T0 })
+  guardSession(on, { context: 200_000, usage: usageOf(200_000) })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await step($, 'a')
+  expect((await submit($, 'warm')).drop).toBeUndefined()
+  await clock.advance(61 * 60_000)
+  const band = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
+  expect(await band.find({ type: 'Text', text: /^cache cold \$0\.80/ })).toBeDefined()
+  await band.unmount()
+  expect((await submit($, '/simplify')).drop).toBeUndefined()
+  expect((await $.prompt.submit({ text: 'x', origin: { kind: 'plugin' } } as Args<'prompt.submit'>)).drop).toBeUndefined()
+  const refused = await submit($, 'recap')
+  expect(refused.drop).toBe('model-router: the prompt cache went cold 1m ago. This send re-writes ~200k tokens on Sonnet 5.5 = $0.80 (warm would be $0.04). Send it again to pay it, or /clear and start from a note.')
+  expect((await submit($, 'recap')).drop).toBeUndefined()
+})
+
+test('the guard skips small contexts, and can warn or be switched off', async ($, on) => {
+  mock.store(on)
+  const clock = mock.clock(on, { now: T0 })
+  const facts = { context: 40_000, usage: usageOf(40_000) }
+  guardSession(on, facts)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await step($, 'a')
+  await clock.advance(61 * 60_000)
+  expect((await submit($, 'small')).drop).toBeUndefined()
+  facts.context = 200_000
+  for (const mode of ['warn', 'off']) {
+    await route($, `guard ${mode}`)
+    expect((await submit($, 'recap')).drop).toBeUndefined()
+  }
+})
+
+test('cache rewrites are tallied by cause and shown in Last and Stats', async ($, on) => {
+  mock.store(on, { config: { ...DEFAULT_CONFIG, coldGuard: 'off' } })
+  const clock = mock.clock(on, { now: T0 })
+  const warm = usageOf(100_000)
+  const rebuilt = usageOf(0, 100_000)
+  const facts = { context: 100_000, usage: warm }
+  guardSession(on, facts)
+  on('prompt.attachment', (_$, e) => ({ text: e.text }))
+  on('session.compact', (_$, e) => ({ messages: e.messages }))
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const prompt = async (id: string, usage: StepUsage) => {
+    facts.usage = usage
+    await submit($, id)
+    await $.turn.start({ text: id, turnId: id })
+    await step($, id)
+  }
+
+  await prompt('a', warm)
+  await clock.advance(61 * 60_000)
+  await prompt('cold', rebuilt)
+  const last = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'Pane', requestId: 'model-router-last', props: {} as never })
+  expect(await last.find({ type: 'Text', text: 'includes a cold cache rewrite of 100k tokens, $0.78' })).toBeDefined()
+  await last.unmount()
+
+  await prompt('b', warm)
+  await attach($, 'plan_mode')
+  await prompt('switch', rebuilt)
+  await attach($, 'plan_mode_exit')
+  await $.session.compact({ messages: [{ role: 'user', text: 'summary', toolUses: [] }] } as unknown as Args<'session.compact'>)
+  await clock.advance(61 * 60_000)
+  await prompt('after-compact', rebuilt)
+  await prompt('done', warm)
+
+  const stats = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'Pane', requestId: 'model-router-stats', props: {} as never })
+  expect(await stats.find({ type: 'Text', text: / · 2 cache rewrites \$1\.56/ })).toBeDefined()
+  expect(await stats.find({ type: 'Text', text: / · route switch rewrite of 100k tokens, \$0\.78/ })).toBeDefined()
+  await stats.unmount()
 })

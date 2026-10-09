@@ -1,5 +1,6 @@
 import type {
   Effort,
+  Rewrite,
   ModelKey,
   RouteEffort,
   RouteSetting,
@@ -90,6 +91,7 @@ export const DEFAULT_CONFIG: RouterConfig = {
   preset: 'mine',
   routes: PRESETS.mine!.routes,
   cacheTtlMinutes: 60,
+  coldGuard: 'refuse',
 }
 
 export function parentOf(route: string): string | undefined {
@@ -165,6 +167,58 @@ export function costOf(usage: Usage, modelId: string, ttlMinutes = DEFAULT_TTL):
   )
 }
 
+export const ttlOf = (config: RouterConfig) => config.cacheTtlMinutes ?? DEFAULT_TTL
+
+/** How long ago the cache expired; negative while it is still warm. */
+export const coldForMs = (lastAt: number, now: number, ttlMinutes: number) => now - lastAt - ttlMinutes * 60_000
+
+/** Writing `tokens` to the cache, reading them warm instead, and the premium the write pays over the read. */
+export function rewritePrice(modelId: string, tokens: number, ttlMinutes = DEFAULT_TTL): { write: number; warm: number; premium: number } {
+  const key = modelKeyOf(modelId)
+  if (key === undefined) return { write: 0, warm: 0, premium: 0 }
+  const p = MODELS[key]
+  const write = (tokens * writePrice(p, ttlMinutes)) / 1e6
+  const warm = (tokens * p.cacheRead) / 1e6
+  return { write, warm, premium: write - warm }
+}
+
+/** Below this the rewrite costs cents, so the guard stays out of the way. */
+export const GUARD_MIN_TOKENS = 50_000
+
+export type RewriteFacts = {
+  isAfterCompact: boolean
+  prevAt?: number
+  now: number
+  ttlMinutes: number
+  from?: { model: string; effort?: Effort }
+  to: { model: string; effort?: Effort }
+}
+
+/** Why a main-loop request would rebuild the cache; compaction rebuilds it anyway, so that one is not counted. */
+export function rewriteCause(f: RewriteFacts): Rewrite['cause'] | undefined {
+  if (f.isAfterCompact) return undefined
+  if (f.prevAt !== undefined && coldForMs(f.prevAt, f.now, f.ttlMinutes) >= 0) return 'cold'
+  if (f.from !== undefined && (f.from.model !== f.to.model || f.from.effort !== f.to.effort)) return 'switch'
+  return undefined
+}
+
+/**
+ * With a cause, a request that wrote most of a sizeable prompt rebuilt the
+ * cache; without one the write is just new content, such as a big file read.
+ */
+export function rewriteOf(usage: Usage, modelId: string, cause: Rewrite['cause'] | undefined, ttlMinutes = DEFAULT_TTL): Rewrite | undefined {
+  const prompt = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+  const write = usage.cache_creation_input_tokens
+  if (cause === undefined || prompt <= 20_000 || write < 0.5 * prompt || modelKeyOf(modelId) === undefined) return undefined
+  return { cause, tokens: write, usd: rewritePrice(modelId, write, ttlMinutes).premium }
+}
+
+export function fmtAge(ms: number): string {
+  const minutes = Math.max(0, Math.round(ms / 60_000))
+  const h = Math.floor(minutes / 60)
+  return h > 0 ? `${h}h${String(minutes % 60).padStart(2, '0')}m` : `${minutes}m`
+}
+
 export const EMPTY_SPEND: RouteSpend = { requests: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, usd: 0 }
 
 export function addSpend(spend: RouteSpend, usage: Usage, modelId: string, ttlMinutes = DEFAULT_TTL): RouteSpend {
@@ -218,8 +272,7 @@ export function shouldSwitch(f: SwitchFacts): boolean {
   const toOut = TURN_OUTPUT[f.to.effort ?? 'medium'] * to.output
   if (toOut >= fromOut) return true
   const saving = (fromOut - toOut) / 1e6
-  const switchCost = (f.contextTokens * (writePrice(to, f.ttlMinutes) - to.cacheRead)) / 1e6
-  return saving > switchCost
+  return saving > rewritePrice(f.to.model, f.contextTokens, f.ttlMinutes).premium
 }
 
 export function parseSetting(model: string | undefined, effort: string | undefined): RouteSetting | string {
@@ -309,10 +362,7 @@ function turnCost(r: Resolved, fallbackModel: string, context: number): number {
 }
 
 function rewriteCost(r: Resolved, fallbackModel: string, context: number, ttlMinutes: number): number {
-  const key = modelKeyOf(r.model ?? fallbackModel)
-  if (key === undefined) return 0
-  const p = MODELS[key]
-  return (context * (writePrice(p, ttlMinutes) - p.cacheRead)) / 1e6
+  return rewritePrice(r.model ?? fallbackModel, context, ttlMinutes).premium
 }
 
 const same = (a: Resolved, b: Resolved) => a.model === b.model && a.effort === b.effort
@@ -349,5 +399,5 @@ export function estimateChanges(
 export function modeSwitchCost(config: RouterConfig, contextTokens: number, sessionModel: string): number {
   const plan = resolve(config, 'plan')
   const main = resolve(config, 'main')
-  return same(plan, main) ? 0 : rewriteCost(plan, sessionModel, contextTokens, config.cacheTtlMinutes ?? DEFAULT_TTL)
+  return same(plan, main) ? 0 : rewriteCost(plan, sessionModel, contextTokens, ttlOf(config))
 }

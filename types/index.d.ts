@@ -8,7 +8,10 @@ export type RouterConfig = {
   preset: string
   routes: Record<string, RouteSetting>
   cacheTtlMinutes?: number
+  coldGuard?: ColdGuard
 }
+export type ColdGuard = 'refuse' | 'warn' | 'off'
+export type Rewrite = { cause: 'cold' | 'switch'; tokens: number; usd: number }
 export type RouteSpend = {
   requests: number
   input: number
@@ -25,6 +28,7 @@ export type Health = {
   ctxLevel: 'success' | 'warning' | 'error'
   last: number
   toggle: number
+  coldUsd?: number
   fiveHour?: number
   resetMinutes?: number
   sevenDay?: number
@@ -42,7 +46,7 @@ export type PromptItem = {
   output: number
   usd: number
 }
-export type PromptCost = { usd: number; requests: number; items: PromptItem[] }
+export type PromptCost = { usd: number; requests: number; items: PromptItem[]; rewrites?: Rewrite[] }
 export type PromptRecord = {
   at: number
   repo: string
@@ -52,6 +56,7 @@ export type PromptRecord = {
   requests: number
   agents: number
   models?: Record<string, number>
+  rewrites?: Rewrite[]
 }
 export type ActiveRoute = {
   route: string

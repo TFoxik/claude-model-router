@@ -1,20 +1,26 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, BoxProps, ElementConstructor, EngineInterface, Register } from 'claude-code'
 
-import type { ActiveRoute, Effort, Health, LastUsage, PromptCost, PromptItem, PromptRecord, RouteSetting, RouteSpend, RouterConfig } from '../types'
+import type { ActiveRoute, ColdGuard, Effort, Health, LastUsage, PromptCost, PromptItem, PromptRecord, Rewrite, RouteSetting, RouteSpend, RouterConfig } from '../types'
 import {
   AUTO_LABELS,
   DEFAULT_CONFIG,
-  DEFAULT_TTL,
   EFFORTS,
   EMPTY_SPEND,
   FORK,
+  GUARD_MIN_TOKENS,
   MODELS,
   PRESETS,
   PRICES_AS_OF,
   ROUTES,
   SUB_CONTEXT,
   addSpend,
+  coldForMs,
+  fmtAge,
+  rewriteCause,
+  rewriteOf,
+  rewritePrice,
+  ttlOf,
   HISTORY_LIMIT,
   commandLabel,
   commandStats,
@@ -71,16 +77,40 @@ const shortRoute = (cfg: RouterConfig, route: string) => {
   return `${model}${r.effort ? ` ${r.effort}` : ''}`
 }
 
+async function routedMainModel($: $, cfg: RouterConfig, fallback: string): Promise<string> {
+  return resolve(cfg, (await read($, isPlan)) ? 'plan' : 'main').model ?? fallback
+}
+
+const promptTokens = (last: LastUsage) => last.input + last.cacheRead + last.cacheWrite
+
+/** The price of the next main-loop send when the cache has gone cold over a big context. */
+async function coldSend($: $, cfg: RouterConfig): Promise<{ at: number; text: string } | undefined> {
+  const last = await read($, lastUsage)
+  if (last === null) return undefined
+  const ttl = ttlOf(cfg)
+  const coldFor = coldForMs(last.at, await $.clock.now().catch(() => Date.now()), ttl)
+  if (coldFor < 0) return undefined
+  const context = (await $.session.usage()).context.tokens ?? promptTokens(last)
+  if (context < GUARD_MIN_TOKENS) return undefined
+  const model = await routedMainModel($, cfg, last.model)
+  const { write, warm } = rewritePrice(model, context, ttl)
+  return {
+    at: last.at,
+    text: `the prompt cache went cold ${fmtAge(coldFor)} ago. This send re-writes ~${kTokens(context)} tokens on ${labelOf(model)} = ${money(write)} (warm would be ${money(warm)}).`,
+  }
+}
+
 async function refreshStatus($: $) {
   const last = await read($, lastUsage)
   if (last === null) return
   const { context, rateLimits } = await $.session.usage()
-  const tokens = context.tokens ?? last.input + last.cacheRead + last.cacheWrite
-  const prompt = last.input + last.cacheRead + last.cacheWrite
+  const tokens = context.tokens ?? promptTokens(last)
+  const prompt = promptTokens(last)
   const five = rateLimits.find(one => one.kind === 'five_hour')
   const seven = rateLimits.find(one => one.kind === 'seven_day')
   const now = await $.clock.now().catch(() => Date.now())
-  const ttl = (await read($, config)).cacheTtlMinutes ?? 60
+  const cfg = await read($, config)
+  const ttl = ttlOf(cfg)
   const warmMinutes = Math.max(0, Math.ceil((last.at + ttl * 60_000 - now) / 60_000))
   const resetMs = five?.resetsAt ? Date.parse(five.resetsAt) - now : undefined
   if (mem.compactCheckedAt === undefined || now - mem.compactCheckedAt > 10 * 60_000) {
@@ -95,7 +125,10 @@ async function refreshStatus($: $) {
     ctx: context.percent ?? Math.round((tokens / context.window) * 100),
     ctxLevel: contextLevel(tokens, context.window, mem.compactAt),
     last: (await read($, promptCost))?.usd ?? last.usd,
-    toggle: modeSwitchCost(await read($, config), tokens, last.model),
+    toggle: modeSwitchCost(cfg, tokens, last.model),
+    ...(warmMinutes === 0 && tokens >= GUARD_MIN_TOKENS
+      ? { coldUsd: rewritePrice(await routedMainModel($, cfg, last.model), tokens, ttl).write }
+      : {}),
     ...(five ? { fiveHour: Math.round(five.percentUsed) } : {}),
     ...(resetMs !== undefined && resetMs > 0 ? { resetMinutes: Math.round(resetMs / 60_000) } : {}),
     ...(seven ? { sevenDay: Math.round(seven.percentUsed) } : {}),
@@ -114,21 +147,30 @@ function modelsOf(p: PromptCost): Record<string, number> {
   return out
 }
 
-async function recordPrompt($: $) {
-  const p = await read($, promptCost)
-  const meta = mem.current
-  mem.current = undefined
-  if (p === null || meta === undefined || p.usd <= 0) return
-  const rec: PromptRecord = {
+function recordOf(meta: { label: string; text: string; at: number }, p: PromptCost): PromptRecord {
+  return {
     at: meta.at,
     repo: mem.repo,
     label: meta.label,
     text: meta.text,
     usd: p.usd,
     requests: p.requests,
-    agents: p.items.filter(one => one.id !== one.route).length,
+    agents: subagentCount(p),
     models: modelsOf(p),
+    rewrites: p.rewrites,
   }
+}
+
+const CAUSE_LABEL: Record<Rewrite['cause'], string> = { cold: 'cold cache', switch: 'route switch' }
+
+const rewriteText = (one: Rewrite) => `${CAUSE_LABEL[one.cause]} rewrite of ${kTokens(one.tokens)} tokens, ${money(one.usd)}`
+
+async function recordPrompt($: $) {
+  const p = await read($, promptCost)
+  const meta = mem.current
+  mem.current = undefined
+  if (p === null || meta === undefined || p.usd <= 0) return
+  const rec = recordOf(meta, p)
   const next = await update($, history, all => [...all, rec].slice(-HISTORY_LIMIT))
   await $.store.set('history', next)
 }
@@ -159,15 +201,14 @@ async function renderStatsPane($: $, e: Args<'ui.render'>) {
   const saved = await read($, history)
   const live = await read($, promptCost)
   const current = mem.current
-  const all: PromptRecord[] =
-    live && current && live.usd > 0
-      ? [...saved, { at: current.at, repo: mem.repo, label: current.label, text: current.text, usd: live.usd, requests: live.requests, agents: live.items.filter(one => one.id !== one.route).length, models: modelsOf(live) }]
-      : saved
+  const all = live && current && live.usd > 0 ? [...saved, recordOf(current, live)] : saved
   const records = scope === 'repo' ? all.filter(r => r.repo === mem.repo) : all
   const now = await $.clock.now().catch(() => Date.now())
   const sum = (rs: readonly PromptRecord[]) => rs.reduce((acc, r) => acc + r.usd, 0)
   const today = sum(records.filter(r => sameDay(r.at, now)))
   const week = sum(records.filter(r => now - r.at < 7 * 86_400_000))
+  const rewrites = records.flatMap(r => r.rewrites ?? [])
+  const rewriteUsd = rewrites.reduce((acc, one) => acc + one.usd, 0)
   const commands = commandStats(records).slice(0, 10)
   const priciest = [...records].sort((x, y) => y.usd - x.usd).slice(0, 8)
   const setScope = async (next: 'repo' | 'all') => {
@@ -205,6 +246,7 @@ async function renderStatsPane($: $, e: Args<'ui.render'>) {
       </Box>
       <Text dimColor>
         today {money(today)} · 7 days {money(week)} · all {money(sum(records))} · {records.length} prompts
+        {rewrites.length > 0 ? ` · ${rewrites.length} cache rewrite${rewrites.length === 1 ? '' : 's'} ${money(rewriteUsd)}` : ''}
       </Text>
       {records.length === 0 ? (
         <Text dimColor>Nothing recorded yet.</Text>
@@ -219,7 +261,7 @@ async function renderStatsPane($: $, e: Args<'ui.render'>) {
           <Box flexDirection="column">
             <Text bold dimColor>MOST EXPENSIVE PROMPTS</Text>
             {priciest.map((r, i) =>
-              row(`p:${i}`, r.label === 'prompt' ? 'subtle' : 'suggestion', r.label === 'prompt' ? r.text : `${r.label} ${r.text.replace(r.label, '').trim()}`.trim(), money(r.usd), [`${day(r.at)} · ${scope === 'all' ? `${r.repo} · ` : ''}${r.requests} req · ${r.agents} subagent${r.agents === 1 ? '' : 's'}`, modelMix(r.models, money)].filter(Boolean).join('\n   ')),
+              row(`p:${i}`, r.label === 'prompt' ? 'subtle' : 'suggestion', r.label === 'prompt' ? r.text : `${r.label} ${r.text.replace(r.label, '').trim()}`.trim(), money(r.usd), [`${day(r.at)} · ${scope === 'all' ? `${r.repo} · ` : ''}${r.requests} req · ${r.agents} subagent${r.agents === 1 ? '' : 's'}${(r.rewrites ?? []).map(one => ` · ${rewriteText(one)}`).join('')}`, modelMix(r.models, money)].filter(Boolean).join('\n   ')),
             )}
           </Box>
         </>
@@ -238,9 +280,13 @@ async function renderHealthRow($: $, e: Args<'ui.render'>) {
     <Box flexDirection="row">
       <Text dimColor>
         {'cache '}
-        {hp.warmMinutes === 0 ? <Text color="error">cold</Text> : <Text color={cacheColor}>{hp.cache}%</Text>}
-        {hp.warmMinutes === 0 ? null : ' '}
-        {hp.warmMinutes === 0 ? null : <Text color={hp.warmMinutes <= 5 ? 'warning' : undefined}>{hp.warmMinutes}m</Text>}
+        {hp.warmMinutes === 0 ? (
+          <Text color="error">{hp.coldUsd === undefined ? 'cold' : `cold ${money(hp.coldUsd)}`}</Text>
+        ) : (
+          <Text>
+            <Text color={cacheColor}>{hp.cache}%</Text> <Text color={hp.warmMinutes <= 5 ? 'warning' : undefined}>{hp.warmMinutes}m</Text>
+          </Text>
+        )}
         {'  ·  '}
       </Text>
       <Button key="ctx" label="context" plain dimColor onPress={() => $.ui.open({ id: CTX_PANE, title: 'Context' })} />
@@ -373,7 +419,7 @@ export async function renderPane($: EngineInterface, e: Args<'ui.render'>) {
   const contextTokens = (await $.session.usage()).context.tokens ?? 0
   const sessionModel = now?.model ?? (await $.session.model())
   const liveRoute = isPlanning ? 'plan' : 'main'
-  const ttlMinutes = cfg.cacheTtlMinutes ?? DEFAULT_TTL
+  const ttlMinutes = ttlOf(cfg)
   const changes = pending ? estimateChanges(cfg, pending, { contextTokens, liveRoute, sessionModel, ttlMinutes }) : []
   const changed = new Set(changes.map(one => one.route))
   const upFront = changes.reduce((sum, one) => sum + one.switchCost, 0)
@@ -627,6 +673,9 @@ async function renderLastPane($: $, e: Args<'ui.render'>) {
       <Text dimColor>
         {p.requests} requests · main {money(p.usd - subTotal)} · {subs.length} subagent{subs.length === 1 ? '' : 's'} {money(subTotal)}
       </Text>
+      {(p.rewrites ?? []).map((one, i) => (
+        <Text key={`rw:${i}`} color="warning">includes a {rewriteText(one)}</Text>
+      ))}
       <Box flexDirection="column" gap={1}>
         {main.map(row)}
         {subs.map(row)}
@@ -771,6 +820,12 @@ async function renderBand($: $, e: Args<'ui.render'>) {
   )
 }
 
+const GUARD_TEXT: Record<ColdGuard, string> = {
+  refuse: 'Cold sends are dropped once with their price; the resend goes through.',
+  warn: 'Cold sends go through with their price shown.',
+  off: 'Cold-send guard off.',
+}
+
 const asEffort = (effort: unknown): Effort | undefined =>
   typeof effort === 'string' ? (effort as Effort) : undefined
 
@@ -780,7 +835,7 @@ type Decision = { model: string; effort?: Effort; isHeld: boolean }
 const mem = {
   autoEffort: new Map<string, Effort>(),
   decisions: new Map<string, Decision>(),
-  lastMain: undefined as { route: string; model: string; effort?: Effort } | undefined,
+  lastMain: undefined as { route: string; model: string; effort?: Effort; at: number } | undefined,
   isAfterCompact: false,
   isNewPrompt: true,
   repo: 'unknown',
@@ -789,6 +844,7 @@ const mem = {
   compactAt: undefined as number | undefined,
   compactCheckedAt: undefined as number | undefined,
   pendingWorkflow: 0,
+  coldAckedAt: undefined as number | undefined,
 }
 
 async function routeOfAgent($: $, agentId: string): Promise<string | undefined> {
@@ -808,6 +864,7 @@ async function decideMain(
   index: number,
   route: string,
   model: string,
+  isAfterCompact: boolean,
   effort?: Effort,
 ): Promise<Decision> {
   const known = mem.decisions.get(turnId)
@@ -822,13 +879,12 @@ async function decideMain(
     const contextTokens = (await $.session.usage()).context.tokens ?? 0
     const from = { model: last.model, effort: last.effort }
     const to = { model: toModel, effort: toEffort }
-    const ttlMinutes = (await read($, config)).cacheTtlMinutes ?? DEFAULT_TTL
-    if (!shouldSwitch({ contextTokens, isAfterCompact: mem.isAfterCompact, from, to, ttlMinutes })) {
+    const ttlMinutes = ttlOf(await read($, config))
+    if (!shouldSwitch({ contextTokens, isAfterCompact, from, to, ttlMinutes })) {
       toEffort = last.effort
       isHeld = true
     }
   }
-  mem.isAfterCompact = false
   mem.autoEffort.delete(turnId)
   const decision = { model: toModel, effort: toEffort, isHeld }
   mem.decisions.clear()
@@ -855,9 +911,13 @@ export const register: Register = on => {
     $.clock.every(60_000, () => void refreshStatus($))
     await $.command.register({
       name: 'route',
-      description: 'Model router: open the pane, or `stats`, `context`, `last`, `preset <name>`, `set <route> <model> [effort]`, `on`, `off`, `band on|off`',
-      argumentHint: '[stats | context | last | preset <name> | set <route> <model> [effort] | on | off | band on|off]',
+      description: 'Model router: open the pane, or `stats`, `context`, `last`, `preset <name>`, `set <route> <model> [effort]`, `on`, `off`, `band on|off`, `guard refuse|warn|off`',
+      argumentHint: '[stats | context | last | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off]',
     })
+    const hasCacheTax = (await read($, config)).coldGuard !== 'off' && (await $.command.list().catch(() => [])).some(one => one.name === 'cache-tax')
+    if (hasCacheTax) {
+      $.ui.log('model-router: cache-tax is installed too, so a cold send is guarded twice. Run /route guard off to leave it to cache-tax.')
+    }
     return next(e)
   })
 
@@ -902,8 +962,18 @@ export const register: Register = on => {
     return started
   })
 
-  on('prompt.submit', ($, e, next) => {
+  on('prompt.submit', async ($, e, next) => {
     if (e.turnId === undefined) {
+      const cfg = await read($, config)
+      const guard = cfg.coldGuard ?? 'refuse'
+      if (guard !== 'off' && e.origin.kind !== 'plugin' && !e.text.trimStart().startsWith('/')) {
+        const cold = await coldSend($, cfg).catch(() => undefined)
+        if (cold !== undefined && guard === 'warn') $.ui.log(`model-router: ${cold.text} Sending anyway.`)
+        if (cold !== undefined && guard === 'refuse' && mem.coldAckedAt !== cold.at) {
+          mem.coldAckedAt = cold.at
+          return { drop: `model-router: ${cold.text} Send it again to pay it, or /clear and start from a note.` }
+        }
+      }
       mem.isNewPrompt = true
       mem.pendingLabel = commandLabel(e.text)
     }
@@ -948,11 +1018,13 @@ export const register: Register = on => {
     let model = e.model
     let effort = asEffort(e.effort)
     let isHeld = false
+    const isAfterCompact = e.agentId === undefined && mem.isAfterCompact
 
     if (e.agentId === undefined) {
+      mem.isAfterCompact = false
       route = (await read($, isPlan)) ? 'plan' : 'main'
       if (cfg.isEnabled) {
-        const decision = await decideMain($, e.turnId, e.index, route, e.model, effort)
+        const decision = await decideMain($, e.turnId, e.index, route, e.model, isAfterCompact, effort)
         model = decision.model
         effort = decision.effort
         isHeld = decision.isHeld
@@ -973,12 +1045,16 @@ export const register: Register = on => {
     const stepAt = await $.clock.now().catch(() => Date.now())
     if (result.usage) {
       const usage = result.usage
-      const ttl = cfg.cacheTtlMinutes ?? DEFAULT_TTL
+      const ttl = ttlOf(cfg)
       await update($, spend, all => ({ ...all, [key]: addSpend(all[key] ?? EMPTY_SPEND, usage, usage.model, ttl) }))
       const itemId = e.agentId ?? key
       const label = e.agentId === undefined ? (key === 'plan' ? 'Main loop (plan mode)' : 'Main loop') : ((await read($, agentLabels))[e.agentId] ?? key)
       const usd = costOf(usage, usage.model, ttl)
       const stepEffort = typeof effort === 'string' ? effort : undefined
+      const rewrite =
+        e.agentId === undefined
+          ? rewriteOf(usage, usage.model, rewriteCause({ isAfterCompact, prevAt: mem.lastMain?.at, now: stepAt, ttlMinutes: ttl, from: mem.lastMain, to: { model, effort } }), ttl)
+          : undefined
       await update($, promptCost, p => {
         const was = p ?? { usd: 0, requests: 0, items: [] }
         const old: PromptItem = was.items.find(one => one.id === itemId) ?? {
@@ -998,7 +1074,7 @@ export const register: Register = on => {
         const items = was.items.some(one => one.id === itemId)
           ? was.items.map(one => (one.id === itemId ? item : one))
           : [...was.items, item]
-        return { usd: was.usd + usd, requests: was.requests + 1, items }
+        return { usd: was.usd + usd, requests: was.requests + 1, items, rewrites: rewrite ? [...(was.rewrites ?? []), rewrite] : was.rewrites }
       })
       if (e.agentId === undefined) {
         await update($, lastUsage, () => ({
@@ -1016,7 +1092,7 @@ export const register: Register = on => {
       if (mem.lastMain !== undefined && mem.lastMain.route !== key && cfg.isEnabled) {
         $.ui.toast(`Route ${key}: ${labelOf(model)}${effort ? ` ${effort}` : ''}`)
       }
-      mem.lastMain = { route: key, model, effort }
+      mem.lastMain = { route: key, model, effort, at: stepAt }
       await update($, active, () => ({ route: key, model, effort, isHeld }))
     }
     await refreshStatus($)
@@ -1047,6 +1123,12 @@ export const register: Register = on => {
       await setConfig($, c => ({ ...c, cacheTtlMinutes: minutes }))
       return { text: `Cache lifetime set to ${minutes} minutes.` }
     }
+    if (verb === 'guard') {
+      const mode = rest[0] as ColdGuard
+      if (!Object.hasOwn(GUARD_TEXT, mode ?? '')) return { text: 'Usage: /route guard refuse|warn|off (what a send onto a cold prompt cache does)' }
+      await setConfig($, c => ({ ...c, coldGuard: mode }))
+      return { text: GUARD_TEXT[mode] }
+    }
     if (verb === 'band') {
       const isShown = rest[0] !== 'off'
       await setBand($, isShown)
@@ -1071,7 +1153,7 @@ export const register: Register = on => {
       await setConfig($, c => ({ ...c, preset: 'custom', routes: { ...c.routes, [route]: setting } }))
       return { text: `${route} → ${setting.model} · ${setting.effort}.` }
     }
-    return { text: 'Usage: /route [stats | context | last | preset <name> | set <route> <model> [effort] | on | off | band on|off | ttl 5|60]' }
+    return { text: 'Usage: /route [stats | context | last | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]' }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, ($, e) => renderPane($, e))
