@@ -2,6 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Lesson, PromptItem } from '../types'
 import {
+  awayText,
   byKind,
   capLessons,
   lessonFromCompact,
@@ -111,11 +112,11 @@ test('expiry lesson: once, as the warm time crosses the warning mark, over a big
   expect(cents([lessonFromExpiry(6, 5, 60, 200_000, opus)!])[0]).toEqual({
     kind: 'cache-expiring',
     usd: 1.56,
-    fact: 'The prompt cache goes cold in 5m. A send before then reads the 200k tokens for $0.04; after, it re-writes them on Opus 5.5 for $1.60.',
+    fact: 'The prompt cache goes cold in 5m. A send before then reads the 200k tokens for $0.04; after, it re-writes them on Opus 5.5 for $1.60. Leaving for longer? /route away',
   })
   expect(lessonFromExpiry(6, 4, 60, 200_000, opus)!.fact).toMatch(/^The prompt cache goes cold in 4m\./)
   expect(lessonFromExpiry(3, 2, 5, 200_000, opus)!.fact).toBe(
-    'The prompt cache goes cold in 2m. A send before then reads the 200k tokens for $0.04; after, it re-writes them on Opus 5.5 for $1.00.',
+    'The prompt cache goes cold in 2m. A send before then reads the 200k tokens for $0.04; after, it re-writes them on Opus 5.5 for $1.00. Leaving for longer? /route away',
   )
   expect(lessonFromExpiry(5, 5, 60, 200_000, opus)).toBeUndefined()
   expect(lessonFromExpiry(undefined, 5, 60, 200_000, opus)).toBeUndefined()
@@ -189,4 +190,18 @@ test('byKind groups newest first', () => {
   const b = lesson({ kind: 'subagents', at: 2 })
   const c = lesson({ kind: 'cold-rewrite', at: 3 })
   expect(byKind([a, b, c])).toEqual([['cold-rewrite', [c, a]], ['subagents', [b]]])
+})
+
+test('awayText prices the ways to step away for this session', () => {
+  const warm = awayText({ tokens: 200_000, model: opus, ttlMinutes: 60, warmMinutes: 42 })
+  expect(warm).toContain('200k tokens of context on Opus 5.5, cache warm for 42m more (60-minute TTL).')
+  expect(warm).toMatch(/Note \+ \/clear +now ≈ \$0\.06 +on return ≈ \$0\.00/)
+  expect(warm).toMatch(/\/compact +now ≈ \$0\.12 +on return ≈ \$0\.03/)
+  expect(warm).toMatch(/Keep warm +\$0\.04 an hour/)
+  expect(warm).toMatch(/Do nothing +now +\$0\.00 +on return +\$1\.60/)
+  const short = awayText({ tokens: 200_000, model: opus, ttlMinutes: 5, warmMinutes: 3 })
+  expect(short).toMatch(/Keep warm +\$0\.48 an hour/)
+  const cold = awayText({ tokens: 200_000, model: opus, ttlMinutes: 60, warmMinutes: 0 })
+  expect(cold).toContain('The cache is already cold: anything sent now re-writes the 200k tokens for $1.60, so /clear (free) is the cheapest way out.')
+  expect(awayText({ tokens: 200_000, model: 'gpt-x', ttlMinutes: 60, warmMinutes: 10 })).toMatch(/^No prices for gpt-x\./)
 })

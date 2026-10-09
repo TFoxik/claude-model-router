@@ -5,6 +5,8 @@
 ### Added
 
 - Learn mode, off by default: `/route learn on`. Cache rewrites, an expensive model doing most of a prompt, context growing toward auto-compact, compaction and subagent-heavy prompts each become a lesson with the measured numbers: a toast when it happens (at most one per turn, once an hour per topic, three times per topic) and a **Learn** pane that explains each concept the first times and lists the facts. The band shows **Learn ●N** while lessons are unread.
+- Learn mode warns before a cost too: 5 minutes before the cache goes cold while idle, when plan mode is routed differently from normal work (what each switch rewrites, including the way back), and why the cold-send guard held a message.
+- `/route away`: before a break, the ways to step away from a session (note plus `/clear`, `/compact` while warm, `/rename` and `/resume`, keep-warm pings, nothing), each priced for the session's context, routed model and cache.
 
 ## 0.3.2 — 2026-10-09
 

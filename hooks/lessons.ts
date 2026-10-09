@@ -1,5 +1,5 @@
 import type { Effort, Lesson, LessonKind, PromptCost, PromptItem, Rewrite } from '../types'
-import { GUARD_MIN_TOKENS, MODELS, costOf, fmtAge, isSub, kTokens, labelOf, modelKeyOf, money, plural, printable, rewritePrice, routeText } from './routes'
+import { GUARD_MIN_TOKENS, MODELS, PRICES_AS_OF, costOf, fmtAge, isSub, kTokens, labelOf, modelKeyOf, money, plural, printable, rewritePrice, routeText } from './routes'
 
 export type LessonDraft = Pick<Lesson, 'kind' | 'fact' | 'usd'>
 type Level = 'success' | 'warning' | 'error'
@@ -37,7 +37,7 @@ export const CONCEPTS: Record<LessonKind, { title: string; body: string }> = {
   },
   'cache-expiring': {
     title: 'Cache about to go cold',
-    body: 'The prompt cache keeps the conversation cheap to re-send only for its TTL after the last request. Any send before it expires keeps it warm for another full TTL; after it expires, the next send writes the whole context again. If you are done for now, /clear costs nothing and the next session starts small.',
+    body: 'The prompt cache keeps the conversation cheap to re-send only for its TTL after the last request. Any send before it expires keeps it warm for another full TTL; after it expires, the next send writes the whole context again. If you are done for now, /clear costs nothing and the next session starts small. /route away compares the ways to step away, priced for the session.',
   },
   'plan-toggle': {
     title: 'Plan mode switches rewrite the cache',
@@ -166,7 +166,7 @@ export function lessonFromExpiry(prevWarm: number | undefined, warm: number, ttl
   return {
     kind: 'cache-expiring',
     usd: price.premium,
-    fact: `The prompt cache goes cold in ${warm}m. A send before then reads the ${kTokens(tokens)} tokens for ${money(price.warm)}; after, it re-writes them on ${labelOf(model)} for ${money(price.write)}.`,
+    fact: `The prompt cache goes cold in ${warm}m. A send before then reads the ${kTokens(tokens)} tokens for ${money(price.warm)}; after, it re-writes them on ${labelOf(model)} for ${money(price.write)}. Leaving for longer? /route away`,
   }
 }
 
@@ -235,4 +235,43 @@ export function byKind(lessons: readonly Lesson[]): Array<[LessonKind, Lesson[]]
   const groups = new Map<LessonKind, Lesson[]>()
   for (const one of [...lessons].sort((a, b) => b.at - a.at)) groups.set(one.kind, [...(groups.get(one.kind) ?? []), one])
   return [...groups.entries()]
+}
+
+const NOTE_TOKENS = 1_000
+const SUMMARY_TOKENS = 4_000
+
+type AwayFacts = { tokens: number; model: string; ttlMinutes: number; warmMinutes: number }
+
+/** The ways to step away from a session, priced for its context, routed model and cache state. */
+export function awayText(f: AwayFacts): string {
+  const key = modelKeyOf(f.model)
+  if (key === undefined) {
+    return `No prices for ${f.model}. Before a long break: have Claude write the work in progress to a note, /rename, then /clear; or /compact while the cache is warm.`
+  }
+  const out = (tokens: number) => (tokens * MODELS[key].output) / 1e6
+  const { write, warm } = rewritePrice(f.model, f.tokens, f.ttlMinutes)
+  const ctx = `${kTokens(f.tokens)} tokens of context on ${labelOf(f.model)}`
+  if (f.warmMinutes <= 0) {
+    return [
+      `${ctx}. The cache is already cold: anything sent now re-writes the ${kTokens(f.tokens)} tokens for ${money(write)}, so /clear (free) is the cheapest way out.`,
+      'To keep the work: /rename first and /resume later (Pro and Max offer to resume from a summary), or pay the rewrite once and ask Claude for a note before /clear.',
+    ].join('\n')
+  }
+  const row = (name: string, now: string, back: string, how: string) => `  ${name.padEnd(18)}${now.padEnd(16)}${back.padEnd(22)}${how}`
+  return [
+    `${ctx}, cache warm for ${f.warmMinutes}m more (${f.ttlMinutes}-minute TTL).`,
+    '',
+    row('Note + /clear', `now ≈ ${money(warm + out(NOTE_TOKENS))}`, 'on return ≈ $0.00', 'Ask Claude to write the work in progress to a file, /rename, /clear; start the next session from the note.'),
+    row(
+      '/compact',
+      `now ≈ ${money(warm + out(SUMMARY_TOKENS))}`,
+      `on return ≈ ${money(rewritePrice(f.model, SUMMARY_TOKENS, f.ttlMinutes).write)}`,
+      'Say what to keep: /compact keep the plan, open TODOs and touched files. Only while warm: cold, it reads everything at full price.',
+    ),
+    row('/rename, /resume', 'now   $0.00', 'on return: summary', 'On Pro and Max, /resume of a big session offers to continue from a summary.'),
+    row('Keep warm', `${money(warm * Math.ceil(60 / f.ttlMinutes))} an hour`, '', 'An idle ping before each expiry (cache-tax does this); pays off for a few hours, not overnight.'),
+    row('Do nothing', 'now   $0.00', `on return   ${money(write)}`, 'The first send re-writes the whole context.'),
+    '',
+    `Prices as of ${PRICES_AS_OF}, estimates; ≈ also guesses the note (${kTokens(NOTE_TOKENS)}) and summary (${kTokens(SUMMARY_TOKENS)}) sizes.`,
+  ].join('\n')
 }

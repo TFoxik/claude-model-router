@@ -265,6 +265,9 @@ export function costOf(usage: Usage, modelId: string, ttlMinutes = DEFAULT_TTL):
 /** How long ago the cache expired; negative while it is still warm. */
 export const coldForMs = (lastAt: number, now: number, ttlMinutes: number) => now - lastAt - ttlMinutes * 60_000
 
+/** Whole minutes the cache stays warm, 0 once cold. */
+export const warmMinutesLeft = (lastAt: number, now: number, ttlMinutes: number) => Math.max(0, Math.ceil(-coldForMs(lastAt, now, ttlMinutes) / 60_000))
+
 /** Writing `tokens` to the cache, reading them warm instead, and the premium the write pays over the read. */
 export function rewritePrice(modelId: string, tokens: number, ttlMinutes = DEFAULT_TTL): { write: number; warm: number; premium: number } {
   const key = modelKeyOf(modelId)

@@ -5,6 +5,7 @@ import type { ActiveRoute, ColdGuard, Effort, Health, LastUsage, Lesson, LessonK
 import {
   CONCEPTS,
   TOAST_MS,
+  awayText,
   capLessons,
   lessonFromCompact,
   lessonFromContext,
@@ -57,6 +58,7 @@ import {
   subagentCount,
   sumUsd,
   todayUsd,
+  warmMinutesLeft,
   withoutText,
   withPreset,
   withRoute,
@@ -234,6 +236,16 @@ async function coldSend($: $, cfg: RouterConfig): Promise<{ at: number; text: st
   }
 }
 
+/** `/route away`: the ways to step away, priced for this session as it stands. */
+async function awayReport($: $): Promise<string> {
+  const last = await read($, lastUsage)
+  if (last === null) return 'Nothing is cached in this session yet.'
+  const cfg = await read($, config)
+  const tokens = (await $.session.usage()).context.tokens ?? promptTokens(last)
+  const warmMinutes = warmMinutesLeft(last.at, await nowOf($), cfg.cacheTtlMinutes)
+  return awayText({ tokens, model: await routedMainModel($, cfg, last.model), ttlMinutes: cfg.cacheTtlMinutes, warmMinutes })
+}
+
 async function refreshStatus($: $) {
   const last = await read($, lastUsage)
   if (last === null) return
@@ -247,7 +259,7 @@ async function refreshStatus($: $) {
   const ttl = cfg.cacheTtlMinutes
   const prev = await read($, health)
   const model = await routedMainModel($, cfg, last.model)
-  const warmMinutes = Math.max(0, Math.ceil(-coldForMs(last.at, now, ttl) / 60_000))
+  const warmMinutes = warmMinutesLeft(last.at, now, ttl)
   if (mem.compactCheckedAt === undefined || now - mem.compactCheckedAt > 10 * 60_000) {
     const { context: detailed } = await $.session.usage({ breakdown: 'summary' })
     const b = detailed.breakdown
@@ -404,7 +416,7 @@ const LEARN_ON_TEXT =
 const asEffort = (effort: unknown): Effort | undefined =>
   typeof effort === 'string' ? (effort as Effort) : undefined
 
-const USAGE = '[stats [clear | text on|off] | context | last | learn [on|off] | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
+const USAGE = '[stats [clear | text on|off] | context | last | learn [on|off] | away | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
 
 // Origins a person typed or drove: only these may change the routes, and only these are held by the cold guard.
 const USER_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
@@ -734,6 +746,7 @@ export const register: Register = on => {
       openPane($)(pane)
       return { text: `${PANES[pane].title} pane opened.` }
     }
+    if (verb === 'away') return { text: await awayReport($) }
     if (!USER_ORIGINS.has(e.origin.kind)) return { text: `model-router: /route ${verb} only runs when you type it.` }
     if (verb === 'learn' && (rest[0] === 'on' || rest[0] === 'off')) {
       const isOn = rest[0] === 'on'

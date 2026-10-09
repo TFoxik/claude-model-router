@@ -890,7 +890,7 @@ test('learn mode: a cold rewrite toasts once per turn, lands in the pane, and th
   const { toasts, prompt } = await coldPrompts($, on, true)
   await prompt('cold', usageOf(0, 100_000))
   expect(toasts).toEqual([
-    'Cache about to go cold: The prompt cache goes cold in 5m. A send before then reads the 100k tokens for $0.02; after, it re-writes them on Opus 5.5 for $0.80. · /route learn',
+    'Cache about to go cold: The prompt cache goes cold in 5m. A send before then reads the 100k tokens for $0.02; after, it re-writes them on Opus 5.5 for $0.80. Leaving for longer? /route away · /route learn',
     'Cache went cold: The cache had expired after 1h01m idle, so this send re-wrote 100k tokens on Opus 5.5 for $0.80; read warm they would have cost $0.02. · /route learn',
   ])
   const band = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
@@ -1019,7 +1019,7 @@ test('learn mode warns while idle, before the cache goes cold', async ($, on) =>
   expect(toasts).toEqual([])
   await clock.advance(60_000)
   expect(toasts).toEqual([
-    'Cache about to go cold: The prompt cache goes cold in 5m. A send before then reads the 200k tokens for $0.04; after, it re-writes them on Opus 5.5 for $1.60. · /route learn',
+    'Cache about to go cold: The prompt cache goes cold in 5m. A send before then reads the 200k tokens for $0.04; after, it re-writes them on Opus 5.5 for $1.60. Leaving for longer? /route away · /route learn',
   ])
 })
 
@@ -1038,4 +1038,12 @@ test('learn mode warns that leaving plan mode will rewrite the cache too', async
   ])
   await prompt('p2', () => attach($, 'plan_mode'))
   expect(toasts.filter(one => !one.startsWith('Route ')).length).toBe(1)
+})
+
+test('/route away prices stepping away for this session, from anywhere', async ($, on) => {
+  const { clock } = await learningSession($, on)
+  await clock.advance(18 * 60_000)
+  const run = (kind: string) => $.command.run({ command: 'route', args: 'away', origin: { kind } } as unknown as Args<'command.run'>)
+  const away = await run('peer')
+  expect(away.text).toContain('200k tokens of context on Opus 5.5, cache warm for 42m more (60-minute TTL).')
 })
