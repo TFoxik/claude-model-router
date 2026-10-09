@@ -59,6 +59,8 @@ test('pricey-model lesson: a big Opus share, priced on Sonnet, only when Sonnet 
   expect(lessonsFromPrompt({ usd: 0.4, requests: 1, items: [readHeavy] }, 60)).toEqual([])
   const small = item({ output: 5_000, usd: 0.1 })
   expect(lessonsFromPrompt({ usd: 0.1, requests: 1, items: [small] }, 60)).toEqual([])
+  const mixed = item({ output: 10_000, cacheWrite: 50_000, usd: 0.45 })
+  expect(lessonsFromPrompt({ usd: 0.45, requests: 2, items: [mixed] }, 60)).toEqual([])
   const unknown = item({ model: 'gpt-something', output: 100_000, usd: 2 })
   expect(lessonsFromPrompt({ usd: 2, requests: 1, items: [unknown] }, 60)).toEqual([])
 })
@@ -83,6 +85,10 @@ test('subagents lesson: share, the busiest route, and a reroute hint only for su
   const weird = items.map(one => (one.id === 'main' ? one : { ...one, route: 'sub:x\u001b[2J' }))
   expect(lessonsFromPrompt({ usd: 1, requests: 3, items: weird }, 60)[0]!.fact).not.toContain('\u001b')
   expect(lessonsFromPrompt({ usd: 1, requests: 2, items: items.slice(0, 2) }, 60)).toEqual([])
+  const cheap = items.map(one => ({ ...one, usd: one.usd / 100 }))
+  expect(lessonsFromPrompt({ usd: 0.01, requests: 3, items: cheap }, 60)).toEqual([])
+  const notRoutable = [item({ usd: 0.2 }), item({ id: 'compact-1', route: 'engine', usd: 0.5 }), item({ id: 'f-1', route: 'fork', usd: 0.3 })]
+  expect(lessonsFromPrompt({ usd: 1, requests: 3, items: notRoutable }, 60)).toEqual([])
 })
 
 test('context lesson: only when the level rises, never on the first reading or an unknown model', () => {
@@ -106,12 +112,14 @@ test('compaction lesson', () => {
   expect(lessonFromCompact(0).fact).toBe('The conversation was compacted down to a summary. Turns now re-read far less, but details the summary left out are gone.')
 })
 
-test('pickToast: costliest fresh lesson, not one seen 3 times, not within the hour', () => {
+test('pickToast: costliest fresh lesson, not one toasted 3 times, not within the hour', () => {
   const cold = lesson({ kind: 'cold-rewrite', at: T0, usd: 0.78 })
   const ctx = lesson({ kind: 'context-high', at: T0, usd: 0.06 })
   expect(pickToast([ctx, cold], [], T0)).toBe(cold)
-  const seen3 = [1, 2, 3].map(i => lesson({ kind: 'cold-rewrite', at: T0 - i * 2 * HOUR }))
+  const seen3 = [1, 2, 3].map(i => lesson({ kind: 'cold-rewrite', at: T0 - i * 2 * HOUR, isToasted: true }))
   expect(pickToast([ctx, cold], seen3, T0)).toBe(ctx)
+  const keptNotToasted = [1, 2, 3].map(i => lesson({ kind: 'cold-rewrite', at: T0 - i * 2 * HOUR }))
+  expect(pickToast([ctx, cold], keptNotToasted, T0)).toBe(cold)
   const toastedRecently = [lesson({ kind: 'cold-rewrite', at: T0 - 30 * 60_000, isToasted: true })]
   expect(pickToast([ctx, cold], toastedRecently, T0)).toBe(ctx)
   const toastedLongAgo = [lesson({ kind: 'cold-rewrite', at: T0 - HOUR, isToasted: true })]
@@ -119,10 +127,11 @@ test('pickToast: costliest fresh lesson, not one seen 3 times, not within the ho
   expect(pickToast([], [], T0)).toBeUndefined()
 })
 
-test('toastText leads with the concept title the first time only', () => {
+test('toastText leads with the concept title until the kind has toasted once', () => {
   const cold = lesson({ fact: 'X.' })
   expect(toastText(cold, [])).toBe('Cache went cold: X. · /route learn')
-  expect(toastText(cold, [lesson({})])).toBe('▸ X. · /route learn')
+  expect(toastText(cold, [lesson({})])).toBe('Cache went cold: X. · /route learn')
+  expect(toastText(cold, [lesson({ isToasted: true })])).toBe('▸ X. · /route learn')
 })
 
 test('capLessons keeps the last 20 of each kind, in order', () => {

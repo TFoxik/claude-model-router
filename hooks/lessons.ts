@@ -9,7 +9,7 @@ export const TOAST_COOLDOWN_MS = 3_600_000
 export const TOAST_MS = 8000
 export const PER_KIND = 20
 const MIN_REWRITE_USD = 0.05
-const PRICEY_MIN_USD = 0.25
+const MIN_PROMPT_USD = 0.25
 const PRICEY_SHARE = 0.7
 const PRICEY_SAVING = 0.25
 const SUB_SHARE = 0.5
@@ -17,7 +17,7 @@ const SUB_SHARE = 0.5
 export const CONCEPTS: Record<LessonKind, { title: string; body: string }> = {
   'cold-rewrite': {
     title: 'Cache went cold',
-    body: 'Each request re-sends the whole conversation. A warm prompt cache lets the API read it back cheaply, at about a tenth of the input price. The cache expires after the TTL (1 hour in Claude Code, 5 minutes on some setups). The first send after that writes everything again, at 1.25-2× input. Over a big context that one send can cost more than an hour of work. /clear and start from a short note, or come back before it expires.',
+    body: 'Each request re-sends the whole conversation. A warm prompt cache lets the API read it back cheaply, at a tenth of the input price or less. The cache expires after the TTL (1 hour in Claude Code, 5 minutes on some setups). The first send after that writes everything again, at 1.25-2× input. Over a big context that one send can cost as much as a dozen or more warm turns. /clear and start from a short note, or come back before it expires.',
   },
   'switch-rewrite': {
     title: 'Switching model rewrote the cache',
@@ -25,7 +25,7 @@ export const CONCEPTS: Record<LessonKind, { title: string; body: string }> = {
   },
   'pricey-model': {
     title: 'An expensive model did most of the work',
-    body: 'Models differ in price per token: Opus costs about twice Sonnet for input and output, Fable more, and Haiku a fraction. Effort adds output (thinking) tokens. Use the top model where its judgement pays off (planning, tricky changes) and a cheaper one for routine edits or searches. Cache reads cost about the same everywhere, so the difference shows in output and writes.',
+    body: 'Models differ in price per token: Opus costs about twice Sonnet for input and output, Fable more, and Haiku a fraction. Effort adds output (thinking) tokens. Use the top model where its judgement pays off (planning, tricky changes) and a cheaper one for routine edits or searches. Opus and Sonnet price cache reads the same, so between them the difference shows in output and cache writes.',
   },
   'context-high': {
     title: 'Context is getting big',
@@ -83,11 +83,15 @@ export function lessonFromRewrite(rw: Rewrite, f: RewriteLessonFacts): LessonDra
   }
 }
 
+// An item's tokens priced on its model, matching what it was charged: false once it ran on more than one model.
+const isOneModel = (one: PromptItem, ttlMinutes: number) => Math.abs(costOf(usageOf(one), one.model, ttlMinutes) - one.usd) <= 0.01 * one.usd
+
 function priceyLesson(p: PromptCost, ttlMinutes: number): LessonDraft | undefined {
   const pricey = p.items.filter(one => isPricey(one.model))
-  const actual = pricey.reduce((acc, one) => acc + costOf(usageOf(one), one.model, ttlMinutes), 0)
+  if (!pricey.every(one => isOneModel(one, ttlMinutes))) return undefined
+  const actual = pricey.reduce((acc, one) => acc + one.usd, 0)
   const onSonnet = pricey.reduce((acc, one) => acc + costOf(usageOf(one), MODELS.sonnet.id, ttlMinutes), 0)
-  if (p.usd < PRICEY_MIN_USD || actual < PRICEY_SHARE * p.usd || onSonnet > (1 - PRICEY_SAVING) * actual) return undefined
+  if (p.usd < MIN_PROMPT_USD || actual < PRICEY_SHARE * p.usd || onSonnet > (1 - PRICEY_SAVING) * actual) return undefined
   const labels = [...new Set(pricey.map(one => labelOf(one.model)))].join(' and ')
   return {
     kind: 'pricey-model',
@@ -96,10 +100,13 @@ function priceyLesson(p: PromptCost, ttlMinutes: number): LessonDraft | undefine
   }
 }
 
+// Agents that start fresh and that a route can move; forks share the parent's context and engine agents are not routed.
+const isRoutable = (route: string) => route.startsWith('sub:') || route === 'workflow' || route === 'teammate'
+
 function subagentLesson(p: PromptCost): LessonDraft | undefined {
-  const subs = p.items.filter(isSub)
+  const subs = p.items.filter(one => isSub(one) && isRoutable(one.route))
   const subUsd = subs.reduce((acc, one) => acc + one.usd, 0)
-  if (subs.length < 2 || p.usd <= 0 || subUsd < SUB_SHARE * p.usd) return undefined
+  if (subs.length < 2 || p.usd < MIN_PROMPT_USD || subUsd < SUB_SHARE * p.usd) return undefined
   const byRoute = new Map<string, number>()
   for (const one of subs) byRoute.set(one.route, (byRoute.get(one.route) ?? 0) + one.usd)
   const route = [...byRoute.entries()].sort((a, b) => b[1] - a[1])[0]![0]
@@ -140,18 +147,19 @@ export function lessonFromCompact(beforeTokens: number): LessonDraft {
   }
 }
 
-/** The one fresh lesson worth a toast: costliest first, skipping kinds seen enough or toasted within the cooldown. */
+/** The one fresh lesson worth a toast: costliest first, skipping kinds toasted enough or within the cooldown. */
 export function pickToast(fresh: readonly Lesson[], earlier: readonly Lesson[], now: number): Lesson | undefined {
   const due = fresh.filter(one => {
     const before = earlier.filter(e => e.kind === one.kind)
-    const lastToast = Math.max(-Infinity, ...before.filter(e => e.isToasted).map(e => e.at))
-    return before.length < SEEN_ENOUGH && now - lastToast >= TOAST_COOLDOWN_MS
+    const toasted = before.filter(e => e.isToasted)
+    const lastToast = Math.max(-Infinity, ...toasted.map(e => e.at))
+    return toasted.length < SEEN_ENOUGH && now - lastToast >= TOAST_COOLDOWN_MS
   })
   return [...due].sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0))[0]
 }
 
 export function toastText(one: Lesson, earlier: readonly Lesson[]): string {
-  const isFirst = !earlier.some(e => e.kind === one.kind)
+  const isFirst = !earlier.some(e => e.kind === one.kind && e.isToasted)
   return `${isFirst ? `${CONCEPTS[one.kind].title}: ` : '▸ '}${one.fact} · /route learn`
 }
 
