@@ -1,6 +1,7 @@
 import type { PromptRecord, Rewrite, Scope } from '../../types'
 import { HISTORY_LIMIT, money, plural, statsSummary, sumUsd, typedText } from '../routes'
-import { DATE_W, day, rewriteText } from './kit'
+import { statsTips } from '../tips'
+import { DATE_W, day, rewriteText, tipsSection } from './kit'
 import type { Els, Open } from './kit'
 
 const colorOfLabel = (label: string) => (label === 'prompt' ? undefined : 'suggestion')
@@ -157,6 +158,8 @@ export function statsPaneView(els: Els, { records, scope, repo, now }: StatsData
           </Box>
         </Box>
       )}
+
+      {tipsSection(els, statsTips(records))}
 
       <Text dimColor>estimate · kept across sessions, last {HISTORY_LIMIT} prompts</Text>
     </Box>

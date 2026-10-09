@@ -448,7 +448,12 @@ td .ex { color: var(--muted); font-size: 13.5px; }
               <div class="warn ind">↻ cold cache rewrite of 140k tokens, $1.05</div>
             </div>
           </div>
-          <div class="dim zone" data-z="s5"><span class="pin">5</span>estimate · kept across sessions, last 2000 prompts</div>
+          <div class="zone" data-z="s5"><span class="pin">5</span>
+            <div class="label">TIPS</div>
+            <div><span style="color:#e0b24f">›</span> /code-review averages $1.84 a run over 9 runs, 6× a plain prompt, mostly on Opus 5.5 high: give it a narrower scope, or route its subagents cheaper in /route</div>
+            <div><span style="color:#e0b24f">›</span> /simplify averages $1.12 a run over 14 runs, 4× a plain prompt, mostly on Sonnet 5.5 high: give it a narrower scope, or route its subagents cheaper in /route</div>
+          </div>
+          <div class="dim zone" data-z="s6"><span class="pin">6</span>estimate · kept across sessions, last 2000 prompts</div>
         </div>
       </div>
       <div class="notes">
@@ -456,7 +461,8 @@ td .ex { color: var(--muted); font-size: 13.5px; }
         <div class="note" data-z="s2"><span class="n">2</span><h3>Totals</h3><div class="body"><p>Spend today, over the last 7 days and in all kept history, plus how many prompts that covers.</p><p><span class="m">↻ cache rewrites</span> counts requests that had to rebuild the whole cache, because it went cold or because a route switched model or effort. The amount is what that cost above a normal warm read.</p></div></div>
         <div class="note" data-z="s3"><span class="n">3</span><h3>Average cost per run</h3><div class="body"><p>Each slash command (and <code>prompt</code> for plain messages), ranked by what one run costs on average. The bar compares it to the most expensive command. Below it: number of runs, total, the single most expensive run, and which models the money went to.</p><p>Model colours: <span style="color:#d97757">● Opus</span> · <span style="color:#6ea8e0">● Sonnet</span> · <span style="color:#5fb36b">● Haiku</span> · <span style="color:#a87fd6">● Fable</span>.</p></div></div>
         <div class="note" data-z="s4"><span class="n">4</span><h3>Most expensive prompts</h3><div class="body"><p>The 8 priciest prompts: date, the start of the prompt, cost. Below: requests and subagents, the models used, and any cache rewrite it paid for in yellow.</p></div></div>
-        <div class="note" data-z="s5"><span class="n">5</span><h3>What is kept</h3><div class="body"><p>History lives in the mod's local store and never leaves your machine: per prompt, the first 120 characters of text, the repo name, cost and models. The last 2,000 prompts are kept. <code>/route stats text off</code> stops keeping the text, <code>/route stats clear</code> deletes everything.</p></div></div>
+        <div class="note" data-z="s5"><span class="n">5</span><h3>Tips</h3><div class="body"><p>Up to three patterns in the history worth changing, biggest first: cache rewrites that add up to $1 and a tenth of spend, a command run 3+ times that averages 3× a plain prompt or more, or Opus and Fable doing 80% of $5+ of spend.</p></div></div>
+        <div class="note" data-z="s6"><span class="n">6</span><h3>What is kept</h3><div class="body"><p>History lives in the mod's local store and never leaves your machine: per prompt, the first 120 characters of text, the repo name, cost and models. The last 2,000 prompts are kept. <code>/route stats text off</code> stops keeping the text, <code>/route stats clear</code> deletes everything.</p></div></div>
       </div>
     </div>
   </section>
@@ -490,6 +496,11 @@ td .ex { color: var(--muted); font-size: 13.5px; }
               <div class="dim ind">Sonnet 5.5 high · 2 req · in 30k · cache 12k/14k · out 6k</div>
             </div>
           </div>
+          <div class="zone" data-z="l4"><span class="pin">4</span>
+            <div class="label">TIPS</div>
+            <div><span style="color:#e0b24f">›</span> The cache had gone cold, which cost $0.94 over a warm read: send before it expires, or /clear before a break; /route away compares the options</div>
+            <div><span style="color:#e0b24f">›</span> 3 subagents made up 63% of this prompt ($0.53), most of it sub:general-purpose on Sonnet 5.5. Subagents start with a fresh context, so they never pay a cache rewrite when rerouted.</div>
+          </div>
           <div class="dim">estimate · resets when you send the next prompt</div>
         </div>
       </div>
@@ -497,6 +508,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
         <div class="note" data-z="l1"><span class="n">1</span><h3>Summary</h3><div class="body"><p>Total for the prompt, and how it splits between the main loop and subagents.</p></div></div>
         <div class="note" data-z="l2"><span class="n">2</span><h3>Cache rewrite warning</h3><div class="body"><p>Shown when part of the cost came from rebuilding the cache, with the reason (<b>cold cache</b> or <b>route switch</b>) and the extra cost.</p></div></div>
         <div class="note" data-z="l3"><span class="n">3</span><h3>One row per agent</h3><div class="body"><p>The main loop first, then each subagent with its type and task, most expensive first. Each row shows its share of the prompt, then the model and effort it ran on and its token counts (same format as in the <a href="#routes">Routes pane</a>).</p></div></div>
+        <div class="note" data-z="l4"><span class="n">4</span><h3>Tips</h3><div class="body"><p>Up to three changes for this prompt, biggest saving first: how to avoid the cache rewrite it paid for, a cheaper route when Opus or Fable did most of the work, or which subagent route to move when subagents did most of the spending.</p></div></div>
       </div>
     </div>
   </section>
@@ -534,6 +546,11 @@ td .ex { color: var(--muted); font-size: 13.5px; }
             <div class="label" style="margin-top:6px">MEMORY FILES</div>
             <div><span class="plan">●</span> &nbsp;  6k &nbsp;<span class="dim"> 0.6%</span>&nbsp; Project · my-app/CLAUDE.md</div>
           </div>
+          <div class="zone" data-z="c6"><span class="pin">6</span>
+            <div class="label">TIPS</div>
+            <div><span style="color:#e0b24f">›</span> MCP server github loads 22k of tool schemas: disconnect it in /mcp if this repo does not use it</div>
+            <div><span style="color:#e0b24f">›</span> my-app/CLAUDE.md (Project) is 6k, re-sent every turn: move rarely needed parts into a skill or a doc Claude reads when it needs it</div>
+          </div>
         </div>
       </div>
       <div class="notes">
@@ -542,6 +559,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
         <div class="note" data-z="c3"><span class="n">3</span><h3>Auto-compact</h3><div class="body"><p>Where Claude Code will compact the conversation, and how many tokens are left until then.</p></div></div>
         <div class="note" data-z="c4"><span class="n">4</span><h3>In use / not sent</h3><div class="body"><p><b>In use</b> is what is sent with every request: messages, tools, memory files, and so on. <b>Not sent</b> covers deferred tools (loaded only when needed), free space and the buffer kept for compaction.</p></div></div>
         <div class="note" data-z="c5"><span class="n">5</span><h3>Biggest MCP servers and memory files</h3><div class="body"><p>The top five of each by size: the first places to look when context fills up quickly.</p></div></div>
+        <div class="note" data-z="c6"><span class="n">6</span><h3>Tips</h3><div class="body"><p>Up to three things worth trimming, biggest first, each with what to do: a memory file of 3k or more, an MCP server whose loaded tool schemas reach 5k (deferred ones cost nothing), a skills listing of 3k or more, custom agent descriptions of 2k or more, a conversation that fills most of the window, or auto-compaction close ahead. Worked out from the breakdown alone, with no model call; nothing shows when there is nothing to trim.</p></div></div>
       </div>
     </div>
   </section>

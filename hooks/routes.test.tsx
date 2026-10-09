@@ -401,6 +401,8 @@ test('the context pane breaks the window down', async ($, on) => {
     expect(await ui.find({ type: 'Text', text: 'Messages' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'jira' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /780k to go/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'TIPS' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /MCP server jira loads 5k/ })).toBeDefined()
     expect(await ui.find({ type: surface === 'desktop' ? 'Svg' : 'Text', text: surface === 'desktop' ? undefined : /█/ })).toBeDefined()
     await ui.unmount()
   }
@@ -559,6 +561,7 @@ test('cache rewrites are tallied by cause and shown in Last and Stats', async ($
   await prompt('cold', rebuilt)
   const last = await mountPane($, 'last')
   expect(await last.find({ type: 'Text', text: 'includes a cold cache rewrite of 100k tokens, $0.78' })).toBeDefined()
+  expect(await last.find({ type: 'Text', text: /^The cache had gone cold, which cost \$0\.78/ })).toBeDefined()
   await last.unmount()
 
   await prompt('b', warm)
@@ -573,6 +576,7 @@ test('cache rewrites are tallied by cause and shown in Last and Stats', async ($
   const stats = await mountPane($, 'stats')
   expect(await stats.find({ type: 'Text', text: /^↻ 2 cache rewrites \$1\.56$/ })).toBeDefined()
   expect(await stats.find({ type: 'Text', text: /^↻ route switch rewrite of 100k tokens, \$0\.78$/ })).toBeDefined()
+  expect(await stats.find({ type: 'Text', text: /^Cache rewrites cost \$1\.56/ })).toBeDefined()
   await stats.unmount()
 })
 

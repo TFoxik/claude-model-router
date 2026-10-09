@@ -1,6 +1,7 @@
-import type { EngineInterface } from 'claude-code'
-
-import { contextLevel, kTokens, printable } from '../routes'
+import { contextLevel, kTokens, printable, shortPath } from '../routes'
+import { contextTips, tokensByServer } from '../tips'
+import type { Breakdown } from '../tips'
+import { tipsSection } from './kit'
 import type { Els } from './kit'
 
 // Theme keys as hex, for the one place a theme key cannot go: an SVG drawn as an image.
@@ -47,8 +48,6 @@ function stackedCells(segments: readonly Segment[], whole: number, width: number
   return used < width ? [...out, { text: '░'.repeat(width - used), color: undefined }] : out
 }
 
-type Breakdown = NonNullable<Awaited<ReturnType<EngineInterface['session']['usage']>>['context']['breakdown']>
-
 export function contextMobileView({ Text }: Els) {
   return <Text dimColor>Open the context breakdown from a terminal or desktop.</Text>
 }
@@ -63,9 +62,7 @@ export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns }:
   const deferred = b.categories.filter(one => one.kind === 'deferred')
   const free = b.categories.find(one => one.kind === 'free')
   const buffer = b.categories.find(one => one.kind === 'buffer')
-  const servers = new Map<string, number>()
-  for (const tool of b.mcpTools) servers.set(tool.serverName, (servers.get(tool.serverName) ?? 0) + tool.tokens)
-  const topServers = [...servers.entries()].sort((x, y) => y[1] - x[1]).slice(0, 5)
+  const topServers = [...tokensByServer(b.mcpTools)].sort((x, y) => y[1] - x[1]).slice(0, 5)
   const topMemory = [...b.memoryFiles].sort((x, y) => y.tokens - x.tokens).slice(0, 5)
   const untilCompact = b.autoCompactThreshold === undefined ? undefined : b.autoCompactThreshold - b.totalTokens
   const pct = (tokens: number) => `${((tokens / b.rawMaxTokens) * 100).toFixed(1)}%`
@@ -130,9 +127,10 @@ export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns }:
       {topMemory.length > 0 ? (
         <Box flexDirection="column">
           <Text bold dimColor>MEMORY FILES</Text>
-          {topMemory.map(one => line(`f:${one.path}`, printable(`${one.type} · ${one.path.split('/').slice(-2).join('/')}`), one.tokens, 'planMode'))}
+          {topMemory.map(one => line(`f:${one.path}`, printable(`${one.type} · ${shortPath(one.path)}`), one.tokens, 'planMode'))}
         </Box>
       ) : null}
+      {tipsSection(els, contextTips(b))}
       <Text dimColor>
         {b.skills ? `skills listing ${kTokens(b.skills.tokens)} (${b.skills.includedSkills}/${b.skills.totalSkills}) · ` : ''}
         {b.model} · estimated locally, as /context does

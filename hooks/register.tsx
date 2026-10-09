@@ -328,7 +328,8 @@ async function recordPrompt($: $) {
 }
 
 async function renderLastPane($: $, e: Args<'ui.render'>) {
-  return lastPaneView($.ui.resolve(e), await read($, promptCost))
+  const [p, cfg] = await Promise.all([read($, promptCost), read($, config)])
+  return lastPaneView($.ui.resolve(e), p, cfg.cacheTtlMinutes)
 }
 
 const openPane = ($: $): Open => pane => {

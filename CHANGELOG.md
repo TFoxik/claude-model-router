@@ -1,5 +1,14 @@
 # Release notes
 
+## 0.6.0 — 2026-10-10
+
+### Added
+
+- Tips at the bottom of the Context, Last and Stats panes: up to three each, biggest saving first, worked out locally with no model call.
+  - **Context**: a memory file of 3k tokens or more (CLAUDE.md, auto-memory), an MCP server whose loaded tool schemas reach 5k, a skills listing of 3k or more, custom agent descriptions of 2k or more, a conversation filling most of the window, or auto-compaction close ahead.
+  - **Last**: how to avoid the cache rewrite the prompt paid for, a cheaper route when Opus or Fable did most of the work, or which subagent route to move when subagents did most of the spending. Always on, unlike the learn mode toasts.
+  - **Stats**: cache rewrites adding up, a command averaging 3× a plain prompt or more, or Opus and Fable doing 80% of the spending.
+
 ## 0.5.1 — 2026-10-09
 
 ### Fixed

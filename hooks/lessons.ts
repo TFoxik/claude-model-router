@@ -8,7 +8,7 @@ export const SEEN_ENOUGH = 3
 const TOAST_COOLDOWN_MS = 3_600_000
 export const TOAST_MS = 8000
 const PER_KIND = 20
-const MIN_REWRITE_USD = 0.05
+export const MIN_REWRITE_USD = 0.05
 const MIN_PROMPT_USD = 0.25
 const PRICEY_SHARE = 0.7
 const PRICEY_SAVING = 0.25
@@ -51,7 +51,7 @@ export const CONCEPTS: Record<LessonKind, { title: string; body: string }> = {
 
 export const TOPICS = Object.keys(CONCEPTS) as LessonKind[]
 const RANK: Record<Level, number> = { success: 0, warning: 1, error: 2 }
-const isPricey = (model: string) => {
+export const isPricey = (model: string) => {
   const key = modelKeyOf(model)
   return key === 'opus' || key === 'fable'
 }
@@ -61,7 +61,7 @@ const usageOf = (one: PromptItem) => ({
   cache_read_input_tokens: one.cacheRead,
   cache_creation_input_tokens: one.cacheWrite,
 })
-const pct = (share: number) => `${Math.round(share * 100)}%`
+export const pct = (share: number) => `${Math.round(share * 100)}%`
 
 type RewriteLessonFacts = {
   model: string

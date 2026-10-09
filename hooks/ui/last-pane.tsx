@@ -1,9 +1,10 @@
 import type { PromptCost } from '../../types'
 import { isSub, money, plural, routeText, sumUsd } from '../routes'
-import { ledgerRow, rewriteText, shareOf, tokenLine } from './kit'
+import { lastTips } from '../tips'
+import { ledgerRow, rewriteText, shareOf, tipsSection, tokenLine } from './kit'
 import type { Els } from './kit'
 
-export function lastPaneView(els: Els, p: PromptCost | null) {
+export function lastPaneView(els: Els, p: PromptCost | null, ttlMinutes: number) {
   const { Box, Text } = els
   if (p === null || p.items.length === 0) return <Text dimColor>No requests in this prompt yet.</Text>
   const main = p.items.filter(one => !isSub(one))
@@ -33,6 +34,7 @@ export function lastPaneView(els: Els, p: PromptCost | null) {
           }),
         )}
       </Box>
+      {tipsSection(els, lastTips(p, ttlMinutes))}
       <Text dimColor>estimate · resets when you send the next prompt</Text>
     </Box>
   )

@@ -2,6 +2,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { Rewrite, RouteSpend } from '../../types'
 import { kTokens, money } from '../routes'
+import type { Tip } from '../tips'
 
 export const PANES = {
   route: { id: 'model-router', title: 'Model router' },
@@ -76,3 +77,23 @@ export function ledgerRow({ Box, Text }: Els, r: Row) {
 
 /** Each row's share of `total`, or 0 when nothing was spent. */
 export const shareOf = (usd: number, total: number) => (total > 0 ? usd / total : 0)
+
+/** A pane's TIPS section, or nothing when there are none. */
+export function tipsSection({ Box, Text }: Els, tips: readonly Tip[]) {
+  if (tips.length === 0) return null
+  return (
+    <Box flexDirection="column">
+      <Text bold dimColor>TIPS</Text>
+      {tips.map(one => (
+        <Box key={`t:${one.key}`} flexDirection="row" gap={1}>
+          <Box width={2} flexShrink={0}>
+            <Text color="warning">›</Text>
+          </Box>
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+            <Text>{one.text}</Text>
+          </Box>
+        </Box>
+      ))}
+    </Box>
+  )
+}

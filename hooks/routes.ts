@@ -197,6 +197,9 @@ export const sanitizeHistory = (stored: unknown): PromptRecord[] => (Array.isArr
 /** Terminal control characters stripped from text the panes show but didn't write. */
 export const printable = (text: string) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
 
+/** `repo/CLAUDE.md`: a path's last two segments. */
+export const shortPath = (path: string) => path.split('/').slice(-2).join('/')
+
 /**
  * What a prompt says, out of the tags Claude Code wraps some prompts in: a slash command as `/name args`,
  * a message from an agent or the app by its tag (`agent message`), reminders dropped. Also takes text cut short mid-tag.
@@ -247,8 +250,10 @@ export function routeForSpawn(e: SpawnFacts): string {
   return `sub:${e.subagentType}`
 }
 
+/** The model an API id (`claude-opus-5-5`) or a display label (`Opus 5.5 high`) names. */
 export function modelKeyOf(id: string): ModelKey | undefined {
-  return (Object.keys(MODELS) as ModelKey[]).find(key => id.includes(key))
+  const lower = id.toLowerCase()
+  return (Object.keys(MODELS) as ModelKey[]).find(key => lower.includes(key))
 }
 
 export function labelOf(id: string): string {
