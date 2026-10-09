@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="232" viewBox="0 0 820 232" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12">
+  <rect width="820" height="232" rx="12" fill="#1f1e1d"/>
+  <text x="28" y="40" fill="#d97757" font-weight="700" font-size="14">⚙ Model Router</text>
+  <text x="626" y="40" fill="#5fb36b" font-size="13">● on</text>
+  <rect x="682" y="24" width="114" height="24" rx="7" fill="#34332f"/>
+  <text x="739" y="40" fill="#e9e7e2" font-size="13" text-anchor="middle">Turn off</text>
+  <text x="28" y="78" font-size="13"><tspan fill="#e9e7e2">Learn mode </tspan><tspan fill="#8b8a86">○ off</tspan></text>
+  <text x="28" y="98" fill="#8b8a86">explains cache misses and model costs with your own numbers, when they happen</text>
+  <rect x="616" y="62" width="96" height="24" rx="7" fill="#34332f"/>
+  <text x="664" y="78" fill="#e9e7e2" font-size="13" text-anchor="middle">Turn on</text>
+  <rect x="720" y="62" width="76" height="24" rx="7" fill="#34332f"/>
+  <text x="758" y="78" fill="#e9e7e2" font-size="13" text-anchor="middle">Open</text>
+  <rect x="16" y="116" width="788" height="70" rx="10" fill="none" stroke="#d97757" stroke-width="1.5"/>
+  <text x="30" y="140" fill="#d97757" font-weight="700">▸ main  Opus 5.5 medium</text>
+  <text x="790" y="140" fill="#8b8a86" text-anchor="end">$3.68</text>
+  <text x="30" y="160" fill="#8b8a86">plan mode off · context 76k tokens · plan toggle ≈ $0.61</text>
+  <text x="30" y="176" fill="#8b8a86">last prompt $0.42 · 4 requests · 2 subagents</text>
+  <text x="28" y="214" fill="#8b8a86" font-weight="700">PRESET</text>
+  <rect x="692" y="198" width="104" height="22" rx="6" fill="#2a2927" stroke="#4a4946"/>
+  <text x="704" y="213" fill="#e9e7e2">Mine <tspan fill="#8b8a86">⌄</tspan></text>
+</svg>

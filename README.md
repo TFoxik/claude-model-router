@@ -4,6 +4,8 @@ A Claude Code mod that picks the model and effort per kind of work (plan mode, n
 
 ![Two-row band above the prompt and today's spend below it](docs/band-and-footer.svg)
 
+The **[field guide](https://tfoxik.github.io/claude-model-router/)** walks through every part of the screen it adds, with annotated pictures.
+
 ## Install
 
 Needs Claude Code 2.1.287 or later, the first release with mods. Tested with 2.1.294; the hook events and engine calls a mod uses can change between releases, so a newer Claude Code may need an update here.
@@ -47,6 +49,12 @@ See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
   - It also warns *before* a cost: 5 minutes before the cache goes cold while you're idle (2 on the 5-minute TTL), with what a send costs before and after; when plan mode is routed differently from normal work, what each switch rewrites, including the way back (the engine reports plan mode only with the send, so the first switch is already paid); and, when the cold-send guard holds a message, why.
   - **Stepping away?** `/route away` compares the ways to leave a session, priced for its context, routed model and cache: a note plus `/clear`, `/compact` while warm, `/rename` and `/resume`, keeping the cache warm with pings, or doing nothing. Based on Anthropic's [cost guidance](https://code.claude.com/docs/en/costs) and [session tips](https://claude.com/blog/maximizing-the-value-of-your-claude-code-sessions). The Sonnet comparison is price arithmetic only, not a quality claim.
 - **`/route` pane**: model and effort per route, presets, a per-route spend table, and the learn mode switch. Edits stay a draft until you press **Apply**. The draft shows the per-turn cost change, the one-off cache rewrite cost, the plan-mode toggle cost and the payback.
+
+![The /route pane: routing on, the learn mode switch, the live route and the preset](docs/routes-pane.svg)
+
+![A learn mode toast warning that the cache goes cold in 5 minutes, and the Learn pane explaining a cold cache rewrite with its cost](docs/learn.svg)
+
+![/route away comparing a note plus /clear, /compact, /resume, keep-warm pings and doing nothing, each priced for the session](docs/away.svg)
 
 ## Commands
 
@@ -94,3 +102,7 @@ claude --plugin-dir .
 claude plugin validate .
 claude plugin test .
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
