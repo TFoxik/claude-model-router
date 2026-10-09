@@ -27,6 +27,8 @@ To update, run `claude plugin marketplace update claude-model-router`, then `cla
 
 A fresh install starts on the `inherit` preset, which changes no model. Run `/route preset mine` (or pick one in `/route`) to start routing.
 
+New to prompt caching or model costs? Turn on **Learn mode** in the `/route` pane (or `/route learn on`). It stays off until you do, and then explains each cache miss, model switch and expensive prompt with your own numbers, warns before the cache goes cold, and `/route away` shows the cheapest way to step away from a session.
+
 See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
 ## What you get
