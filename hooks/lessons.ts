@@ -1,0 +1,184 @@
+import type { Effort, Lesson, LessonKind, PromptCost, PromptItem, Rewrite } from '../types'
+import { MODELS, costOf, fmtAge, isSub, kTokens, labelOf, modelKeyOf, money, plural, printable, rewritePrice, routeText } from './routes'
+
+export type LessonDraft = Pick<Lesson, 'kind' | 'fact' | 'usd'>
+type Level = 'success' | 'warning' | 'error'
+
+export const SEEN_ENOUGH = 3
+export const TOAST_COOLDOWN_MS = 3_600_000
+export const TOAST_MS = 8000
+export const PER_KIND = 20
+const MIN_REWRITE_USD = 0.05
+const PRICEY_MIN_USD = 0.25
+const PRICEY_SHARE = 0.7
+const PRICEY_SAVING = 0.25
+const SUB_SHARE = 0.5
+
+export const CONCEPTS: Record<LessonKind, { title: string; body: string }> = {
+  'cold-rewrite': {
+    title: 'Cache went cold',
+    body: 'Each request re-sends the whole conversation. A warm prompt cache lets the API read it back cheaply, at about a tenth of the input price. The cache expires after the TTL (1 hour in Claude Code, 5 minutes on some setups). The first send after that writes everything again, at 1.25-2× input. Over a big context that one send can cost more than an hour of work. /clear and start from a short note, or come back before it expires.',
+  },
+  'switch-rewrite': {
+    title: 'Switching model rewrote the cache',
+    body: 'A prompt cache belongs to one model at one effort. Changing either, by hand, by a route or by plan mode, starts a new cache: the next request writes the whole context again. Switch at the start of a task, while the context is small, not in the middle of a long one.',
+  },
+  'pricey-model': {
+    title: 'An expensive model did most of the work',
+    body: 'Models differ in price per token: Opus costs about twice Sonnet for input and output, Fable more, and Haiku a fraction. Effort adds output (thinking) tokens. Use the top model where its judgement pays off (planning, tricky changes) and a cheaper one for routine edits or searches. Cache reads cost about the same everywhere, so the difference shows in output and writes.',
+  },
+  'context-high': {
+    title: 'Context is getting big',
+    body: 'Every turn sends the whole context again. Even read from the cache, a big context makes each turn cost more, and a cold send rewrites all of it. Near the limit Claude Code auto-compacts into a summary. Finishing a task and running /clear keeps turns cheap. /compact keeps a summary when you need the thread.',
+  },
+  compacted: {
+    title: 'Conversation compacted',
+    body: 'Compaction replaces the conversation with a summary written by the model. Later turns are cheaper because there is less to re-read, but anything the summary left out is gone. The summary is written to the cache once, like any new context.',
+  },
+  subagents: {
+    title: 'Subagents did most of the spending',
+    body: 'A subagent runs in its own fresh context. It has no cache to lose, so routing it to a cheaper model costs nothing up front. Each subagent re-reads the files it needs, so many parallel agents add up. Searches and reads usually do fine on a cheaper model: /route set sub:Explore sonnet.',
+  },
+}
+
+const KINDS = Object.keys(CONCEPTS) as LessonKind[]
+const RANK: Record<Level, number> = { success: 0, warning: 1, error: 2 }
+const isPricey = (model: string) => {
+  const key = modelKeyOf(model)
+  return key === 'opus' || key === 'fable'
+}
+const usageOf = (one: PromptItem) => ({
+  input_tokens: one.input,
+  output_tokens: one.output,
+  cache_read_input_tokens: one.cacheRead,
+  cache_creation_input_tokens: one.cacheWrite,
+})
+const pct = (share: number) => `${Math.round(share * 100)}%`
+
+type RewriteLessonFacts = {
+  model: string
+  ttlMinutes: number
+  idleMs?: number
+  from?: { model: string; effort?: Effort }
+  to: { model: string; effort?: Effort }
+}
+
+/** A cache rewrite worth explaining: why it happened and what it cost against a warm read. */
+export function lessonFromRewrite(rw: Rewrite, f: RewriteLessonFacts): LessonDraft | undefined {
+  if (rw.usd < MIN_REWRITE_USD) return undefined
+  const { write, warm } = rewritePrice(f.model, rw.tokens, f.ttlMinutes)
+  if (rw.cause === 'cold') {
+    const idle = f.idleMs === undefined ? '' : ` after ${fmtAge(f.idleMs)} idle`
+    return {
+      kind: 'cold-rewrite',
+      usd: rw.usd,
+      fact: `The cache had expired${idle}, so this send re-wrote ${kTokens(rw.tokens)} tokens on ${labelOf(f.model)} for ${money(write)}; read warm they would have cost ${money(warm)}.`,
+    }
+  }
+  const from = f.from === undefined ? 'another route' : routeText(f.from.model, f.from.effort)
+  return {
+    kind: 'switch-rewrite',
+    usd: rw.usd,
+    fact: `Switching from ${from} to ${routeText(f.to.model, f.to.effort)} re-wrote ${kTokens(rw.tokens)} tokens for ${money(write)} (${money(rw.usd)} more than a warm read). Each model and effort keeps its own cache.`,
+  }
+}
+
+function priceyLesson(p: PromptCost, ttlMinutes: number): LessonDraft | undefined {
+  const pricey = p.items.filter(one => isPricey(one.model))
+  const actual = pricey.reduce((acc, one) => acc + costOf(usageOf(one), one.model, ttlMinutes), 0)
+  const onSonnet = pricey.reduce((acc, one) => acc + costOf(usageOf(one), MODELS.sonnet.id, ttlMinutes), 0)
+  if (p.usd < PRICEY_MIN_USD || actual < PRICEY_SHARE * p.usd || onSonnet > (1 - PRICEY_SAVING) * actual) return undefined
+  const labels = [...new Set(pricey.map(one => labelOf(one.model)))].join(' and ')
+  return {
+    kind: 'pricey-model',
+    usd: actual - onSonnet,
+    fact: `${labels} did ${pct(actual / p.usd)} of this prompt's ${money(p.usd)}. The same tokens on ${MODELS.sonnet.label} would cost about ${money(onSonnet)} (price only, not quality).`,
+  }
+}
+
+function subagentLesson(p: PromptCost): LessonDraft | undefined {
+  const subs = p.items.filter(isSub)
+  const subUsd = subs.reduce((acc, one) => acc + one.usd, 0)
+  if (subs.length < 2 || p.usd <= 0 || subUsd < SUB_SHARE * p.usd) return undefined
+  const byRoute = new Map<string, number>()
+  for (const one of subs) byRoute.set(one.route, (byRoute.get(one.route) ?? 0) + one.usd)
+  const route = [...byRoute.entries()].sort((a, b) => b[1] - a[1])[0]![0]
+  const top = subs.filter(one => one.route === route).sort((a, b) => b.usd - a.usd)[0]!
+  const shown = printable(route)
+  const hint = route.startsWith('sub:') && isPricey(top.model)
+    ? `Subagents start with a fresh context, so moving ${shown} to a cheaper model costs no cache rewrite: /route set ${shown} sonnet`
+    : 'Subagents start with a fresh context, so they never pay a cache rewrite when rerouted.'
+  return {
+    kind: 'subagents',
+    usd: subUsd,
+    fact: `${plural(subs.length, 'subagent')} made up ${pct(subUsd / p.usd)} of this prompt (${money(subUsd)}), most of it ${shown} on ${labelOf(top.model)}. ${hint}`,
+  }
+}
+
+/** The lessons a finished prompt's cost breakdown holds. */
+export function lessonsFromPrompt(p: PromptCost, ttlMinutes: number): LessonDraft[] {
+  return [priceyLesson(p, ttlMinutes), subagentLesson(p)].filter((one): one is LessonDraft => one !== undefined)
+}
+
+/** Context crossing into amber or red, priced per turn on the model the main loop runs. */
+export function lessonFromContext(prev: Level | undefined, next: Level, tokens: number, model: string, ttlMinutes: number): LessonDraft | undefined {
+  if (prev === undefined || RANK[next] <= RANK[prev] || next === 'success' || modelKeyOf(model) === undefined) return undefined
+  const { write, warm } = rewritePrice(model, tokens, ttlMinutes)
+  const how = next === 'error' ? 'past 85%' : 'past 60%'
+  return {
+    kind: 'context-high',
+    usd: warm,
+    fact: `Context reached ${kTokens(tokens)} tokens, ${how} of the way to auto-compact. Every turn re-reads all of it: about ${money(warm)} a turn on ${labelOf(model)} while the cache is warm, ${money(write)} if it has gone cold.`,
+  }
+}
+
+export function lessonFromCompact(beforeTokens: number): LessonDraft {
+  const from = beforeTokens > 0 ? ` from about ${kTokens(beforeTokens)} tokens` : ''
+  return {
+    kind: 'compacted',
+    fact: `The conversation was compacted${from} down to a summary. Turns now re-read far less, but details the summary left out are gone.`,
+  }
+}
+
+/** The one fresh lesson worth a toast: costliest first, skipping kinds seen enough or toasted within the cooldown. */
+export function pickToast(fresh: readonly Lesson[], earlier: readonly Lesson[], now: number): Lesson | undefined {
+  const due = fresh.filter(one => {
+    const before = earlier.filter(e => e.kind === one.kind)
+    const lastToast = Math.max(-Infinity, ...before.filter(e => e.isToasted).map(e => e.at))
+    return before.length < SEEN_ENOUGH && now - lastToast >= TOAST_COOLDOWN_MS
+  })
+  return [...due].sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0))[0]
+}
+
+export function toastText(one: Lesson, earlier: readonly Lesson[]): string {
+  const isFirst = !earlier.some(e => e.kind === one.kind)
+  return `${isFirst ? `${CONCEPTS[one.kind].title}: ` : '▸ '}${one.fact} · /route learn`
+}
+
+/** The last PER_KIND lessons of each kind, so a lesson that fires every prompt can't crowd out the rest. */
+export function capLessons(list: readonly Lesson[]): Lesson[] {
+  const counts = new Map<LessonKind, number>()
+  const kept: Lesson[] = []
+  for (let i = list.length - 1; i >= 0; i--) {
+    const one = list[i]!
+    const n = counts.get(one.kind) ?? 0
+    if (n >= PER_KIND) continue
+    counts.set(one.kind, n + 1)
+    kept.push(one)
+  }
+  return kept.reverse()
+}
+
+const isLesson = (l: unknown): l is Lesson => {
+  const x = l as Lesson | null
+  return typeof x === 'object' && x !== null && KINDS.includes(x.kind) && typeof x.at === 'number' && typeof x.repo === 'string' && typeof x.fact === 'string'
+}
+
+export const sanitizeLessons = (stored: unknown): Lesson[] => (Array.isArray(stored) ? capLessons(stored.filter(isLesson)) : [])
+
+/** Kinds ordered by their newest lesson, each with its lessons newest first. */
+export function byKind(lessons: readonly Lesson[]): Array<[LessonKind, Lesson[]]> {
+  const groups = new Map<LessonKind, Lesson[]>()
+  for (const one of [...lessons].sort((a, b) => b.at - a.at)) groups.set(one.kind, [...(groups.get(one.kind) ?? []), one])
+  return [...groups.entries()]
+}
