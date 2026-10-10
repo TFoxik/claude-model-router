@@ -1,5 +1,11 @@
 # Release notes
 
+## Unreleased
+
+### Changed
+
+- Tips in the Context, Last prompt cost and Stats panes sit in their own amber-bordered box, so they no longer blend into the figures above them.
+
 ## 0.6.3 — 2026-10-10
 
 ### Fixed

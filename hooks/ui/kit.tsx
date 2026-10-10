@@ -78,12 +78,12 @@ export function ledgerRow({ Box, Text }: Els, r: Row) {
 /** Each row's share of `total`, or 0 when nothing was spent. */
 export const shareOf = (usd: number, total: number) => (total > 0 ? usd / total : 0)
 
-/** A pane's TIPS section, or nothing when there are none. */
+/** A pane's TIPS section, boxed apart from the figures above it, or nothing when there are none. */
 export function tipsSection({ Box, Text }: Els, tips: readonly Tip[]) {
   if (tips.length === 0) return null
   return (
-    <Box flexDirection="column">
-      <Text bold dimColor>TIPS</Text>
+    <Box flexDirection="column" borderStyle="round" borderColor="warning" borderDimColor paddingX={1}>
+      <Text bold color="warning">TIPS</Text>
       {tips.map(one => (
         <Box key={`t:${one.key}`} flexDirection="row" gap={1}>
           <Box width={2} flexShrink={0}>
