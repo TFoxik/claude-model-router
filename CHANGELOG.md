@@ -1,5 +1,26 @@
 # Release notes
 
+## 0.7.0 — 2026-10-11
+
+### Added
+
+- **Carry on, compact or clear.** When carrying on is not the best move, the band shows `next /clear` or `next /compact`; click it for the reason in the Context pane, priced for this session.
+  - **Clear**: after a `git commit` or a pull request (`gh pr create` / `merge`) over 50k tokens or more, until your next prompt. Also when the cache has gone cold over a big context, since `/compact` would pay the rewrite too.
+  - **Compact**: within 15% of auto-compact, or when the conversation is most of a context that is 60% of the way there.
+  - These replace the Context pane's own compaction tips, so the band and the pane always agree.
+  - With learn mode on, a toast explains why clearing after a commit pays. Its new topic is `strategy`. A growing context is still taught by `context-high`, which now also says what to keep when compacting.
+- **Unused MCP servers and plugins.** The mod notes, per repo, which MCP servers and plugins are loaded and which get used, from tool calls, skills, plugin agents and slash commands. Once one has been loaded for two weeks and ten sessions without use in 30 days, the Context pane tips and the new `/route unused` name it with the setting that turns it off. Recording starts with this version.
+  - `/route unused` groups them: the MCP servers in one line with the `/mcp` fix (off for that repo only), `"disableClaudeAiConnectors": true` when none of the connected claude.ai connectors is used, and a ready-to-paste `enabledPlugins` block for `.claude/settings.local.json`. Anything no repo uses points to its config or `/plugin` instead.
+  - Servers are named as `/mcp` names them, `claude.ai Gmail` and `plugin:slint:slint-docs` included.
+  - Only connected servers count: a connector you never signed in to offers just its sign-in tools and is never listed. A plugin listed covers its own MCP server, which isn't listed again.
+  - A plugin's hooks can't be seen, so plugin lines say so, and plugins with only hooks are never listed.
+  - Each session counts once, even across `/login` or `/reload-plugins`, and calls not yet saved count straight away.
+  - `MODEL_ROUTER_IDLE_DEV=1` lists them after a single session, for trying it out.
+
+### Fixed
+
+- `/reload-plugins` no longer loses the prompt still running: its cost stays in the footer's `▤ today` and is saved to Stats when it finishes. Before, a reload dropped it from both.
+
 ## 0.6.4 — 2026-10-10
 
 ### Changed
