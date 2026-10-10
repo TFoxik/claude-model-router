@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## 0.6.4 — 2026-10-10
 
 ### Changed
 
