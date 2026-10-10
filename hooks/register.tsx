@@ -1,13 +1,14 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, Register, Timer } from 'claude-code'
 
-import type { ActiveRoute, ColdGuard, Effort, Health, LastUsage, Lesson, LessonKind, PromptCost, PromptRecord, RouteSpend, RouterConfig, Scope } from '../types'
+import type { ActiveRoute, Carried, ColdGuard, Effort, Health, LastUsage, Lesson, LessonKind, PromptCost, PromptRecord, RouteSpend, RouterConfig, Scope } from '../types'
 import {
   CONCEPTS,
   TOAST_MS,
   TOPICS,
   awayText,
   capLessons,
+  lessonFromAdvice,
   lessonFromCompact,
   lessonFromContext,
   lessonFromExpiry,
@@ -46,6 +47,7 @@ import {
   modelsOf,
   money,
   parseSetting,
+  plural,
   presetOf,
   printable,
   typedText,
@@ -67,6 +69,11 @@ import {
   withPreset,
   withRoute,
 } from './routes'
+import { adviseSession, boundaryOf } from './strategy'
+import type { Boundary } from './strategy'
+import { messagesOf, tokensByServer } from './tips'
+import { DEV_PATIENCE, PATIENCE, applyUsage, connectedServers, idleItems, idleReport, idleTips, itemOfCommand, itemOfToolCall, mcpKey, patienceText, pluginKey, pluginName, pluginOfMcpTool, pluginServer, sanitizeUsage } from './usage'
+import type { ItemKey, Patience, UsageStore } from './usage'
 import { bandView } from './ui/band'
 import { contextMobileView, contextPaneView } from './ui/context-pane'
 import { PANES } from './ui/kit'
@@ -94,12 +101,14 @@ const lessons = atom({ plugin: 'model-router', key: 'lessons' } as const, [] as 
 const lessonsReadAt = atom({ plugin: 'model-router', key: 'lessonsReadAt' } as const, 0)
 const learnOpen = atom({ plugin: 'model-router', key: 'learnOpen' } as const, [] as LessonKind[])
 const learnScope = atom({ plugin: 'model-router', key: 'learnScope' } as const, 'repo' as Scope)
+// Atoms outlive a hot reload of this code and `mem` does not: this keeps what the session would lose with it.
+const carried = atom({ plugin: 'model-router', key: 'carried' } as const, null as Carried | null)
 
 type $ = EngineInterface
 
 // The store keys the atoms kept across sessions are saved under. The engine's
 // scan needs each update() to name its atom, so callers update, then save().
-const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown', modelCommands: 'modelCommands', lessons: 'lessons', lessonsReadAt: 'lessonsReadAt', learnScope: 'learnScope' } as const
+const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown', modelCommands: 'modelCommands', lessons: 'lessons', lessonsReadAt: 'lessonsReadAt', learnScope: 'learnScope', toolUse: 'toolUse' } as const
 
 /** Saves a value kept across sessions; a failed save keeps the session going. */
 async function save<T>($: $, key: string, value: T): Promise<T> {
@@ -147,7 +156,7 @@ const PROMPT_SOURCES: ReadonlySet<string> = new Set(['user', 'mcp'])
 /** Whether a slash command starts a model turn: learned from earlier runs, or known from where it comes from. */
 async function reachesModel($: $, name: string): Promise<boolean> {
   if (mem.modelCommands.has(name)) return true
-  const info = (await $.command.list().catch(() => [])).find(one => one.name === name)
+  const info = (await listCommands($)).find(one => one.name === name)
   return info !== undefined && PROMPT_SOURCES.has(info.source)
 }
 
@@ -210,6 +219,12 @@ async function markLessonsRead($: $) {
 }
 
 const nowOf = ($: $) => $.clock.now().catch(() => Date.now())
+
+/** Copies what a hot reload would drop into an atom; session.start puts it back. */
+async function carry($: $) {
+  const next: Carried = { ...mem.kept, used: { ...mem.kept.used } }
+  await update($, carried, () => next)
+}
 
 const mainRoute = async ($: $) => ((await read($, isPlan)) ? 'plan' : 'main')
 
@@ -278,35 +293,196 @@ async function refreshStatus($: $) {
   const now = await nowOf($)
   const cfg = await read($, config)
   const ttl = cfg.cacheTtlMinutes
-  const routed = () => routedMainModel($, cfg, last.model)
   const warmMinutes = warmMinutesLeft(last.at, now, ttl)
   if (mem.compactCheckedAt === undefined || now - mem.compactCheckedAt > 10 * 60_000) {
     const { context: detailed } = await $.session.usage({ breakdown: 'summary' })
     const b = detailed.breakdown
     mem.compactAt = b?.isAutoCompactEnabled ? b.autoCompactThreshold : undefined
+    mem.messagesShare = b && b.totalTokens > 0 ? messagesOf(b) / b.totalTokens : undefined
     mem.compactCheckedAt = now
   }
+  const model = await routedMainModel($, cfg, last.model)
+  const advice = adviseSession({ tokens, window: context.window, compactAt: mem.compactAt, model, ttlMinutes: ttl, warmMinutes, messagesShare: mem.messagesShare, boundary: mem.boundary })
   const next: Health = {
     cache: prompt > 0 ? Math.round((last.cacheRead / prompt) * 100) : 0,
     warmMinutes,
     ctx: context.percent ?? Math.round((tokens / context.window) * 100),
     ctxLevel: contextLevel(tokens, context.window, mem.compactAt),
     last: (await read($, promptCost))?.usd ?? last.usd,
-    ...(warmMinutes === 0 && tokens >= GUARD_MIN_TOKENS
-      ? { coldUsd: rewritePrice(await routed(), tokens, ttl).write }
-      : {}),
+    ...(warmMinutes === 0 && tokens >= GUARD_MIN_TOKENS ? { coldUsd: rewritePrice(model, tokens, ttl).write } : {}),
     ...(five ? { fiveHour: Math.round(five.percentUsed) } : {}),
     ...(seven ? { sevenDay: Math.round(seven.percentUsed) } : {}),
+    ...(advice.verdict === 'continue' ? {} : { advice: { verdict: advice.verdict, reason: advice.reason, text: advice.text } }),
   }
   const prev = await read($, health)
   await update($, health, was => (JSON.stringify(was) === JSON.stringify(next) ? was : next))
   if (!cfg.isLearning) return
-  const model = await routed()
-  const draft = lessonFromContext(prev?.ctxLevel, next.ctxLevel, tokens, model, ttl, mem.compactAt !== undefined)
-  if (draft !== undefined) mem.pendingLessons.push(draft)
+  for (const draft of [lessonFromContext(prev?.ctxLevel, next.ctxLevel, tokens, model, ttl, mem.compactAt !== undefined), lessonFromAdvice(prev?.advice?.reason, advice)]) {
+    if (draft !== undefined) mem.pendingLessons.push(draft)
+  }
   // The one lesson that can't wait for a turn to end: by then the cache has gone cold.
   const expiring = lessonFromExpiry(prev?.warmMinutes, warmMinutes, ttl, tokens, model)
   if (expiring !== undefined) await teach($, [expiring], now).catch(() => undefined)
+}
+
+/** Every slash command, or none when the engine can't say. */
+const listCommands = ($: $) => $.command.list().catch(() => [])
+
+/** `names`: what to show for a key; `owners`: the plugin key behind a plugin-shipped server's key; `commands`: the plugin key behind a slash command. */
+type Loaded = { keys: ItemKey[]; names: Record<ItemKey, string>; owners: Record<ItemKey, ItemKey>; commands: Record<string, ItemKey>; plugins: string[] }
+
+// What is loaded changes only on /mcp, /plugin or a reload, so a minute-old answer serves a pane that redraws often.
+const LOADED_TTL_MS = 60_000
+
+/** MCP servers and plugins loaded now whose use the mod can see: plugins that serve a command, a skill or an MCP server. */
+async function loadedItems($: $): Promise<Loaded> {
+  const now = await nowOf($)
+  if (mem.loaded !== undefined && now - mem.loaded.at < LOADED_TTL_MS) return mem.loaded.value
+  const value = fetchLoaded($)
+  mem.loaded = { at: now, value }
+  // A failed fetch is not kept: the next caller tries again.
+  value.catch(() => (mem.loaded?.value === value ? (mem.loaded = undefined) : undefined))
+  return value
+}
+
+/** What was last loaded, however old, for hot paths that only need the plugin list or command names. */
+const cachedLoaded = ($: $) => mem.loaded?.value ?? loadedItems($)
+
+async function fetchLoaded($: $): Promise<Loaded> {
+  const [tools, settings, list] = await Promise.all([$.tool.list().catch(() => []), $.settings.read().catch(() => ({}) as Record<string, unknown>), listCommands($)])
+  const enabled = settings.enabledPlugins
+  const ids = Object.entries(typeof enabled === 'object' && enabled !== null ? enabled : {})
+    .filter(([id, isOn]) => isOn === true && pluginName(id) !== $.plugin.name)
+    .map(([id]) => id)
+  const plugins = ids.map(pluginName)
+  const commands: Record<string, ItemKey> = {}
+  for (const info of list) {
+    const key = itemOfCommand(info)
+    if (key !== undefined) commands[info.name] = key
+  }
+  const seen = new Set(Object.values(commands))
+  const allMcp = tools.filter(one => one.mcp).map(one => one.name)
+  const keys = new Set(connectedServers(allMcp))
+  const names: Record<ItemKey, string> = {}
+  const owners: Record<ItemKey, ItemKey> = {}
+  for (const tool of allMcp) {
+    const key = itemOfToolCall(tool, {})
+    const hit = key !== undefined && keys.has(key) ? pluginServer(tool, plugins) : undefined
+    if (key === undefined || hit === undefined) continue
+    owners[key] = pluginKey(hit.plugin)
+    names[key] = `plugin:${hit.plugin}:${hit.server}`
+    seen.add(owners[key])
+  }
+  for (const id of ids) {
+    if (!seen.has(pluginKey(id))) continue
+    keys.add(pluginKey(id))
+    names[pluginKey(id)] = id
+  }
+  return { keys: [...keys], names, owners, commands, plugins }
+}
+
+function noteUse(key: ItemKey, at: number, calls: number) {
+  const was = mem.kept.used[key]
+  mem.kept.used[key] = { calls: (was?.calls ?? 0) + calls, lastUsed: Math.max(was?.lastUsed ?? at, at) }
+}
+
+/** The MCP server and plugin a tool use counts toward, if any. */
+async function itemsOfToolUse($: $, tool: string, input: Record<string, unknown>): Promise<ItemKey[]> {
+  const direct = itemOfToolCall(tool, input)
+  if (direct === undefined) return []
+  const owner = direct.startsWith('mcp:plugin_') ? pluginOfMcpTool(tool, (await cachedLoaded($)).plugins) : undefined
+  return owner === undefined ? [direct] : [direct, owner]
+}
+
+/** Counts a finished tool call toward the MCP server or plugin behind it, and notes work being wrapped up. */
+async function noteToolCall($: $, e: Args<'tool.call'>) {
+  const input = e as unknown as Record<string, unknown>
+  if (e.agentId === undefined && e.tool === 'Bash' && typeof input.command === 'string') mem.boundary = boundaryOf(input.command) ?? mem.boundary
+  const items = await itemsOfToolUse($, e.tool, input)
+  if (items.length === 0) return
+  const at = await nowOf($)
+  for (const key of items) noteUse(key, at, 1)
+  // Kept for a reload without holding up the tool's result.
+  void carry($).catch(() => undefined)
+}
+
+async function noteCommand($: $, name: string) {
+  const key = (await cachedLoaded($)).commands[name]
+  if (key === undefined) return
+  noteUse(key, await nowOf($), 1)
+  void carry($).catch(() => undefined)
+}
+
+/** Backfills a resumed transcript: its calls only move `lastUsed`, since the session that made them counted them. */
+async function backfillUsage($: $) {
+  const [now, messages] = await Promise.all([nowOf($), $.session.messages().catch(() => [])])
+  for (const message of messages) for (const use of message.toolUses) for (const key of await itemsOfToolUse($, use.tool, use.input)) noteUse(key, now, 0)
+  await carry($)
+}
+
+/**
+ * Saves what this session used, merged with what other sessions stored. A
+ * session's loaded items are taken at its first save after a prompt, when
+ * slow MCP servers have connected; a session with no prompt is not counted.
+ */
+async function flushUsage($: $, canCount: boolean) {
+  const isNewSession = canCount && mem.kept.isUncounted
+  if (!isNewSession && Object.keys(mem.kept.used).length === 0) return
+  // Taken fresh: a list cached at session start may predate the MCP servers that connect late.
+  if (isNewSession) mem.loaded = undefined
+  const [stored, now, loaded] = await Promise.all([load($, STORE.toolUse), nowOf($), isNewSession ? loadedItems($) : undefined])
+  if (stored === UNREADABLE) return
+  const used = mem.kept.used
+  mem.kept = { ...mem.kept, used: {}, isUncounted: mem.kept.isUncounted && !isNewSession }
+  const next = applyUsage(sanitizeUsage(stored), mem.repo, { at: now, isNewSession, seen: loaded?.keys ?? [], used })
+  const isSaved = await $.store.set(STORE.toolUse, next).then(() => true, () => false)
+  if (isSaved) {
+    mem.savedUsage = { at: now, value: next }
+  } else {
+    // Not saved, so not lost: the calls and the uncounted session wait for the next save.
+    for (const [key, use] of Object.entries(used)) noteUse(key, use.lastUsed, use.calls)
+    if (isNewSession) mem.kept = { ...mem.kept, isUncounted: true }
+  }
+  await carry($)
+}
+
+/** The usage every session has saved, re-read at most once a minute: other sessions save too, but a pane redraws far more often. */
+async function savedUsage($: $): Promise<UsageStore> {
+  const now = await nowOf($)
+  if (mem.savedUsage !== undefined && now - mem.savedUsage.at < LOADED_TTL_MS) return mem.savedUsage.value
+  const stored = await load($, STORE.toolUse)
+  const value = stored === UNREADABLE ? {} : sanitizeUsage(stored)
+  if (stored !== UNREADABLE) mem.savedUsage = { at: now, value }
+  return value
+}
+
+/** Idle MCP servers and plugins in this repo, counting this session's calls not yet saved, with what is loaded and this repo's saved usage. */
+async function idleHere($: $) {
+  const [saved, loaded, now] = await Promise.all([savedUsage($), loadedItems($), nowOf($)])
+  const store = applyUsage(saved, mem.repo, { at: now, isNewSession: false, seen: [], used: mem.kept.used })
+  return { idle: idleItems(store, mem.repo, loaded.keys, now, { patience: mem.patience, owners: loaded.owners }), loaded, repo: saved[mem.repo] }
+}
+
+/** Names to show: what the mod worked out, over the /mcp names of servers /context lists. */
+const withServerNames = (names: Record<ItemKey, string>, servers: readonly { serverName: string }[]) => ({
+  ...Object.fromEntries(servers.map(one => [mcpKey(one.serverName), one.serverName])),
+  ...names,
+})
+
+/** `/route unused`: every idle MCP server and plugin here, or why nothing is listed yet. */
+async function unusedReport($: $): Promise<string> {
+  const [breakdown, { idle, loaded, repo }] = await Promise.all([
+    $.session.usage({ breakdown: 'summary' }).then(u => u.context.breakdown).catch(() => undefined),
+    idleHere($),
+  ])
+  const here = printable(mem.repo)
+  const patience = `${patienceText(mem.patience)}${mem.patience === DEV_PATIENCE ? ' (MODEL_ROUTER_IDLE_DEV)' : ''}`
+  if (repo === undefined) return `No usage recorded for ${here} yet. model-router notes which MCP servers and plugins each repo uses; idle ones show here after ${patience}.`
+  if (idle.length === 0) {
+    return `Nothing idle in ${here}: every MCP server and plugin loaded here was used in the last 30 days, or has been loaded for under ${patience} (${plural(repo.sessions, 'session')} recorded).`
+  }
+  const lines = idleReport(idle, withServerNames(loaded.names, breakdown?.mcpTools ?? []), loaded.keys)
+  return [`Unused in ${here} (${plural(repo.sessions, 'session')} recorded):`, ...lines.map(line => `  ${line}`)].join('\n')
 }
 
 function recordOf(meta: { label: string; text: string; at: number }, p: PromptCost): PromptRecord {
@@ -325,9 +501,11 @@ function recordOf(meta: { label: string; text: string; at: number }, p: PromptCo
 
 async function recordPrompt($: $) {
   const p = await read($, promptCost)
-  const meta = mem.current
-  mem.current = undefined
-  if (p === null || meta === undefined || p.usd <= 0) return
+  const meta = mem.kept.current
+  if (meta === undefined) return
+  mem.kept = { ...mem.kept, current: undefined }
+  await carry($)
+  if (p === null || p.usd <= 0) return
   const rec = recordOf(meta, p)
   await setHistory($, all => [...all, rec].slice(-HISTORY_LIMIT))
 }
@@ -358,7 +536,7 @@ async function renderLearnPane($: $, e: Args<'ui.render'>) {
 /** Saved history plus the prompt still running, every repo; the Stats pane narrows it to one. */
 async function allRecords($: $): Promise<{ records: PromptRecord[]; now: number }> {
   const [saved, live, now] = await Promise.all([read($, history), read($, promptCost), nowOf($)])
-  const current = mem.current
+  const current = mem.kept.current
   return { records: live && current && live.usd > 0 ? [...saved, recordOf(current, live)] : saved, now }
 }
 
@@ -395,8 +573,22 @@ async function renderBand($: $, e: Args<'ui.render'>) {
 async function renderCtxPane($: $, e: Args<'ui.render'>) {
   if (e.surface === 'mobile') return contextMobileView($.ui.resolve(e))
   const columns = (e.component === 'Pane' ? e.props.bodyColumns : undefined) || 80
-  const { context } = await $.session.usage({ breakdown: 'summary', columns })
-  return contextPaneView($.ui.resolve(e), { breakdown: context.breakdown, isTerminal: e.surface === 'terminal', columns })
+  const [{ context }, hp, cfg, { idle, loaded }] = await Promise.all([$.session.usage({ breakdown: 'summary', columns }), read($, health), read($, config), idleHere($)])
+  const b = context.breakdown
+  const servers = b?.mcpTools ?? []
+  // Worked out from this breakdown, not the band's last refresh, so it holds before the first request and right after a /clear.
+  const advice = b && adviseSession({
+    tokens: b.totalTokens,
+    window: b.rawMaxTokens,
+    compactAt: b.isAutoCompactEnabled ? b.autoCompactThreshold : undefined,
+    model: hp === null ? b.model : await routedMainModel($, cfg, b.model),
+    ttlMinutes: cfg.cacheTtlMinutes,
+    warmMinutes: hp?.warmMinutes ?? cfg.cacheTtlMinutes,
+    messagesShare: b.totalTokens > 0 ? messagesOf(b) / b.totalTokens : undefined,
+    boundary: mem.boundary,
+  })
+  const data = { breakdown: b, isTerminal: e.surface === 'terminal', columns, advice, idle: idleTips(idle, withServerNames(loaded.names, servers), tokensByServer(servers)) }
+  return contextPaneView($.ui.resolve(e), data)
 }
 
 async function renderPane($: $, e: Args<'ui.render'>) {
@@ -447,7 +639,7 @@ const LEARN_ON_TEXT =
 const asEffort = (effort: unknown): Effort | undefined =>
   typeof effort === 'string' ? (effort as Effort) : undefined
 
-const USAGE = '[stats [clear | text on|off] | context | last | learn [on|off | mute|unmute <topic>] | away | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
+const USAGE = '[stats [clear | text on|off] | context | last | learn [on|off | mute|unmute <topic>] | away | unused | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
 
 // Origins a person typed or drove: only these may change the routes, and only these are held by the cold guard.
 const USER_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
@@ -475,6 +667,15 @@ const mem = {
   lastCommand: undefined as string | undefined,
   // Lessons the running main-loop turn has taught so far; kept or dropped when it ends.
   pendingLessons: [] as LessonDraft[],
+  messagesShare: undefined as number | undefined,
+  // Work wrapped up (a commit, a PR) since the person last prompted.
+  boundary: undefined as Boundary | undefined,
+  // MCP servers and plugins used since the last save, whether this session has been counted yet, and what is loaded.
+  kept: { used: {}, isUncounted: true } as Carried,
+  loaded: undefined as { at: number; value: Promise<Loaded> } | undefined,
+  savedUsage: undefined as { at: number; value: UsageStore } | undefined,
+  // MODEL_ROUTER_IDLE_DEV=1: report idle items after one counted session instead of two weeks and ten.
+  patience: PATIENCE as Patience,
 }
 
 async function routeOfAgent($: $, agentId: string): Promise<string | undefined> {
@@ -557,7 +758,7 @@ async function recordStep($: $, agentId: string | undefined, key: string, s: Ste
     }
     await update($, spend, all => ({ ...all, [key]: addSpend(all[key] ?? EMPTY_SPEND, usage, usage.model, ttl) }))
     const promptAt = isMain ? undefined : mem.agents.get(agentId)?.promptAt
-    if (promptAt !== undefined && promptAt !== mem.current?.at) {
+    if (promptAt !== undefined && promptAt !== mem.kept.current?.at) {
       // A background agent outlived the prompt that started it: its cost belongs to that prompt's saved record.
       await setHistory($, all => all.map(r => (r.at === promptAt && r.repo === mem.repo ? addLateStep(r, { usage, effort: s.effort, ttlMinutes: ttl }) : r)))
     } else {
@@ -612,12 +813,22 @@ export const register: Register = on => {
     if (typeof band === 'boolean') await update($, isBandShown, () => band)
     const root = repo?.root ?? (await $.session.root().catch(() => ''))
     mem.repo = printable(repo?.name ?? (root.split('/').pop() || 'unknown'))
+    // The same session starting again, after a hot reload of this code or a /login, keeps its running prompt, count and unsaved calls.
+    const [sessionId, before, idleDev] = await Promise.all([$.session.id().catch(() => undefined), read($, carried), $.env.get('MODEL_ROUTER_IDLE_DEV').catch(() => undefined)])
+    const isSame = sessionId !== undefined && before?.sessionId === sessionId
+    // A copy: noteUse writes into `used`, and the atom's own value is not ours to change in place.
+    mem.kept = isSame ? { ...before, used: { ...before.used } } : { sessionId, used: {}, isUncounted: true }
+    if (!isSame) await carry($)
+    mem.loaded = undefined
+    mem.savedUsage = undefined
+    mem.patience = idleDev === '1' ? DEV_PATIENCE : PATIENCE
+    void backfillUsage($).catch(() => undefined)
     $.ui.status(undefined)
     await refreshStatus($).catch(() => undefined)
     mem.tick?.cancel()
     mem.tick = $.clock.every(60_000, () => void refreshStatus($).catch(() => undefined))
     await $.command.register({ name: 'route', description: 'Model router: open the pane, or one of the verbs', argumentHint: USAGE })
-    const hasCacheTax = (await read($, config)).coldGuard !== 'off' && (await $.command.list().catch(() => [])).some(one => one.name === 'cache-tax')
+    const hasCacheTax = (await read($, config)).coldGuard !== 'off' && (await listCommands($)).some(one => one.name === 'cache-tax')
     if (hasCacheTax) {
       $.ui.log('model-router: cache-tax is installed too, so a cold send is guarded twice. Run /route guard off to leave it to cache-tax.')
     }
@@ -645,11 +856,18 @@ export const register: Register = on => {
     return ran
   }).catch(($, e, next) => next(e))
 
+  on('tool.call', async ($, e, next) => {
+    const ran = await next(e)
+    if (ran.deny === undefined && !ran.isError) await noteToolCall($, e).catch(() => undefined)
+    return ran
+  }).catch(($, e, next) => next(e))
+
   on('session.compact', async ($, e, next) => {
     const before = (await read($, config)).isLearning ? await read($, lastUsage) : undefined
     const done = await next(e)
     if (e.agentId === undefined) {
       mem.isAfterCompact = true
+      mem.boundary = undefined
       if (before !== undefined) mem.pendingLessons.push(lessonFromCompact(before === null ? 0 : promptTokens(before)))
     }
     return done
@@ -661,7 +879,7 @@ export const register: Register = on => {
     const canRewrite = route !== FORK && e.workflow === undefined
     const started = await next(canRewrite && model ? { ...e, model } : e)
     if (started.agentId !== undefined) {
-      mem.agents.set(started.agentId, { route, label: printable(`${e.subagentType} · ${e.description}`), promptAt: mem.current?.at })
+      mem.agents.set(started.agentId, { route, label: printable(`${e.subagentType} · ${e.description}`), promptAt: mem.kept.current?.at })
     }
     return started
   }).catch(($, e, next) => next(e))
@@ -687,6 +905,7 @@ export const register: Register = on => {
 
   on('command.run', async ($, e, next) => {
     if (e.origin.kind === 'plugin' || e.command === 'route') return next(e)
+    await noteCommand($, e.command).catch(() => undefined)
     const cfg = await read($, config)
     if (cfg.coldGuard !== 'off' && USER_ORIGINS.has(e.origin.kind)) {
       const cold = await coldSend($, cfg).catch(() => undefined)
@@ -700,11 +919,17 @@ export const register: Register = on => {
     }
     mem.pendingPrompt = `/${e.command}`
     mem.lastCommand = e.command
-    return next(e)
+    const done = await next(e)
+    if (e.command === 'clear') {
+      mem.boundary = undefined
+      await refreshStatus($).catch(() => undefined)
+    }
+    return done
   }).catch(($, e, next) => next(e))
 
   on('session.end', async ($, e, next) => {
-    await recordPrompt($).catch(() => undefined)
+    // One short time limit covers every session.end hook, so both saves run at once.
+    await Promise.all([recordPrompt($).catch(() => undefined), flushUsage($, false).catch(() => undefined)])
     return next(e)
   })
 
@@ -718,8 +943,14 @@ export const register: Register = on => {
     if (mem.pendingPrompt !== undefined) {
       const label = mem.pendingPrompt
       mem.pendingPrompt = undefined
+      mem.boundary = undefined
       await recordPrompt($).catch(() => undefined)
-      mem.current = { label, text: cfg.keepPromptText ? printable(typedText(e.text).slice(0, 120)) : '', at: await nowOf($) }
+      const [at, sessionId] = await Promise.all([nowOf($), $.session.id().catch(() => mem.kept.sessionId)])
+      // A /clear starts a new session without a session.start: count it, and let a reload recognise it.
+      const isNew = sessionId !== mem.kept.sessionId
+      const current = { label, text: cfg.keepPromptText ? printable(typedText(e.text).slice(0, 120)) : '', at }
+      mem.kept = { ...mem.kept, current, ...(isNew ? { sessionId, isUncounted: true } : {}) }
+      await carry($)
       await update($, promptCost, () => EMPTY_PROMPT)
     }
     const { effort } = resolve(cfg, route)
@@ -768,7 +999,10 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    if (e.agentId === undefined) await flushLessons($).catch(() => undefined)
+    if (e.agentId === undefined) {
+      await flushLessons($).catch(() => undefined)
+      await flushUsage($, true).catch(() => undefined)
+    }
     return done
   }).catch(($, e, next) => next(e))
 
@@ -780,6 +1014,7 @@ export const register: Register = on => {
       return { text: `${PANES[pane].title} pane opened.` }
     }
     if (verb === 'away') return { text: await awayReport($) }
+    if (verb === 'unused') return { text: await unusedReport($) }
     if (!USER_ORIGINS.has(e.origin.kind)) return { text: `model-router: /route ${verb} only runs when you type it.` }
     if (verb === 'learn' && (rest[0] === 'on' || rest[0] === 'off')) {
       const isOn = rest[0] === 'on'
@@ -802,7 +1037,8 @@ export const register: Register = on => {
       const keep = rest[1] === 'on'
       await setConfig($, c => ({ ...c, keepPromptText: keep }))
       if (keep) return { text: 'Stats keeps the first 120 characters of each prompt again.' }
-      if (mem.current) mem.current.text = ''
+      if (mem.kept.current) mem.kept = { ...mem.kept, current: { ...mem.kept.current, text: '' } }
+      await carry($)
       await setHistory($, withoutText)
       return { text: 'Stats keeps only labels and costs now; saved prompt text was removed.' }
     }

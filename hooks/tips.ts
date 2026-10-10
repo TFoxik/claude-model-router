@@ -3,18 +3,16 @@ import type { SessionContextBreakdown } from 'claude-code'
 import type { PromptCost, PromptRecord, Rewrite } from '../types'
 import { MIN_REWRITE_USD, isPricey, lessonsFromPrompt, pct } from './lessons'
 import { commandStats, kTokens, money, printable, shortPath, sumUsd } from './routes'
+import type { Advice } from './strategy'
 
 export type Breakdown = SessionContextBreakdown
-/** `weight` ranks tips within one pane: tokens in Context, dollars in Last and Stats. */
-export type Tip = { key: string; text: string; weight: number }
+/** `weight` ranks tips within one pane: tokens in Context, dollars in Last and Stats; `replaces` names a tip this one says more than. */
+export type Tip = { key: string; text: string; weight: number; replaces?: string }
 
 const MEMORY_MIN = 3000
 const MCP_SERVER_MIN = 5000
 const SKILLS_MIN = 3000
 const AGENTS_MIN = 2000
-const CONVERSATION_SHARE = 0.6
-const CONVERSATION_FILL = 0.5
-const COMPACT_NEAR = 0.15
 const MAX_TIPS = 3
 const STATS_REWRITES_MIN_USD = 1
 const STATS_REWRITES_SHARE = 0.1
@@ -28,7 +26,10 @@ const AVOID: Record<Rewrite['cause'], string> = {
   switch: 'switch model or plan mode at the start of a task, while the context is small',
 }
 
-const top = (tips: Tip[]) => tips.sort((x, y) => y.weight - x.weight).slice(0, MAX_TIPS)
+function top(tips: Tip[]): Tip[] {
+  const replaced = new Set(tips.map(one => one.replaces))
+  return tips.filter(one => !replaced.has(one.key)).sort((x, y) => y.weight - x.weight).slice(0, MAX_TIPS)
+}
 
 export function tokensByServer(tools: Breakdown['mcpTools']): Map<string, number> {
   const servers = new Map<string, number>()
@@ -43,9 +44,15 @@ function byCause(rewrites: readonly Rewrite[]): Array<[Rewrite['cause'], number]
   return [...sums.entries()].sort((x, y) => y[1] - x[1])
 }
 
-/** What to trim in the context window, biggest first, from the /context breakdown alone. */
-export function contextTips(b: Breakdown): Tip[] {
-  const tips: Tip[] = []
+// The engine names no kind for the conversation row, so this matches /context's label; a rename only silences the advice that uses it.
+export const messagesOf = (b: Breakdown) => b.categories.find(one => one.kind === 'used' && one.name === 'Messages')?.tokens ?? 0
+
+type ContextExtras = { advice?: Pick<Advice, 'verdict' | 'text'>; more?: readonly Tip[] }
+
+/** What to trim in the context window, biggest first, from the /context breakdown; advice to compact or clear comes first, and `more` joins the ranking. */
+export function contextTips(b: Breakdown, { advice, more = [] }: ContextExtras = {}): Tip[] {
+  const tips: Tip[] = [...more]
+  if (advice !== undefined && advice.verdict !== 'continue') tips.push({ key: `advice:${advice.verdict}`, weight: Infinity, text: advice.text })
 
   for (const file of b.memoryFiles) {
     if (file.tokens < MEMORY_MIN) continue
@@ -67,15 +74,6 @@ export function contextTips(b: Breakdown): Tip[] {
     tips.push({ key: 'agents', weight: agentTokens, text: `${b.agents.length} custom agents describe themselves in ${kTokens(agentTokens)}: remove the ones you do not use` })
   }
 
-  const limit = b.isAutoCompactEnabled ? b.autoCompactThreshold : undefined
-  const toGo = (limit ?? Infinity) - b.totalTokens
-  // The engine names no kind for the conversation row, so this matches /context's label; a rename only silences the tip.
-  const messages = b.categories.find(one => one.kind === 'used' && one.name === 'Messages')?.tokens ?? 0
-  if (limit !== undefined && toGo > 0 && toGo < limit * COMPACT_NEAR) {
-    tips.push({ key: 'compact', weight: b.totalTokens, text: `${kTokens(toGo)} to auto-compact: /compact now, at a point you choose, rather than mid-task` })
-  } else if (messages >= b.totalTokens * CONVERSATION_SHARE && b.totalTokens >= (limit ?? b.rawMaxTokens) * CONVERSATION_FILL) {
-    tips.push({ key: 'conversation', weight: messages, text: `the conversation is ${kTokens(messages)} of ${kTokens(b.totalTokens)}: when this task is done, /clear, or /compact to keep a summary` })
-  }
 
   return top(tips)
 }

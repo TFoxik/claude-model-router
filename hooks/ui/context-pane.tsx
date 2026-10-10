@@ -1,6 +1,7 @@
 import { contextLevel, kTokens, printable, shortPath } from '../routes'
 import { contextTips, tokensByServer } from '../tips'
-import type { Breakdown } from '../tips'
+import type { Breakdown, Tip } from '../tips'
+import type { Advice } from '../strategy'
 import { tipsSection } from './kit'
 import type { Els } from './kit'
 
@@ -52,9 +53,9 @@ export function contextMobileView({ Text }: Els) {
   return <Text dimColor>Open the context breakdown from a terminal or desktop.</Text>
 }
 
-type ContextData = { breakdown: Breakdown | undefined; isTerminal: boolean; columns: number }
+type ContextData = { breakdown: Breakdown | undefined; isTerminal: boolean; columns: number; advice?: Pick<Advice, 'verdict' | 'text'>; idle?: readonly Tip[] }
 
-export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns }: ContextData) {
+export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, advice, idle }: ContextData) {
   const { Box, Text } = els
   const Svg = 'Svg' in els ? els.Svg : undefined
   if (b === undefined) return <Text dimColor>No context breakdown available yet.</Text>
@@ -130,7 +131,7 @@ export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns }:
           {topMemory.map(one => line(`f:${one.path}`, printable(`${one.type} · ${shortPath(one.path)}`), one.tokens, 'planMode'))}
         </Box>
       ) : null}
-      {tipsSection(els, contextTips(b))}
+      {tipsSection(els, contextTips(b, { advice, more: idle }))}
       <Text dimColor>
         {b.skills ? `skills listing ${kTokens(b.skills.tokens)} (${b.skills.includedSkills}/${b.skills.totalSkills}) · ` : ''}
         {b.model} · estimated locally, as /context does

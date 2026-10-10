@@ -1177,3 +1177,128 @@ test('the band counts unread lessons in the Learn pane scope', async ($, on) => 
   expect(await all.find({ type: 'Button', text: 'Learn ●1' })).toBeDefined()
   await all.unmount()
 })
+
+const okTool = (on: On) => on('tool.call', () => ({ result: '', text: 'ok' }) as never)
+const bandOf = ($: Engine) => $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
+
+test('a commit over a big context turns the band to next /clear until the next prompt, and learn mode says why', async ($, on) => {
+  okTool(on)
+  const { toasts, prompt } = await learningSession($, on)
+  await prompt('c', async () => {
+    await $.tool.call({ tool: 'Bash', command: 'git commit -m "done"', tool_use_id: 'tu1' } as never)
+  })
+  const band = await bandOf($)
+  expect((await band.find({ key: 'advice' }))?.text).toBe('next /clear')
+  await band.unmount()
+  expect(toasts).toEqual([
+    'Clear after committing: Work was committed. Each further request re-reads the 200k tokens of finished work ($0.04 warm): /clear and start the next task fresh, or /compact to carry a summary. · /route learn',
+  ])
+  await prompt('d')
+  const after = await bandOf($)
+  expect(await after.find({ key: 'advice' })).toBeUndefined()
+  await after.unmount()
+})
+
+test('MCP servers and plugins are counted per repo, and long-idle ones are listed by /route unused', async ($, on) => {
+  const DAY = 86_400_000
+  const old = { firstSeen: T0 - 20 * DAY, sessionsSeen: 12, calls: 0 }
+  const data: Record<string, unknown> = { config: { ...MINE, coldGuard: 'off' }, toolUse: { unknown: { sessions: 12, items: { 'mcp:jira': old, 'mcp:github': old } } } }
+  sharedStore(on, data)
+  mock.clock(on, { now: T0 })
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  okTool(on)
+  on('tool.list', () => ({ value: [{ name: 'mcp__jira__search', description: '', mcp: true }, { name: 'mcp__github__get', description: '', mcp: true }, { name: 'mcp__notion__authenticate', description: '', mcp: true }, { name: 'Bash', description: '', mcp: false }] }) as never)
+  on('settings.read', () => ({ value: { enabledPlugins: { 'superpowers@official': true, 'hooks-only@x': true, 'off@x': false } } }) as never)
+  on('command.list', () => ({ value: [{ name: 'superpowers:brainstorm', description: '', source: 'plugin', plugin: 'superpowers@official' }] }) as never)
+  on('session.id', () => ({ value: 'session-1' }) as never)
+  const unused = async () => (await $.command.run({ command: 'route', args: 'unused', origin: { kind: 'peer' } } as unknown as Args<'command.run'>)).text
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await submit($, 'go')
+  await $.turn.start({ text: 'go', turnId: 'go' })
+  await $.tool.call({ tool: 'mcp__github__get', tool_use_id: 'tu1' } as never)
+  await $.tool.call({ tool: 'Skill', skill: 'superpowers:brainstorming', tool_use_id: 'tu2' } as never)
+  expect(await unused()).not.toMatch(/github/)
+  // The same session starting again, as after /login, keeps its unsaved calls and is counted once.
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await step($, 'go')
+  await complete($, 'go')
+  const repo = (data.toolUse as Record<string, { sessions: number; items: Record<string, unknown> }>).unknown!
+  expect(repo.sessions).toBe(13)
+  expect(repo.items).toEqual({
+    'mcp:jira': { ...old, sessionsSeen: 13 },
+    'mcp:github': { ...old, sessionsSeen: 13, calls: 1, lastUsed: T0 },
+    'plugin:superpowers': { firstSeen: T0, sessionsSeen: 1, calls: 1, lastUsed: T0 },
+  })
+  expect(await unused()).toBe('Unused in unknown (13 sessions recorded):\n  › MCP servers not used in this repo: jira. Turn each off in /mcp; it stays off for this repo only.')
+})
+
+test('the Context pane names an idle MCP server in place of its size tip', async ($, on) => {
+  const old = { firstSeen: T0 - 20 * 86_400_000, sessionsSeen: 12, calls: 0 }
+  mock.store(on, { toolUse: { unknown: { sessions: 12, items: { 'mcp:jira': old } } } })
+  mock.clock(on, { now: T0 })
+  on('tool.list', () => ({ value: [{ name: 'mcp__jira__search', description: '', mcp: true }] }) as never)
+  on('session.usage', () => ({
+    value: {
+      startedAt: 0,
+      rateLimits: [],
+      context: {
+        tokens: 20_000,
+        window: 1_000_000,
+        percent: 2,
+        breakdown: {
+          categories: [{ name: 'Messages', tokens: 14_000, color: 'claude', isDeferred: false, kind: 'used' }],
+          totalTokens: 20_000,
+          maxTokens: 1_000_000,
+          rawMaxTokens: 1_000_000,
+          autocompactSource: 'model-default',
+          percentage: 2,
+          gridRows: [],
+          model: 'claude-opus-5-5',
+          memoryFiles: [],
+          mcpTools: [{ name: 'search', serverName: 'jira', tokens: 6000 }],
+          agents: [],
+          isAutoCompactEnabled: false,
+          apiUsage: null,
+        },
+      },
+    } as never,
+  }))
+  const ui = await mountPane($, 'context')
+  expect(await ui.find({ type: 'Text', text: /^MCP server jira has not been used in this repo over 12 sessions/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /MCP server jira loads/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the Context pane advises compacting from its own breakdown, before any request', async ($, on) => {
+  mock.store(on)
+  on('session.usage', () => ({
+    value: {
+      startedAt: 0,
+      rateLimits: [],
+      context: {
+        tokens: 700_000,
+        window: 1_000_000,
+        percent: 70,
+        breakdown: {
+          categories: [{ name: 'Messages', tokens: 650_000, color: 'claude', isDeferred: false, kind: 'used' }],
+          totalTokens: 700_000,
+          maxTokens: 1_000_000,
+          rawMaxTokens: 1_000_000,
+          autocompactSource: 'model-default',
+          percentage: 70,
+          gridRows: [],
+          model: 'claude-opus-5-5',
+          memoryFiles: [],
+          mcpTools: [],
+          agents: [],
+          autoCompactThreshold: 800_000,
+          isAutoCompactEnabled: true,
+          apiUsage: null,
+        },
+      },
+    } as never,
+  }))
+  const ui = await mountPane($, 'context')
+  expect(await ui.find({ type: 'Text', text: /^100k tokens to auto-compact: \/compact now/ })).toBeDefined()
+  await ui.unmount()
+})

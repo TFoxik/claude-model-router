@@ -5,6 +5,7 @@ import {
   awayText,
   byKind,
   capLessons,
+  lessonFromAdvice,
   lessonFromCompact,
   lessonFromContext,
   lessonFromExpiry,
@@ -17,6 +18,7 @@ import {
   unreadCount,
 } from './lessons'
 import { MODELS } from './routes'
+import { adviseSession } from './strategy'
 
 const opus = MODELS.opus.id
 const sonnet = MODELS.sonnet.id
@@ -218,4 +220,13 @@ test('awayText prices the ways to step away for this session', () => {
   const cold = awayText({ tokens: 200_000, model: opus, ttlMinutes: 60, warmMinutes: 0 })
   expect(cold).toContain('The cache is already cold: anything sent now re-writes the 200k tokens for $1.60, so /clear (free) is the cheapest way out.')
   expect(awayText({ tokens: 200_000, model: 'gpt-x', ttlMinutes: 60, warmMinutes: 10 })).toMatch(/^No prices for gpt-x\./)
+})
+
+test('advice teaches only when a commit makes clearing the better move', () => {
+  const advice = adviseSession({ tokens: 200_000, window: 1_000_000, model: opus, ttlMinutes: 60, warmMinutes: 40, boundary: 'commit' })
+  expect(lessonFromAdvice('fine', advice)).toEqual({ kind: 'strategy', usd: advice.perRequestUsd, fact: advice.text })
+  expect(lessonFromAdvice('boundary', advice)).toBeUndefined()
+  expect(lessonFromAdvice(undefined, adviseSession({ tokens: 200_000, window: 1_000_000, model: opus, ttlMinutes: 60, warmMinutes: 0 }))).toBeUndefined()
+  expect(lessonFromAdvice(undefined, adviseSession({ tokens: 100_000, window: 1_000_000, model: opus, ttlMinutes: 60, warmMinutes: 40 }))).toBeUndefined()
+  expect(lessonFromAdvice(undefined, adviseSession({ tokens: 900_000, window: 1_000_000, model: opus, ttlMinutes: 60, warmMinutes: 40 }))).toBeUndefined()
 })

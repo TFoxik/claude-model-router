@@ -157,6 +157,7 @@ const LESSON_KINDS: Record<LessonKind, true> = {
   subagents: true,
   'cache-expiring': true,
   'plan-toggle': true,
+  strategy: true,
 }
 export const isLessonKind = (kind: unknown): kind is LessonKind => typeof kind === 'string' && Object.hasOwn(LESSON_KINDS, kind)
 
@@ -471,9 +472,15 @@ export function parseSetting(route: string, model: string | undefined, effort: s
  * known (else the whole window): green below 60%, amber to 85%, red after.
  */
 export function contextLevel(tokens: number, window: number, compactAt?: number): 'success' | 'warning' | 'error' {
-  const toward = tokens / (compactAt && compactAt > 0 ? compactAt : window)
-  return toward >= 0.85 ? 'error' : toward >= 0.6 ? 'warning' : 'success'
+  const toward = contextFill(tokens, window, compactAt)
+  return toward >= CONTEXT_CRITICAL ? 'error' : toward >= CONTEXT_WARN ? 'warning' : 'success'
 }
+
+export const CONTEXT_WARN = 0.6
+export const CONTEXT_CRITICAL = 0.85
+
+/** How far along the context is: toward auto-compaction when known, else toward the whole window. */
+export const contextFill = (tokens: number, window: number, compactAt?: number) => tokens / (compactAt && compactAt > 0 ? compactAt : window)
 
 export const HISTORY_LIMIT = 2000
 

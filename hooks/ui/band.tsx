@@ -40,6 +40,12 @@ function healthRowView({ Box, Text, Button }: Els, health: Health | null, open: 
         <Text color={health.ctxLevel}>{health.ctx}%</Text>
         {'  ·  '}
       </Text>
+      {health.advice === undefined ? null : (
+        <Box flexDirection="row">
+          <Button key="advice" label={`next /${health.advice.verdict}`} plain onPress={() => open('context')} />
+          <Text dimColor>{'  ·  '}</Text>
+        </Box>
+      )}
       <Button key="last-cost" label={`last ${money(health.last)}`} plain dimColor onPress={() => open('last')} />
       {limits.length === 0 ? null : (
         <Text dimColor>

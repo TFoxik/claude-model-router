@@ -4,7 +4,7 @@ A Claude Code mod that picks the model and effort for each kind of work, and sho
 
 Plan mode, normal work and each subagent type can run on a different model: Opus for planning, Sonnet for edits, Haiku for searches. The mod tracks prompt-cache health and spend as you go, stops a send that would re-write a cold cache, and can explain where your money went with your own numbers.
 
-![Two-row band above the prompt and today's spend below it](docs/band-and-footer.svg)
+![Two-row band above the prompt, suggesting next /clear, and today's spend below it](docs/band-and-footer.svg)
 
 The **[field guide](https://tfoxik.github.io/claude-model-router/)** walks through every part of the screen it adds, with annotated pictures.
 
@@ -12,9 +12,14 @@ The **[field guide](https://tfoxik.github.io/claude-model-router/)** walks throu
 
 - **Routes models per kind of work.** Set a model and effort for `main`, `plan`, each subagent type (`sub:Explore`, `sub:Plan`, …), workflows and teammates, or pick a preset. The `/route` pane shows what a change costs per turn, the one-off cache rewrite it causes, and when it pays back, before you apply it.
 - **Shows cost and cache health in a band above the prompt**: `cache 96% 42m · context 31% · last $0.05 · 5h 38% · 7d 12%`. That's the cache hit rate and minutes until it goes cold, context used, the cost of your last prompt, and your 5-hour and 7-day limits. Click any part for a breakdown with tips on what to trim or reroute.
+- **Says when to carry on, compact or clear.** When carrying on is not the best move, the band shows `next /clear` or `next /compact`. It says clear after a commit or a pull request over a sizeable context, or once the cache has gone cold, and compact when auto-compact is close or the conversation fills most of the context. The Context pane's tips give the reason in dollars.
+- **Spots MCP servers and plugins you don't use.** It notes, per repo, which MCP servers and plugins are loaded and which get used. Once one has been loaded for two weeks and ten sessions without use in 30 days, the Context pane and `/route unused` name it with the setting that turns it off. The mod can't switch anything off itself:
+  - **MCP servers** go off per repo in `/mcp`. When none of your connected claude.ai connectors is used, it also offers `"disableClaudeAiConnectors": true`.
+  - **Plugins** get a ready-to-paste `enabledPlugins` block for the repo's `.claude/settings.local.json`, or `/plugin` when no repo uses them. A plugin listed covers its own MCP server.
+  - Connectors you never signed in to aren't counted. A plugin's hooks can't be seen, so plugins with only hooks are never listed.
 - **Keeps stats across sessions.** The footer shows `▤ today $12.30`; click it to see which commands cost most on average and your most expensive prompts, with the models each one used. Filter by this repo or all repos.
 - **Guards cold sends.** When the cache has expired over a big context, your next message is held once with its price: `This send re-writes ~200k tokens on Opus 5.5 = $1.60 (warm would be $0.04)`. Send it again to pay, or `/clear`.
-- **Teaches, if you want it to.** Learn mode (off by default) explains each cache miss, model switch, growing context and expensive prompt with the real numbers, and warns before the cache goes cold. `/route away` compares the cheapest ways to step away from a session.
+- **Teaches, if you want it to.** Learn mode (off by default) explains each cache miss, model switch, growing context and expensive prompt with the real numbers, warns before the cache goes cold, and says why a commit is a good moment to `/clear`. `/route away` compares the cheapest ways to step away from a session.
 
 ![The /route pane: routing on, the learn mode switch, the live route and the preset](docs/routes-pane.svg)
 
@@ -62,8 +67,9 @@ Then restart or run `/reload-plugins`. Saved settings carry over. See [CHANGELOG
 | `/route stats clear` | Delete the saved prompt history |
 | `/route stats text on\|off` | Keep the first 120 characters of each prompt in Stats (default on) |
 | `/route learn` / `learn on\|off` | Open the Learn pane / turn learn mode on or off (default off) |
-| `/route learn mute\|unmute <topic>` | Silence a topic: `cold-rewrite`, `switch-rewrite`, `pricey-model`, `context-high`, `compacted`, `subagents`, `cache-expiring`, `plan-toggle` |
+| `/route learn mute\|unmute <topic>` | Silence a topic: `cold-rewrite`, `switch-rewrite`, `pricey-model`, `context-high`, `compacted`, `subagents`, `cache-expiring`, `plan-toggle`, `strategy` |
 | `/route away` | Before a break: the ways to step away, priced for this session |
+| `/route unused` | MCP servers and plugins this repo has long left unused, and how to turn each off |
 | `/route guard refuse\|warn\|off` | What a send onto a cold cache does (default `refuse`: held once with its price) |
 | `/route ttl 5\|60` | Prompt-cache lifetime for the warm/cold timer (default 60) |
 | `/route band on\|off` | Show or hide the band |
@@ -81,7 +87,7 @@ Routes: `main`, `plan`, `sub:*`, `sub:<agent-type>` (such as `sub:Explore`), `wo
 
 - **No tokens added**: no system prompt or attachments. Toasts, the band and the panes stay in the UI.
 - **One optional model call**: `auto` effort (presets `balanced` and `frugal`) sends the first 4,000 characters of each prompt you type to Haiku to classify it, about $0.0001 and a few hundred milliseconds. Fixed efforts make no call.
-- **Stored locally** in the plugin store, across repos: prompt history for Stats (the first 120 characters of each prompt, repo name, cost, models; last 2,000 prompts) and learn mode lessons (numbers and model names, never prompt text; last 20 per topic). Nothing leaves your machine; the mod has no network, file or process access of its own.
+- **Stored locally** in the plugin store, across repos: prompt history for Stats (the first 120 characters of each prompt, repo name, cost, models; last 2,000 prompts) learn mode lessons (numbers and model names, never prompt text; last 20 per topic), and per repo which MCP servers and plugins were loaded and used (names, counts and dates, never tool arguments). Nothing leaves your machine; the mod has no network, file or process access of its own.
 - **Settings change only when you type a command**, never from a peer session, channel or trigger. Opening a pane works from anywhere.
 
 ## Develop
@@ -91,6 +97,8 @@ claude --plugin-dir .
 claude plugin validate .
 claude plugin test .
 ```
+
+To see the unused MCP server and plugin advice without two weeks of history, start a session with `MODEL_ROUTER_IDLE_DEV=1 claude --plugin-dir .`. After its first prompt, `/route unused` and the Context pane list whatever was loaded but not used in the last 30 days. Turn off an installed copy of the mod in `/plugin` while you do, or both copies load.
 
 ## License
 

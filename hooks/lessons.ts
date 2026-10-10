@@ -1,4 +1,5 @@
 import type { Effort, Health, Lesson, LessonKind, PromptCost, PromptItem, Rewrite } from '../types'
+import type { Advice } from './strategy'
 import { ENGINE, FORK, GUARD_MIN_TOKENS, MODELS, PRICES_AS_OF, costOf, fmtAge, isLessonKind, isRouteKey, isSub, kTokens, labelOf, modelKeyOf, money, plural, printable, rewritePrice, routeText, sumUsd } from './routes'
 
 export type LessonDraft = Pick<Lesson, 'kind' | 'fact' | 'usd'>
@@ -29,7 +30,7 @@ export const CONCEPTS: Record<LessonKind, { title: string; body: string }> = {
   },
   'context-high': {
     title: 'Context is getting big',
-    body: 'Every turn sends the whole context again. Even read from the cache, a big context makes each turn cost more, and a cold send rewrites all of it. Near the limit Claude Code auto-compacts into a summary. Finishing a task and running /clear keeps turns cheap. /compact keeps a summary when you need the thread.',
+    body: 'Every turn sends the whole context again. Even read from the cache, a big context makes each turn cost more, and a cold send rewrites all of it. Near the limit Claude Code auto-compacts into a summary. Finishing a task and running /clear keeps turns cheap. /compact keeps a summary when you need the thread: say what to keep (the plan, open TODOs, touched files), and run it at a point you choose, while the cache is warm, rather than let auto-compact fire mid-task.',
   },
   compacted: {
     title: 'Conversation compacted',
@@ -42,6 +43,10 @@ export const CONCEPTS: Record<LessonKind, { title: string; body: string }> = {
   'plan-toggle': {
     title: 'Plan mode switches rewrite the cache',
     body: 'A prompt cache belongs to one model at one effort. When plan mode is routed differently from normal work, entering and leaving plan mode each start a new cache, and the first send after each switch writes the whole context again. Plan at the start of a task, while the context is small, or route plan and main the same.',
+  },
+  strategy: {
+    title: 'Clear after committing',
+    body: 'Every request re-sends the whole conversation, so what has piled up is paid for again on each turn. Once a task is committed, its back-and-forth rarely helps the next one: /clear starts small and costs nothing, and the commit and its message already record what was done. /compact instead if the next task builds on this one. The band shows "next /clear" or "next /compact" whenever carrying on is not the best move.',
   },
   subagents: {
     title: 'Subagents did most of the spending',
@@ -178,6 +183,16 @@ export function lessonFromPlanToggle(plan: LoopRoute, main: LoopRoute, tokens: n
     usd: enter + leave,
     fact: `Plan mode runs on ${routeText(plan.model, plan.effort)} and normal work on ${routeText(main.model, main.effort)}, so each switch re-writes the cache: at ${kTokens(tokens)} tokens, entering cost about ${money(enter)} and leaving will cost about ${money(leave)}. Routing both the same avoids it; so does switching while the context is small.`,
   }
+}
+
+/**
+ * Committed work making /clear the better move, worth a toast when the turn
+ * ends. The other advice is taught already: a growing context by
+ * context-high, a cold cache by the expiry warning and the cold-send guard.
+ */
+export function lessonFromAdvice(prevReason: Advice['reason'] | undefined, a: Advice): LessonDraft | undefined {
+  if (a.reason !== 'boundary' || prevReason === 'boundary') return undefined
+  return { kind: 'strategy', usd: a.perRequestUsd, fact: a.text }
 }
 
 export function lessonFromCompact(beforeTokens: number): LessonDraft {

@@ -180,6 +180,8 @@ td .ex { color: var(--muted); font-size: 13.5px; }
     <ul class="what">
       <li><b>Routes models by kind of work.</b> Opus plans, Sonnet edits, Haiku searches: plan mode, normal work and each subagent type get their own model and effort.</li>
       <li><b>Shows the cost as you go.</b> Cache health, context, last prompt and plan limits above the prompt; today's spend below it.</li>
+      <li><b>Says when to compact or clear.</b> After a commit, near auto-compact or on a cold cache, the band says what to do next, with the reason in dollars.</li>
+      <li><b>Spots what you don't use.</b> MCP servers and plugins a repo never touches, with the exact setting that turns each off there.</li>
       <li><b>Stops the expensive send.</b> When the cache has gone cold over a big context, your next message is held once with its price.</li>
       <li><b>Explains, if you want it to.</b> Learn mode turns cache misses and model switches into short lessons with your own numbers.</li>
     </ul>
@@ -200,6 +202,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
     <a href="#guard">Cold-send guard</a>
     <a href="#learn">Learn mode</a>
     <a href="#away">Stepping away</a>
+    <a href="#unused">Unused servers</a>
     <a href="#commands">Commands</a>
   </nav>
 
@@ -227,6 +230,8 @@ td .ex { color: var(--muted); font-size: 13.5px; }
               <span class="dim">&nbsp;·&nbsp;</span>
               <span class="zone inl" data-z="b6"><span class="pin">6</span><span class="dim">context </span><span class="ok">31%</span></span>
               <span class="dim">&nbsp;·&nbsp;</span>
+              <span class="zone inl" data-z="b11"><span class="pin">11</span><span>next /clear</span></span>
+              <span class="dim">&nbsp;·&nbsp;</span>
               <span class="zone inl" data-z="b7"><span class="pin">7</span><span class="dim">last $0.05</span></span>
               <span class="dim">&nbsp;·&nbsp;</span>
               <span class="zone inl" data-z="b8"><span class="pin">8</span><span class="dim">5h </span><span class="warn">74%</span><span class="dim"> · 7d 12%</span></span>
@@ -248,6 +253,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
         <div class="note" data-z="b7"><span class="n">7</span><h3>Last prompt cost</h3><div class="body"><p>What your whole last prompt cost, including every subagent it started. It grows live while the prompt runs. Click it for the <a href="#last">Last prompt pane</a>.</p></div></div>
         <div class="note" data-z="b8"><span class="n">8</span><h3>Usage limits</h3><div class="body"><p>How much of your 5-hour and 7-day plan limits is used. Yellow from 70%, red from 90%.</p></div></div>
         <div class="note" data-z="b9"><span class="n">9</span><h3>Routes / Hide</h3><div class="body"><p><b>Routes</b> opens the <a href="#routes">Routes pane</a>. <b>Hide</b> hides the band; bring it back with <code>/route band on</code>.</p></div></div>
+        <div class="note" data-z="b11"><span class="n">11</span><h3>Next step</h3><div class="body"><p>Only when carrying on is not the best move. <b>next /clear</b> after a <code>git commit</code> or a pull request over 50k tokens or more, until your next prompt, or once the cache has gone cold over a big context (a <code>/compact</code> would pay the rewrite too). <b>next /compact</b> within 15% of auto-compact, or when the conversation is most of a context that is 60% of the way there. Click it for the reason, priced, at the top of the <a href="#context">Context pane</a>'s tips.</p></div></div>
         <div class="note" data-z="b10"><span class="n">10</span><h3>Learn</h3><div class="body"><p>Only while <a href="#learn">learn mode</a> is on and there are lessons you haven't opened: the number is how many, counted in the Learn pane's scope (this repo, or all repos). Click it for the Learn pane.</p></div></div>
       </div>
     </div>
@@ -560,7 +566,8 @@ td .ex { color: var(--muted); font-size: 13.5px; }
           </div>
           <div class="zone" data-z="c6"><span class="pin">6</span>
             <div class="label">TIPS</div>
-            <div><span style="color:#e0b24f">›</span> MCP server github loads 22k of tool schemas: disconnect it in /mcp if this repo does not use it</div>
+            <div><span style="color:#e0b24f">›</span> Work was committed. Each further request re-reads the 312k tokens of finished work ($0.06 warm): /clear and start the next task fresh, or /compact to carry a summary.</div>
+            <div><span style="color:#e0b24f">›</span> MCP server github has not been used in this repo over 14 sessions: turn it off in /mcp, which keeps it off for this repo only</div>
             <div><span style="color:#e0b24f">›</span> my-app/CLAUDE.md (Project) is 6k, re-sent every turn: move rarely needed parts into a skill or a doc Claude reads when it needs it</div>
           </div>
         </div>
@@ -571,7 +578,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
         <div class="note" data-z="c3"><span class="n">3</span><h3>Auto-compact</h3><div class="body"><p>Where Claude Code will compact the conversation, and how many tokens are left until then.</p></div></div>
         <div class="note" data-z="c4"><span class="n">4</span><h3>In use / not sent</h3><div class="body"><p><b>In use</b> is what is sent with every request: messages, tools, memory files, and so on. <b>Not sent</b> covers deferred tools (loaded only when needed), free space and the buffer kept for compaction.</p></div></div>
         <div class="note" data-z="c5"><span class="n">5</span><h3>Biggest MCP servers and memory files</h3><div class="body"><p>The top five of each by size: the first places to look when context fills up quickly.</p></div></div>
-        <div class="note" data-z="c6"><span class="n">6</span><h3>Tips</h3><div class="body"><p>Up to three things worth trimming, biggest first, each with what to do: a memory file of 3k or more, an MCP server whose loaded tool schemas reach 5k (deferred ones cost nothing), a skills listing of 3k or more, custom agent descriptions of 2k or more, a conversation that fills most of the window, or auto-compaction close ahead. Worked out from the breakdown alone, with no model call; nothing shows when there is nothing to trim.</p></div></div>
+        <div class="note" data-z="c6"><span class="n">6</span><h3>Tips</h3><div class="body"><p>Up to three things worth doing, biggest first. Advice to compact or clear always comes first, with its reason, the same advice the band's <b>next</b> shows. An MCP server or plugin this repo has left unused is named with how to turn it off; see <a href="#unused">Unused servers and plugins</a>, and <code>/route unused</code> for the full list.</p><p>The rest are things worth trimming, each with what to do: a memory file of 3k or more, an MCP server whose loaded tool schemas reach 5k (deferred ones cost nothing), a skills listing of 3k or more, or custom agent descriptions of 2k or more. Worked out from the breakdown alone, with no model call; nothing shows when there is nothing to trim.</p></div></div>
       </div>
     </div>
   </section>
@@ -651,6 +658,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
           <tr><td><b>Switching model rewrote the cache</b> <span class="chip">after</span></td><td>A change of model or effort rebuilt the cache.</td><td class="ex">Switching from Opus 5.5 medium to Sonnet 5.5 high re-wrote 100k tokens for $0.40 ($0.38 more than a warm read).</td></tr>
           <tr><td><b>An expensive model did most of the work</b> <span class="chip">after</span></td><td>Opus or Fable made up 70% or more of a prompt costing $0.25 or more, and Sonnet would have been at least 25% cheaper for the same tokens.</td><td class="ex">Opus 5.5 did 100% of this prompt's $0.60. The same tokens on Sonnet 5.5 would cost about $0.30 (price only, not quality).</td></tr>
           <tr><td><b>Subagents did most of the spending</b> <span class="chip">after</span></td><td>Two or more subagents made up half or more of a prompt costing $0.25 or more.</td><td class="ex">2 subagents made up 80% of this prompt ($0.80), most of it sub:Explore on Opus 5.5…</td></tr>
+          <tr><td><b>Clear after committing</b> <span class="chip before">heads-up</span></td><td>When a commit or a pull request over 50k tokens or more turns the band's advice to clear. A growing context and a cold cache are taught by the topics above.</td><td class="ex">Work was committed. Each further request re-reads the 200k tokens of finished work ($0.04 warm): /clear and start the next task fresh, or /compact to carry a summary.</td></tr>
           <tr><td><b>Conversation compacted</b> <span class="chip">after</span></td><td>After a compaction.</td><td class="ex">The conversation was compacted from about 180k tokens down to a summary.</td></tr>
         </tbody>
       </table>
@@ -687,6 +695,32 @@ td .ex { color: var(--muted); font-size: 13.5px; }
     </div>
   </section>
 
+  <!-- UNUSED -->
+  <section class="part" id="unused">
+    <div class="part-head">
+      <div class="where">/route unused · tips in the Context pane</div>
+      <h2>Unused servers and plugins</h2>
+      <p>Every connected MCP server sends its tool names and instructions with each request, and every plugin adds its skills to the list Claude reads. The mod notes, per repo, which ones are loaded and which get used, and names the ones a repo leaves alone. It can't switch anything off itself; it gives you the setting that does.</p>
+    </div>
+    <div class="grid">
+      <div class="stick">
+        <div class="pane mono tab">
+          <div class="zone" data-z="u1"><span class="pin">1</span>Unused in my-app (14 sessions recorded):</div>
+          <div class="zone" data-z="u2"><span class="pin">2</span>&nbsp;&nbsp;› MCP servers not used in this repo: claude.ai Figma, claude.ai Notion, github (41 days ago). Turn each off in /mcp; it stays off for this repo only.</div>
+          <div class="zone" data-z="u3"><span class="pin">3</span>&nbsp;&nbsp;› None of the 2 claude.ai connectors is used here: "disableClaudeAiConnectors": true in .claude/settings.local.json turns them all off for this repo.</div>
+          <div class="zone" data-z="u4"><span class="pin">4</span>&nbsp;&nbsp;› Plugins not used in this repo (hooks they add are not counted): slint, code-review. To turn them off for this repo only, merge into .claude/settings.local.json:<br>&nbsp;&nbsp;&nbsp;&nbsp;{ "enabledPlugins": { "slint@slint": false, "code-review@claude-plugins-official": false } }</div>
+        </div>
+      </div>
+      <div class="notes">
+        <div class="note" data-z="u1"><span class="n">1</span><h3>What counts</h3><div class="body"><p>A server is used when Claude calls one of its tools. A plugin is used when one of its skills, agents, slash commands or MCP tools runs. Recording starts with 0.7.0. Something is listed once it has been loaded here for two weeks and ten sessions with no use in the last 30 days. Each session counts once, even across a <code>/login</code> or a reload.</p></div></div>
+        <div class="note" data-z="u2"><span class="n">2</span><h3>MCP servers</h3><div class="body"><p>Named as <code>/mcp</code> names them. <code>/mcp</code> keeps a server off for the repo you turn it off in. A server no repo has used says so, and suggests removing it from its config. A connector you never signed in to only offers sign-in tools; it isn't counted as connected, so it's never listed.</p></div></div>
+        <div class="note" data-z="u3"><span class="n">3</span><h3>claude.ai connectors</h3><div class="body"><p>Connectors come with your claude.ai account and load in every repo. When none of the connected ones is used here, one setting turns them all off for this repo.</p></div></div>
+        <div class="note" data-z="u4"><span class="n">4</span><h3>Plugins</h3><div class="body"><p>A block to paste into the repo's <code>.claude/settings.local.json</code>, with each plugin's full <code>name@marketplace</code>. A plugin no repo uses points to <code>/plugin</code> instead. Turning a plugin off takes its own MCP server with it, so that server isn't listed again. The mod can't see a plugin's hooks run, so check before turning off one you keep for its hooks; plugins with nothing but hooks are never listed.</p></div></div>
+      </div>
+    </div>
+    <p style="color:var(--muted); max-width:75ch; margin-top:18px">The <a href="#context">Context pane</a> shows the three biggest as tips. To try it without two weeks of history, start a session with <code>MODEL_ROUTER_IDLE_DEV=1</code>: after its first prompt, anything loaded but not used in the last 30 days is listed.</p>
+  </section>
+
   <!-- COMMANDS -->
   <section class="part" id="commands">
     <div class="part-head">
@@ -705,6 +739,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
             <tr><td><code>/route learn on|off</code></td><td>Turn learn mode on or off (default off); also in the Routes pane</td></tr>
             <tr><td><code>/route learn mute|unmute &lt;topic&gt;</code></td><td>Silence or bring back one topic, such as <code>pricey-model</code>; also in the Learn pane</td></tr>
             <tr><td><code>/route away</code></td><td>Before a break: the ways to step away, priced for this session</td></tr>
+            <tr><td><code>/route unused</code></td><td>MCP servers and plugins this repo has long left unused, grouped, with the setting that turns them off</td></tr>
             <tr><td><code>/route stats clear</code></td><td>Delete the saved prompt history</td></tr>
             <tr><td><code>/route stats text on|off</code></td><td>Keep the first 120 characters of each prompt (default on); off also removes text already kept</td></tr>
             <tr><td><code>/route preset &lt;name&gt;</code></td><td>Apply a preset: <code>inherit</code>, <code>mine</code>, <code>balanced</code>, <code>frugal</code>, <code>max</code></td></tr>
@@ -746,6 +781,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
           <ul>
             <li>No network, file or process access of its own.</li>
             <li>Prompt history stays in the mod's local store on your machine.</li>
+            <li>Per repo, which MCP servers and plugins were loaded and used: names, counts and dates, never tool arguments.</li>
             <li>Learn mode lessons are kept there too: topic, time, repo name and the fact text, never your prompt text. The last 20 of each topic.</li>
             <li>Costs are local estimates from built-in prices, not your bill.</li>
           </ul>

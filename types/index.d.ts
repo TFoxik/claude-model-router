@@ -34,6 +34,8 @@ export type Health = {
   coldUsd?: number
   fiveHour?: number
   sevenDay?: number
+  /** What to do next when carrying on is not the best move. */
+  advice?: { verdict: 'compact' | 'clear'; reason: 'boundary' | 'cold' | 'near-compact' | 'conversation'; text: string }
 }
 export type PromptItem = RouteSpend & {
   id: string
@@ -71,6 +73,14 @@ export type LessonKind =
   | 'subagents'
   | 'cache-expiring'
   | 'plan-toggle'
+  | 'strategy'
+/** Session facts a hot reload of the mod's code would otherwise drop: the prompt still running and the MCP and plugin use not yet saved. */
+export type Carried = {
+  sessionId?: string
+  current?: { label: string; text: string; at: number }
+  used: Record<string, { calls: number; lastUsed: number }>
+  isUncounted: boolean
+}
 export type Lesson = { kind: LessonKind; at: number; repo: string; fact: string; usd?: number; isToasted?: boolean }
 
 declare module 'claude-code' {
@@ -91,6 +101,7 @@ declare module 'claude-code' {
       lessonsReadAt: number
       learnOpen: LessonKind[]
       learnScope: Scope
+      carried: Carried | null
     }
   }
 }

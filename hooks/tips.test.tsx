@@ -67,34 +67,6 @@ test('a big skills listing and many custom agents get a tip each', () => {
   ])
 })
 
-test('a conversation that fills the context suggests /clear', () => {
-  const tips = contextTips(breakdown({
-    categories: [
-      { name: 'Messages', tokens: 70_000, color: 'claude', isDeferred: false, kind: 'used' },
-      { name: 'System prompt', tokens: 10_000, color: 'subtle', isDeferred: false, kind: 'used' },
-    ],
-    totalTokens: 80_000,
-  }))
-  expect(tips.map(one => one.text)).toEqual(['the conversation is 70k of 80k: when this task is done, /clear, or /compact to keep a summary'])
-})
-
-test('close to auto-compact replaces the /clear tip and comes first', () => {
-  const tips = contextTips(breakdown({
-    categories: [
-      { name: 'Messages', tokens: 140_000, color: 'claude', isDeferred: false, kind: 'used' },
-      { name: 'System prompt', tokens: 10_000, color: 'subtle', isDeferred: false, kind: 'used' },
-    ],
-    totalTokens: 150_000,
-    memoryFiles: [{ path: '/r/CLAUDE.md', type: 'Project', tokens: 9000 }],
-  }))
-  expect(tips.map(one => one.key)).toEqual(['compact', 'memory:/r/CLAUDE.md'])
-  expect(tips[0]?.text).toBe('10k to auto-compact: /compact now, at a point you choose, rather than mid-task')
-})
-
-test('no compaction tip when auto-compact is off', () => {
-  expect(keys(breakdown({ totalTokens: 150_000, isAutoCompactEnabled: false, autoCompactThreshold: undefined }))).not.toContain('compact')
-})
-
 test('at most three tips, biggest first', () => {
   const memoryFiles = [4000, 9000, 5000, 6000].map((tokens, i) => ({ path: `/r/${i}.md`, type: 'Project', tokens }))
   expect(keys(breakdown({ memoryFiles }))).toEqual(['memory:/r/1.md', 'memory:/r/3.md', 'memory:/r/2.md'])
@@ -168,4 +140,23 @@ test('Stats: Opus and Fable doing nearly all the spending suggest a cheaper pres
   expect(tips.map(one => one.text)).toEqual([
     'Opus and Fable did 90% of $10.00: /route preset balanced keeps Opus for planning and the main loop and moves subagents and searches to Sonnet and Haiku',
   ])
+})
+
+test('advice to compact or clear leads the Context tips; the breakdown alone gives none', () => {
+  const near = breakdown({
+    categories: [{ name: 'Messages', tokens: 140_000, color: 'claude', isDeferred: false, kind: 'used' }],
+    totalTokens: 150_000,
+    memoryFiles: [{ path: '/r/CLAUDE.md', type: 'Project', tokens: 9000 }],
+  })
+  expect(keys(near)).toEqual(['memory:/r/CLAUDE.md'])
+  const advice = { verdict: 'compact' as const, text: 'compact now' }
+  expect(contextTips(near, { advice }).map(one => one.key)).toEqual(['advice:compact', 'memory:/r/CLAUDE.md'])
+  expect(keys(near)).toEqual(contextTips(near, { advice: { verdict: 'continue', text: '' } }).map(one => one.key))
+})
+
+test('extra tips join the ranking, and drop the tips they replace', () => {
+  const b = breakdown({ mcpTools: [{ name: 'search', serverName: 'claude.ai Jira', tokens: 6000, isLoaded: true }] })
+  expect(keys(b)).toEqual(['mcp:claude.ai Jira'])
+  const idle = { key: 'idle:mcp:claude_ai_Jira', weight: 6000, text: 'unused', replaces: 'mcp:claude.ai Jira' }
+  expect(contextTips(b, { more: [idle] }).map(one => one.key)).toEqual(['idle:mcp:claude_ai_Jira'])
 })
