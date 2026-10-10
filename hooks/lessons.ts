@@ -232,7 +232,8 @@ const isLesson = (l: unknown): l is Lesson => {
   return typeof x === 'object' && x !== null && isLessonKind(x.kind) && typeof x.at === 'number' && typeof x.repo === 'string' && typeof x.fact === 'string'
 }
 
-export const sanitizeLessons = (stored: unknown): Lesson[] => (Array.isArray(stored) ? capLessons(stored.filter(isLesson)) : [])
+export const sanitizeLessons = (stored: unknown): Lesson[] =>
+  Array.isArray(stored) ? capLessons(stored.filter(isLesson)).map(one => ({ ...one, repo: printable(one.repo), fact: printable(one.fact) })) : []
 
 /** Kinds ordered by their newest lesson, each with its lessons newest first. */
 export function byKind(lessons: readonly Lesson[]): Array<[LessonKind, Lesson[]]> {

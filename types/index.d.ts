@@ -90,6 +90,7 @@ declare module 'claude-code' {
       lessons: Lesson[]
       lessonsReadAt: number
       learnOpen: LessonKind[]
+      learnScope: Scope
     }
   }
 }

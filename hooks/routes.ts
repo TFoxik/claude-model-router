@@ -192,7 +192,11 @@ const isRecord = (r: unknown): r is PromptRecord => {
     typeof x.text === 'string' && typeof x.usd === 'number' && typeof x.requests === 'number' && typeof x.agents === 'number'
 }
 
-export const sanitizeHistory = (stored: unknown): PromptRecord[] => (Array.isArray(stored) ? stored.filter(isRecord).slice(-HISTORY_LIMIT) : [])
+/** Also cleans the names the panes show, for history saved before they were cleaned at record time. */
+export const sanitizeHistory = (stored: unknown): PromptRecord[] =>
+  Array.isArray(stored)
+    ? stored.filter(isRecord).slice(-HISTORY_LIMIT).map(r => ({ ...r, repo: printable(r.repo), label: printable(r.label), text: printable(r.text) }))
+    : []
 
 /** Terminal control characters stripped from text the panes show but didn't write. */
 export const printable = (text: string) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
@@ -247,7 +251,7 @@ export function routeForSpawn(e: SpawnFacts): string {
   if (e.fork) return FORK
   if (e.workflow !== undefined) return 'workflow'
   if (e.isTeammate) return 'teammate'
-  return `sub:${e.subagentType}`
+  return `sub:${printable(e.subagentType)}`
 }
 
 /** The model an API id (`claude-opus-5-5`) or a display label (`Opus 5.5 high`) names. */
@@ -258,7 +262,7 @@ export function modelKeyOf(id: string): ModelKey | undefined {
 
 export function labelOf(id: string): string {
   const key = modelKeyOf(id)
-  return key ? MODELS[key].label : id
+  return key ? MODELS[key].label : printable(id)
 }
 
 /** `Opus` for `Opus 5.5`: the label without its version. */
@@ -474,7 +478,7 @@ export function contextLevel(tokens: number, window: number, compactAt?: number)
 export const HISTORY_LIMIT = 2000
 
 export function commandLabel(text: string): string {
-  const first = text.trim().split(/\s+/)[0] ?? ''
+  const first = printable(text).trim().split(/\s+/)[0] ?? ''
   return first.startsWith('/') && first.length > 1 ? first : 'prompt'
 }
 

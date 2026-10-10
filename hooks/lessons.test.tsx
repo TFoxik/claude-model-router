@@ -196,6 +196,7 @@ test('sanitizeLessons drops what this version does not understand', () => {
   const good = lesson({})
   expect(sanitizeLessons([good, null, { ...good, kind: 'nope' }, { ...good, fact: 3 }, 'x'])).toEqual([good])
   expect(sanitizeLessons({})).toEqual([])
+  expect(sanitizeLessons([lesson({ repo: 'r\u001b', fact: 'f\u0007' })])).toEqual([lesson({ repo: 'r ', fact: 'f ' })])
 })
 
 test('byKind groups newest first', () => {

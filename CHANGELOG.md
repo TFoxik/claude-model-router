@@ -1,5 +1,12 @@
 # Release notes
 
+## 0.6.3 — 2026-10-10
+
+### Fixed
+
+- Every name the panes show from outside the mod is stripped of terminal control characters: slash command labels in Stats, the repo name in Stats and Learn, agent types in the Routes and Last prompt panes, and unknown model names. History and lessons saved by earlier versions are cleaned when they load.
+- `claude plugin validate` passes again: the Learn pane's scope setting from 0.6.2 is declared in the plugin's types.
+
 ## 0.6.2 — 2026-10-10
 
 ### Changed

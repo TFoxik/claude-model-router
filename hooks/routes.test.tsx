@@ -33,6 +33,7 @@ import {
   resolve,
   routeForSpawn,
   shouldSwitch,
+  labelOf,
 } from './routes'
 
 const opus = MODELS.opus.id
@@ -606,6 +607,14 @@ test('route, model, effort and preset names are checked as own keys', () => {
   expect([presetOf('constructor'), presetOf('__proto__')]).toEqual([undefined, undefined])
   expect(presetOf('max')?.label).toBe('Max quality')
   expect(printable('a\u001b[31mb\nc')).toBe('a [31mb c')
+})
+
+test('names the panes show reach them without terminal control characters', () => {
+  expect(commandLabel('/x\u001b]0;title\u0007 now')).toBe('/x')
+  expect(routeForSpawn({ subagentType: 'odd\u001b[2J', fork: false })).toBe('sub:odd [2J')
+  expect(labelOf('model\u001b[2J')).toBe('model [2J')
+  const dirty = { at: 1, repo: 'r\u001b', label: '/a\u0007', text: 't\u001b[31m', usd: 1, requests: 1, agents: 0 }
+  expect(sanitizeHistory([dirty])).toEqual([{ ...dirty, repo: 'r ', label: '/a ', text: 't [31m' }])
 })
 
 test('prompt text drops the tags Claude Code wraps commands, agent messages and reminders in', () => {

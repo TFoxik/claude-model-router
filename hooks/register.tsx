@@ -482,7 +482,7 @@ async function routeOfAgent($: $, agentId: string): Promise<string | undefined> 
   if (known !== undefined) return known.route
   const listed = (await $.agent.list()).find(one => one.id === agentId)
   if (listed !== undefined) {
-    const route = listed.teammateId !== undefined ? 'teammate' : listed.type === FORK ? FORK : `sub:${listed.type}`
+    const route = listed.teammateId !== undefined ? 'teammate' : listed.type === FORK ? FORK : `sub:${printable(listed.type)}`
     mem.agents.set(agentId, { route })
     return route
   }
@@ -611,7 +611,7 @@ export const register: Register = on => {
     if (lessonScope === 'repo' || lessonScope === 'all') await update($, learnScope, () => lessonScope)
     if (typeof band === 'boolean') await update($, isBandShown, () => band)
     const root = repo?.root ?? (await $.session.root().catch(() => ''))
-    mem.repo = repo?.name ?? (root.split('/').pop() || 'unknown')
+    mem.repo = printable(repo?.name ?? (root.split('/').pop() || 'unknown'))
     $.ui.status(undefined)
     await refreshStatus($).catch(() => undefined)
     mem.tick?.cancel()
