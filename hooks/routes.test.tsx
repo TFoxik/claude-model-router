@@ -1026,8 +1026,8 @@ test('a failed lessons read never saves over them', async ($, on) => {
 
 test('the learn pane explains a kind until seen enough, toggles why, and offers to turn learn mode on', async ($, on) => {
   const at = (i: number) => T0 + i * 60_000
-  const cold = [0, 1, 2].map(i => ({ kind: 'cold-rewrite', at: at(i), repo: 'r', fact: `cold ${i}` }))
-  const ctx = [{ kind: 'context-high', at: at(5), repo: 'r', fact: 'ctx 0' }]
+  const cold = [0, 1, 2].map(i => ({ kind: 'cold-rewrite', at: at(i), repo: 'unknown', fact: `cold ${i}` }))
+  const ctx = [{ kind: 'context-high', at: at(5), repo: 'unknown', fact: 'ctx 0' }]
   mock.store(on, { config: MINE, lessons: [...cold, ...ctx] })
   guardSession(on, { context: 1000, usage: usageOf(1000) })
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
@@ -1117,15 +1117,54 @@ test('learn mode can be switched from the /route pane and the Learn pane', async
   await learn.unmount()
 })
 
-test('the Learn pane says it spans all repos and tags each fact once lessons come from more than one', async ($, on) => {
+test('the Learn pane shows this repo first, and All tags each fact with its repo', async ($, on) => {
   const lesson = (repo: string, at: number): Lesson => ({ kind: 'cold-rewrite', at, repo, fact: `fact in ${repo}` })
-  mock.store(on, { config: { ...MINE, isLearning: true }, lessons: [lesson('alpha', 1), lesson('beta', 2)] })
+  const saved: Record<string, unknown> = { config: { ...MINE, isLearning: true }, lessons: [lesson('unknown', 1), lesson('beta', 2)] }
+  sharedStore(on, saved)
   guardSession(on, { context: 1000, usage: usageOf(1000) })
   on('ui.open', () => ({ value: undefined }) as never)
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   const pane = await mountPane($, 'learn', 'desktop')
+  expect(await pane.find({ type: 'Text', text: 'Learn · unknown' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /fact in unknown$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /fact in beta$/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: 'unknown · ' })).toBeUndefined()
+  await pane.press({ key: 'scope-all' })
   expect(await pane.find({ type: 'Text', text: 'Learn · all repos' })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: 'beta · ' })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: 'alpha · ' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'unknown · ' })).toBeDefined()
+  expect(saved.learnScope).toBe('all')
   await pane.unmount()
+})
+
+test('the Learn pane points to other repos when this one has no lessons', async ($, on) => {
+  mock.store(on, { config: { ...MINE, isLearning: true }, lessons: [{ kind: 'cold-rewrite', at: 1, repo: 'beta', fact: 'elsewhere' }] })
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  on('ui.open', () => ({ value: undefined }) as never)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const pane = await mountPane($, 'learn', 'desktop')
+  expect(await pane.find({ type: 'Text', text: 'No lessons in unknown yet; 1 lesson in other repos under All.' })).toBeDefined()
+  await pane.unmount()
+})
+
+test('the band counts unread lessons in the Learn pane scope', async ($, on) => {
+  const lesson = (repo: string, at: number): Lesson => ({ kind: 'cold-rewrite', at, repo, fact: `fact in ${repo}`, isToasted: true })
+  const saved: Record<string, unknown> = { config: { ...MINE, isLearning: true }, lessons: [lesson('unknown', 1), lesson('beta', 2), lesson('beta', 3)] }
+  sharedStore(on, saved)
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  on('ui.open', () => ({ value: undefined }) as never)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const mountBand = () => $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
+  const band = await mountBand()
+  expect(await band.find({ type: 'Button', text: 'Learn ●1' })).toBeDefined()
+  await band.unmount()
+  const pane = await mountPane($, 'learn', 'desktop')
+  await pane.press({ key: 'scope-all' })
+  await pane.unmount()
+  expect(saved.lessonsReadAt).toBe(3)
+  saved.lessons = [...(saved.lessons as Lesson[]), lesson('beta', 4)]
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const all = await mountBand()
+  expect(await all.find({ type: 'Button', text: 'Learn ●1' })).toBeDefined()
+  await all.unmount()
 })

@@ -1,11 +1,16 @@
-import type { Lesson, LessonKind } from '../../types'
+import type { Lesson, LessonKind, Scope } from '../../types'
 import { CONCEPTS, SEEN_ENOUGH, byKind } from '../lessons'
 import { PRICES_AS_OF } from '../routes'
 import { DATE_W, day } from './kit'
 import type { Els } from './kit'
 
-type LearnData = { lessons: readonly Lesson[]; isLearning: boolean; muted: readonly LessonKind[]; expanded: readonly LessonKind[] }
-type LearnActions = { setLearning: (isOn: boolean) => void; setMuted: (kind: LessonKind, isMuted: boolean) => void; toggle: (kind: LessonKind) => void }
+type LearnData = { lessons: readonly Lesson[]; isLearning: boolean; muted: readonly LessonKind[]; expanded: readonly LessonKind[]; scope: Scope; repo: string }
+type LearnActions = {
+  setLearning: (isOn: boolean) => void
+  setMuted: (kind: LessonKind, isMuted: boolean) => void
+  toggle: (kind: LessonKind) => void
+  setScope: (scope: Scope) => void
+}
 
 const OLDER_SHOWN = 2
 
@@ -26,21 +31,38 @@ function factRow({ Box, Text }: Els, key: string, one: Lesson, isOlder: boolean,
   )
 }
 
-export function learnPaneView(els: Els, { lessons, isLearning, muted, expanded }: LearnData, { setLearning, setMuted, toggle }: LearnActions) {
+export function learnPaneView(
+  els: Els,
+  { lessons, isLearning, muted, expanded, scope, repo }: LearnData,
+  { setLearning, setMuted, toggle, setScope }: LearnActions,
+) {
   const { Box, Text, Button } = els
-  const shown = lessons.filter(one => !muted.includes(one.kind))
+  const unmuted = lessons.filter(one => !muted.includes(one.kind))
+  const shown = scope === 'repo' ? unmuted.filter(one => one.repo === repo) : unmuted
+  const elsewhere = unmuted.length - shown.length
   const groups = byKind(shown)
   const showsRepo = new Set(shown.map(one => one.repo)).size > 1
   return (
     <Box flexDirection="column" gap={1}>
-      <Text bold color="claude">Learn · all repos</Text>
+      <Box flexDirection="row" justifyContent="space-between">
+        <Text bold color="claude">Learn · {scope === 'repo' ? repo : 'all repos'}</Text>
+        <Box flexDirection="row" gap={1}>
+          <Button key="scope-repo" label="This repo" plain dimColor={scope !== 'repo'} onPress={() => setScope('repo')} />
+          <Button key="scope-all" label="All" plain dimColor={scope !== 'all'} onPress={() => setScope('all')} />
+        </Box>
+      </Box>
       {isLearning ? null : (
         <Box flexDirection="row" gap={1}>
           <Text dimColor>Learn mode is off: new cache, model and context costs are not explained.</Text>
           <Button key="learn-on" label="Turn on" plain onPress={() => setLearning(true)} />
         </Box>
       )}
-      {groups.length === 0 ? <Text dimColor>No lessons yet. They appear when a cache rewrite, a pricey model, a big context or busy subagents cost you something.</Text> : null}
+      {groups.length === 0 && elsewhere > 0 ? (
+        <Text dimColor>{`No lessons in ${repo} yet; ${elsewhere === 1 ? '1 lesson' : `${elsewhere} lessons`} in other repos under All.`}</Text>
+      ) : null}
+      {groups.length === 0 && elsewhere === 0 ? (
+        <Text dimColor>No lessons yet. They appear when a cache rewrite, a pricey model, a big context or busy subagents cost you something.</Text>
+      ) : null}
       {groups.map(([kind, list]) => {
         const isOpen = list.length < SEEN_ENOUGH !== expanded.includes(kind)
         const [latest, ...older] = list

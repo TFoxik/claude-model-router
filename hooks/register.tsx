@@ -93,12 +93,13 @@ const isBandShown = atom({ plugin: 'model-router', key: 'isBandShown' } as const
 const lessons = atom({ plugin: 'model-router', key: 'lessons' } as const, [] as Lesson[])
 const lessonsReadAt = atom({ plugin: 'model-router', key: 'lessonsReadAt' } as const, 0)
 const learnOpen = atom({ plugin: 'model-router', key: 'learnOpen' } as const, [] as LessonKind[])
+const learnScope = atom({ plugin: 'model-router', key: 'learnScope' } as const, 'repo' as Scope)
 
 type $ = EngineInterface
 
 // The store keys the atoms kept across sessions are saved under. The engine's
 // scan needs each update() to name its atom, so callers update, then save().
-const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown', modelCommands: 'modelCommands', lessons: 'lessons', lessonsReadAt: 'lessonsReadAt' } as const
+const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown', modelCommands: 'modelCommands', lessons: 'lessons', lessonsReadAt: 'lessonsReadAt', learnScope: 'learnScope' } as const
 
 /** Saves a value kept across sessions; a failed save keeps the session going. */
 async function save<T>($: $, key: string, value: T): Promise<T> {
@@ -199,8 +200,12 @@ async function setMuted($: $, kind: LessonKind, isMuted: boolean) {
   await setConfig($, c => ({ ...c, learnMuted: isMuted ? [...new Set([...c.learnMuted, kind])] : c.learnMuted.filter(one => one !== kind) }))
 }
 
+/** Lessons the Learn pane and its count cover: this repo's, or every repo's under All. */
+const inScope = (all: readonly Lesson[], scope: Scope) => (scope === 'repo' ? all.filter(one => one.repo === mem.repo) : all)
+
 async function markLessonsRead($: $) {
-  const newest = Math.max(0, ...(await read($, lessons)).map(one => one.at))
+  const [all, scope] = await Promise.all([read($, lessons), read($, learnScope)])
+  const newest = Math.max(0, ...inScope(all, scope).map(one => one.at))
   await save($, STORE.lessonsReadAt, await update($, lessonsReadAt, () => newest))
 }
 
@@ -338,11 +343,15 @@ const openPane = ($: $): Open => pane => {
 }
 
 async function renderLearnPane($: $, e: Args<'ui.render'>) {
-  const [cfg, all, expanded] = await Promise.all([read($, config), read($, lessons), read($, learnOpen)])
-  return learnPaneView($.ui.resolve(e), { lessons: all, isLearning: cfg.isLearning, muted: cfg.learnMuted, expanded }, {
+  const [cfg, all, expanded, scope] = await Promise.all([read($, config), read($, lessons), read($, learnOpen), read($, learnScope)])
+  return learnPaneView($.ui.resolve(e), { lessons: all, isLearning: cfg.isLearning, muted: cfg.learnMuted, expanded, scope, repo: mem.repo }, {
     setLearning: isOn => void setLearning($, isOn),
     setMuted: (kind, isMuted) => void setMuted($, kind, isMuted),
     toggle: kind => void update($, learnOpen, open => (open.includes(kind) ? open.filter(one => one !== kind) : [...open, kind])),
+    setScope: async next => {
+      await save($, STORE.learnScope, await update($, learnScope, () => next))
+      await markLessonsRead($)
+    },
   })
 }
 
@@ -368,7 +377,7 @@ async function renderStatsPane($: $, e: Args<'ui.render'>) {
 const setBand = async ($: $, isShown: boolean) => save($, STORE.bandShown, await update($, isBandShown, () => isShown))
 
 async function renderBand($: $, e: Args<'ui.render'>) {
-  const [cfg, now, pending, costs, hp, kept, readAt] = await Promise.all([
+  const [cfg, now, pending, costs, hp, kept, readAt, scope] = await Promise.all([
     read($, config),
     read($, active),
     read($, draft),
@@ -376,8 +385,9 @@ async function renderBand($: $, e: Args<'ui.render'>) {
     read($, health),
     read($, lessons),
     read($, lessonsReadAt),
+    read($, learnScope),
   ])
-  const learnUnread = cfg.isLearning ? unreadCount(kept, readAt, cfg.learnMuted) : 0
+  const learnUnread = cfg.isLearning ? unreadCount(inScope(kept, scope), readAt, cfg.learnMuted) : 0
   const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp, learnUnread }
   return bandView($.ui.resolve(e), data, { open: openPane($), hide: () => void setBand($, false) })
 }
@@ -573,7 +583,7 @@ async function recordStep($: $, agentId: string | undefined, key: string, s: Ste
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const [stored, saved, scope, band, learned, repo, storedLessons, readAt] = await Promise.all([
+    const [stored, saved, scope, band, learned, repo, storedLessons, readAt, lessonScope] = await Promise.all([
       load($, STORE.config),
       load($, STORE.history),
       load($, STORE.statsScope),
@@ -582,6 +592,7 @@ export const register: Register = on => {
       $.session.repo().catch(() => null),
       load($, STORE.lessons),
       load($, STORE.lessonsReadAt),
+      load($, STORE.learnScope),
     ])
     if (Array.isArray(learned)) for (const one of learned) if (typeof one === 'string') mem.modelCommands.add(one)
     const kept = saved === UNREADABLE ? [] : sanitizeHistory(saved)
@@ -597,6 +608,7 @@ export const register: Register = on => {
     if (storedLessons !== UNREADABLE) await update($, lessons, () => sanitizeLessons(storedLessons))
     if (typeof readAt === 'number') await update($, lessonsReadAt, () => readAt)
     if (scope === 'repo' || scope === 'all') await update($, statsScope, () => scope)
+    if (lessonScope === 'repo' || lessonScope === 'all') await update($, learnScope, () => lessonScope)
     if (typeof band === 'boolean') await update($, isBandShown, () => band)
     const root = repo?.root ?? (await $.session.root().catch(() => ''))
     mem.repo = repo?.name ?? (root.split('/').pop() || 'unknown')

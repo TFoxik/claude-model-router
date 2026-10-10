@@ -1,5 +1,12 @@
 # Release notes
 
+## 0.6.2 — 2026-10-10
+
+### Changed
+
+- The Learn pane shows this repo's lessons first, with **This repo** / **All** buttons like the Stats pane; the choice is kept across sessions. When this repo has none yet, it says how many other repos have under All.
+- The band's **Learn ●N** count follows that scope, so it no longer counts lessons from other repos while the pane shows only this one.
+
 ## 0.6.1 — 2026-10-10
 
 ### Changed
