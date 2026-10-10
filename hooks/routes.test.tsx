@@ -1,6 +1,7 @@
 import type { Args, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
+import type { Lesson } from '../types'
 
 import {
   DEFAULT_CONFIG,
@@ -1114,4 +1115,17 @@ test('learn mode can be switched from the /route pane and the Learn pane', async
   await learn.press({ key: 'learn-off' })
   expect(await learn.find({ type: 'Text', text: /^Learn mode is off/ })).toBeDefined()
   await learn.unmount()
+})
+
+test('the Learn pane says it spans all repos and tags each fact once lessons come from more than one', async ($, on) => {
+  const lesson = (repo: string, at: number): Lesson => ({ kind: 'cold-rewrite', at, repo, fact: `fact in ${repo}` })
+  mock.store(on, { config: { ...MINE, isLearning: true }, lessons: [lesson('alpha', 1), lesson('beta', 2)] })
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  on('ui.open', () => ({ value: undefined }) as never)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const pane = await mountPane($, 'learn', 'desktop')
+  expect(await pane.find({ type: 'Text', text: 'Learn · all repos' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'beta · ' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'alpha · ' })).toBeDefined()
+  await pane.unmount()
 })

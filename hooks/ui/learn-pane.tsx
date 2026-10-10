@@ -10,14 +10,17 @@ type LearnActions = { setLearning: (isOn: boolean) => void; setMuted: (kind: Les
 const OLDER_SHOWN = 2
 
 /** A dated fact with a hanging indent; an older one is one dim line, since it mostly repeats the latest. */
-function factRow({ Box, Text }: Els, key: string, one: Lesson, isOlder: boolean) {
+function factRow({ Box, Text }: Els, key: string, one: Lesson, isOlder: boolean, showsRepo: boolean) {
   return (
     <Box key={key} flexDirection="row">
       <Box width={DATE_W} flexShrink={0}>
         <Text dimColor>{day(one.at)}</Text>
       </Box>
       <Box flexGrow={1} flexShrink={1} minWidth={0}>
-        <Text dimColor={isOlder} wrap={isOlder ? 'truncate-end' : 'wrap'}>{one.fact}</Text>
+        <Text dimColor={isOlder} wrap={isOlder ? 'truncate-end' : 'wrap'}>
+          {showsRepo ? <Text dimColor>{`${one.repo} · `}</Text> : null}
+          {one.fact}
+        </Text>
       </Box>
     </Box>
   )
@@ -25,10 +28,12 @@ function factRow({ Box, Text }: Els, key: string, one: Lesson, isOlder: boolean)
 
 export function learnPaneView(els: Els, { lessons, isLearning, muted, expanded }: LearnData, { setLearning, setMuted, toggle }: LearnActions) {
   const { Box, Text, Button } = els
-  const groups = byKind(lessons.filter(one => !muted.includes(one.kind)))
+  const shown = lessons.filter(one => !muted.includes(one.kind))
+  const groups = byKind(shown)
+  const showsRepo = new Set(shown.map(one => one.repo)).size > 1
   return (
     <Box flexDirection="column" gap={1}>
-      <Text bold color="claude">Learn</Text>
+      <Text bold color="claude">Learn · all repos</Text>
       {isLearning ? null : (
         <Box flexDirection="row" gap={1}>
           <Text dimColor>Learn mode is off: new cache, model and context costs are not explained.</Text>
@@ -50,11 +55,11 @@ export function learnPaneView(els: Els, { lessons, isLearning, muted, expanded }
                 <Button key={`mute:${kind}`} label="mute" plain dimColor onPress={() => setMuted(kind, true)} />
               </Box>
             </Box>
-            {factRow(els, `l:${kind}`, latest!, false)}
+            {factRow(els, `l:${kind}`, latest!, false, showsRepo)}
             {older.length === 0 ? null : (
               <Box flexDirection="column" marginTop={1}>
                 <Text dimColor>{older.length > OLDER_SHOWN ? `Earlier, ${older.length - OLDER_SHOWN} more not shown` : 'Earlier'}</Text>
-                {older.slice(0, OLDER_SHOWN).map((one, i) => factRow(els, `o:${kind}:${i}`, one, true))}
+                {older.slice(0, OLDER_SHOWN).map((one, i) => factRow(els, `o:${kind}:${i}`, one, true, showsRepo))}
               </Box>
             )}
             {isOpen ? (

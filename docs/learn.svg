@@ -5,7 +5,7 @@
   <text x="314" y="52" fill="#e9e7e2">Cache about to go cold: The prompt cache goes cold in 5m. A send</text>
   <text x="314" y="69" fill="#e9e7e2">before then reads the 200k tokens for $0.04; after, it re-writes</text>
   <text x="314" y="86" fill="#e9e7e2">them on Opus 5.5 for $1.60. Leaving for longer? /route away</text>
-  <text x="28" y="134" fill="#d97757" font-weight="700" font-size="14">Learn</text>
+  <text x="28" y="134" fill="#d97757" font-weight="700" font-size="14">Learn · all repos</text>
   <text x="28" y="164" fill="#e9e7e2" font-weight="700">Cache went cold</text>
   <text x="792" y="164" fill="#8b8a86" text-anchor="end" text-decoration="underline">hide why</text>
   <text x="28" y="184" fill="#8b8a86">Each request re-sends the whole conversation. A warm prompt cache lets the API read it back cheaply,</text>

@@ -1,5 +1,11 @@
 # Release notes
 
+## 0.6.1 — 2026-10-10
+
+### Changed
+
+- The Learn pane is titled **Learn · all repos**, since lessons, mutes and learn mode are shared by every repo and session. Once its lessons come from more than one repo, each fact starts with the repo it came from.
+
 ## 0.6.0 — 2026-10-10
 
 ### Added
