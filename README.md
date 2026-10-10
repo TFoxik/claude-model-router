@@ -25,7 +25,22 @@ claude plugin marketplace add TFoxik/claude-model-router
 claude plugin install model-router@claude-model-router
 ```
 
-To update, run `claude plugin marketplace update claude-model-router`, then `claude plugin update model-router@claude-model-router`, and restart Claude Code or run `/reload-plugins`. Saved settings carry over.
+### Update
+
+Claude Code leaves auto-update off for third-party marketplaces, so by default you update by hand: run `claude plugin marketplace update claude-model-router`, then `claude plugin update model-router@claude-model-router`, and restart Claude Code or run `/reload-plugins`. Saved settings carry over.
+
+To get new releases automatically instead, turn on auto-update once: in `/plugin`, open **Marketplaces**, select `claude-model-router` and choose **Enable auto-update**. Or set it in `~/.claude/settings.json`:
+
+```json
+"extraKnownMarketplaces": {
+  "claude-model-router": {
+    "source": { "source": "github", "repo": "TFoxik/claude-model-router" },
+    "autoUpdate": true
+  }
+}
+```
+
+Each new Claude Code session then pulls the latest release at startup. Sessions already open keep the old version until you run `/reload-plugins`.
 
 A fresh install starts on the `inherit` preset, which changes no model. Run `/route preset mine` (or pick one in `/route`) to start routing.
 
