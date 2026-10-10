@@ -1,19 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="820" height="312" viewBox="0 0 820 312" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12">
   <rect width="820" height="312" rx="12" fill="#1f1e1d"/>
-  <rect x="300" y="12" width="508" height="88" rx="10" fill="#2a2927" stroke="#4a4946"/>
+  <rect x="300" y="12" width="508" height="105" rx="10" fill="#2a2927" stroke="#4a4946"/>
   <text x="314" y="32" fill="#8b8a86">model-router</text>
   <text x="314" y="52" fill="#e9e7e2">Cache about to go cold: The prompt cache goes cold in 5m. A send</text>
   <text x="314" y="69" fill="#e9e7e2">before then reads the 200k tokens for $0.04; after, it re-writes</text>
-  <text x="314" y="86" fill="#e9e7e2">them on Opus 5.5 for $1.60. Leaving for longer? /route away</text>
+  <text x="314" y="86" fill="#e9e7e2">them on Opus 5.5 for $1.60. Leaving for longer?</text>
+  <text x="314" y="103" fill="#e9e7e2">/route away · /route learn</text>
   <text x="28" y="134" fill="#d97757" font-weight="700" font-size="14">Learn · my-app</text>
   <text x="792" y="134" text-anchor="end"><tspan fill="#e9e7e2" text-decoration="underline">This repo</tspan><tspan fill="#8b8a86" text-decoration="underline" dx="8">All</tspan></text>
   <text x="28" y="164" fill="#e9e7e2" font-weight="700">Cache went cold</text>
-  <text x="792" y="164" fill="#8b8a86" text-anchor="end" text-decoration="underline">hide why</text>
-  <text x="28" y="184" fill="#8b8a86">Each request re-sends the whole conversation. A warm prompt cache lets the API read it back cheaply,</text>
-  <text x="28" y="200" fill="#8b8a86">at a tenth of the input price or less. The cache expires after the TTL; the first send after that</text>
-  <text x="28" y="216" fill="#8b8a86">writes everything again, at 1.25-2× input. /clear and start from a short note, or come back in time.</text>
-  <text x="28" y="242"><tspan fill="#8b8a86">9.10.  </tspan><tspan fill="#e9e7e2">The cache had expired after 1h12m idle, so this send re-wrote 200k tokens on Opus 5.5</tspan></text>
-  <text x="28" y="258" fill="#e9e7e2"><tspan fill="#8b8a86">       </tspan>for $1.60; read warm they would have cost $0.04.</text>
+  <text x="792" y="164" text-anchor="end"><tspan fill="#8b8a86" text-decoration="underline">hide why</tspan><tspan fill="#8b8a86" text-decoration="underline" dx="16">mute</tspan></text>
+  <text x="28" y="188"><tspan fill="#8b8a86">9.10.  </tspan><tspan fill="#e9e7e2">The cache had expired after 1h12m idle, so this send re-wrote 200k tokens on Opus 5.5</tspan></text>
+  <text x="28" y="204" fill="#e9e7e2"><tspan fill="#8b8a86">       </tspan>for $1.60; read warm they would have cost $0.04.</text>
+  <text x="28" y="230" fill="#8b8a86" font-style="italic">Each request re-sends the whole conversation. A warm prompt cache lets the API read it back cheaply,</text>
+  <text x="28" y="246" fill="#8b8a86" font-style="italic">at a tenth of the input price or less. The cache expires after the TTL; the first send after that</text>
+  <text x="28" y="262" fill="#8b8a86" font-style="italic">writes everything again, at 1.25-2× input. /clear and start from a short note, or come back in time.</text>
   <text x="28" y="292" fill="#8b8a86">learn mode on · prices as of 2026-10-06, estimates</text>
   <text x="792" y="292" fill="#8b8a86" text-anchor="end" text-decoration="underline">Turn off</text>
 </svg>

@@ -13,7 +13,7 @@
   <rect x="16" y="116" width="788" height="70" rx="10" fill="none" stroke="#d97757" stroke-width="1.5"/>
   <text x="30" y="140" fill="#d97757" font-weight="700">▸ main  Opus 5.5 medium</text>
   <text x="790" y="140" fill="#8b8a86" text-anchor="end">$3.68</text>
-  <text x="30" y="160" fill="#8b8a86">plan mode off · context 76k tokens · plan toggle ≈ $0.61</text>
+  <text x="30" y="160" fill="#8b8a86">plan mode off · context 76k tokens · plan toggle ≈ $0.59</text>
   <text x="30" y="176" fill="#8b8a86">last prompt $0.42 · 4 requests · 2 subagents</text>
   <text x="28" y="214" fill="#8b8a86" font-weight="700">PRESET</text>
   <rect x="692" y="198" width="104" height="22" rx="6" fill="#2a2927" stroke="#4a4946"/>
