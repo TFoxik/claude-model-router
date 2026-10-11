@@ -2,6 +2,7 @@ import { GUARD_MIN_TOKENS } from './routes'
 import { OPEN_MIN } from './signals'
 
 export const HANDOFF_LABEL = 'auto-handoff'
+export const HANDOFF_DIR = '.claude/handoffs'
 
 export const HANDOFF_PROMPT =
   'The prompt cache expires in a few minutes and work is still open. Reply with a handoff document in Markdown and nothing else: the goal, what is done, the open steps in order, files touched, decisions and their reasons, and the exact next step. Do not call any tools.'
@@ -52,13 +53,17 @@ export function pendingAfter(pending: PendingHandoff, event: PendingEvent): Pend
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')
-const segment = (text: string) => text.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^\.+/, '-') || '-'
+export const segment = (text: string) => text.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^\.+/, '-') || '-'
 
 /** `<home>/.claude/handoffs/<repo>/<YYYY-MM-DD-HHMM>-<session id, 8 chars>.md`, in local time. */
 export function handoffPath(home: string, repo: string, now: number, sessionId: string): string {
   const d = new Date(now)
   const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`
-  return `${home.replace(/\/+$/, '')}/.claude/handoffs/${segment(repo)}/${stamp}-${segment(sessionId).slice(0, 8)}.md`
+  return `${home.replace(/\/+$/, '')}/${HANDOFF_DIR}/${segment(repo)}/${stamp}-${segment(sessionId).slice(0, 8)}.md`
 }
 
-export const tildePath = (path: string, home: string | undefined) => (home !== undefined && home !== '' && path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path)
+export function tildePath(path: string, home: string | undefined): string
+export function tildePath(path: string | undefined, home: string | undefined): string | undefined
+export function tildePath(path: string | undefined, home: string | undefined): string | undefined {
+  return path !== undefined && home !== undefined && home !== '' && path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path
+}

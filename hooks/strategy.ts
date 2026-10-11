@@ -43,8 +43,7 @@ export function boundaryOf(command: string): Boundary | undefined {
   return undefined
 }
 
-const BOUNDARY_TEXT: Record<Boundary, string> = { commit: 'Work was committed.', pr: 'A pull request went up.' }
-const BOUNDARY_OPEN: Record<Boundary, string> = { commit: 'Work was committed', pr: 'A pull request went up' }
+const BOUNDARY_TEXT: Record<Boundary, string> = { commit: 'Work was committed', pr: 'A pull request went up' }
 
 const handoffStep = (hasSkill?: boolean) =>
   hasSkill ? 'write a handoff with /handoff, /clear, then resume from it' : 'ask Claude to save the plan, progress and next steps to a file, /clear, then point the new session at it'
@@ -63,7 +62,8 @@ export function adviseSession(f: StrategyFacts): Advice {
       ...(verdict === 'continue' ? {} : { command: verdict === 'handoff' && !f.hasHandoffSkill ? 'handoff' : `/${verdict}` }),
     }) as Advice
   const toward = contextFill(f.tokens, f.window, f.compactAt)
-  const open = (f.openSteps ?? 0) >= OPEN_MIN ? (f.openSteps ?? 0) : 0
+  const steps = f.openSteps ?? 0
+  const open = steps >= OPEN_MIN ? steps : 0
   const step = handoffStep(f.hasHandoffSkill)
 
   if (f.tokens < SMALL_CONTEXT) return advise('continue', 'small')
@@ -76,13 +76,13 @@ export function adviseSession(f: StrategyFacts): Advice {
       return advise(
         'handoff',
         'boundary',
-        `${BOUNDARY_OPEN[f.boundary]} with ${plural(open, 'step')} still open. Each request re-reads ${kTokens(f.tokens)} tokens${priced(` (${money(warm)} warm)`)}: ${step}. A /compact summary keeps less of the plan.`,
+        `${BOUNDARY_TEXT[f.boundary]} with ${plural(open, 'step')} still open. Each request re-reads ${kTokens(f.tokens)} tokens${priced(` (${money(warm)} warm)`)}: ${step}. A /compact summary keeps less of the plan.`,
       )
     }
     return advise(
       'clear',
       'boundary',
-      `${BOUNDARY_TEXT[f.boundary]} Each further request re-reads the ${kTokens(f.tokens)} tokens of finished work${priced(` (${money(warm)} warm)`)}: /clear and start the next task fresh, or /compact to carry a summary.`,
+      `${BOUNDARY_TEXT[f.boundary]}. Each further request re-reads the ${kTokens(f.tokens)} tokens of finished work${priced(` (${money(warm)} warm)`)}: /clear and start the next task fresh, or /compact to carry a summary.`,
     )
   }
   if (f.planPath !== undefined && f.tokens >= GUARD_MIN_TOKENS) {
@@ -93,8 +93,8 @@ export function adviseSession(f: StrategyFacts): Advice {
     )
   }
   if (f.warmMinutes === 0 && f.tokens >= GUARD_MIN_TOKENS) {
-    const steps = open > 0 ? ` ${plural(open, 'step')} are open: a handoff keeps them, but writing it also pays the rewrite; with a plan file on disk, /clear and resume from it.` : ''
-    return advise('clear', 'cold', `The cache went cold: the next send, /compact included, re-writes ${kTokens(f.tokens)} tokens${priced(` for ${money(write)}`)}. /clear is free.${steps}`)
+    const tail = open > 0 ? ` ${plural(open, 'step')} are open: a handoff keeps them, but writing it also pays the rewrite; with a plan file on disk, /clear and resume from it.` : ''
+    return advise('clear', 'cold', `The cache went cold: the next send, /compact included, re-writes ${kTokens(f.tokens)} tokens${priced(` for ${money(write)}`)}. /clear is free.${tail}`)
   }
   if ((f.corrections ?? 0) >= CORRECTIONS_MIN) {
     return advise(

@@ -205,20 +205,18 @@ export function lessonFromPlanToggle(plan: LoopRoute, main: LoopRoute, tokens: n
   }
 }
 
+const KIND_OF_REASON: Partial<Record<Advice['reason'], LessonKind>> = { boundary: 'strategy', 'plan-ready': 'plan-ready', corrections: 'corrections' }
+
 /**
- * Committed work making /clear the better move, worth a toast when the turn
- * ends. The other advice is taught already: a growing context by
- * context-high, a cold cache by the expiry warning and the cold-send guard.
+ * A lesson the first time advice turns into a handoff, a fresh start after a
+ * commit or a plan, or starting over after corrections. The other advice is
+ * taught already: a growing context by context-high, a cold cache by the
+ * expiry warning and the cold-send guard.
  */
-/** A lesson the first time advice turns into a handoff, a fresh start after a commit or a plan, or starting over after corrections. */
-export function lessonFromAdvice(prev: { verdict: string; reason: string } | undefined, a: Advice): LessonDraft | undefined {
-  const draft = (kind: LessonKind): LessonDraft => ({ kind, usd: a.perRequestUsd, fact: a.text })
-  if (a.verdict === 'handoff') return prev?.verdict === 'handoff' ? undefined : draft('handoff')
-  if (a.reason === prev?.reason) return undefined
-  if (a.reason === 'boundary') return draft('strategy')
-  if (a.reason === 'plan-ready') return draft('plan-ready')
-  if (a.reason === 'corrections') return draft('corrections')
-  return undefined
+export function lessonFromAdvice(prev: Pick<Advice, 'verdict' | 'reason'> | undefined, a: Advice): LessonDraft | undefined {
+  const isNew = a.verdict === 'handoff' ? prev?.verdict !== 'handoff' : a.reason !== prev?.reason
+  const kind = a.verdict === 'handoff' ? 'handoff' : KIND_OF_REASON[a.reason]
+  return isNew && kind !== undefined ? { kind, usd: a.perRequestUsd, fact: a.text } : undefined
 }
 
 export function lessonFromExploration(explored: number, total: number): LessonDraft {

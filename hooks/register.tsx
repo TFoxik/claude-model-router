@@ -71,9 +71,9 @@ import {
   withPreset,
   withRoute,
 } from './routes'
-import { HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, pendingAfter, shouldAutoHandoff, tildePath } from './handoff'
+import { HANDOFF_DIR, HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, pendingAfter, segment, shouldAutoHandoff, tildePath } from './handoff'
 import type { PendingHandoff } from './handoff'
-import { NO_STEPS, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
+import { EXPLORE_MIN, NO_STEPS, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
 import type { Steps } from './signals'
 import { adviseSession, boundaryOf } from './strategy'
 import type { Boundary } from './strategy'
@@ -233,6 +233,10 @@ async function setLearning($: $, isOn: boolean) {
   await setConfig($, c => ({ ...c, isLearning: isOn }))
 }
 
+async function setAutoHandoff($: $, isOn: boolean) {
+  await setConfig($, c => ({ ...c, autoHandoff: isOn }))
+}
+
 async function setMuted($: $, kind: LessonKind, isMuted: boolean) {
   await setConfig($, c => ({ ...c, learnMuted: isMuted ? [...new Set([...c.learnMuted, kind])] : c.learnMuted.filter(one => one !== kind) }))
 }
@@ -344,7 +348,7 @@ async function refreshStatus($: $) {
   }
   const prev = await read($, health)
   await update($, health, was => (JSON.stringify(was) === JSON.stringify(next) ? was : next))
-  await maybeAutoHandoff($, cfg, { warmMinutes, tokens, model }).catch(() => undefined)
+  void maybeAutoHandoff($, cfg, { warmMinutes, tokens, model }).catch(() => undefined)
   if (!cfg.isLearning) return
   for (const draft of [lessonFromContext(prev?.ctxLevel, next.ctxLevel, tokens, model, ttl, mem.compactAt !== undefined), lessonFromAdvice(prev?.advice, advice)]) {
     if (draft !== undefined) mem.pendingLessons.push(draft)
@@ -369,10 +373,14 @@ async function maybeAutoHandoff($: $, cfg: RouterConfig, warm: { warmMinutes: nu
     hasPlan: mem.planPath !== undefined,
   }
   if (!shouldAutoHandoff(facts)) return
-  const [agents, box] = await Promise.all([$.agent.list().catch(() => []), $.prompt.read()])
-  const isIdle = !agents.some(one => one.status === 'running' || one.status === 'pending')
-  if (!shouldAutoHandoff({ ...facts, isIdle, isPromptEmpty: box.text.trim() === '' })) return
+  // Claimed before the awaits, so a refresh running alongside cannot submit a second one.
   mem.handoffArmed = false
+  const [agents, box] = await Promise.all([$.agent.list().catch(() => []), $.prompt.read()])
+  const isIdle = !mem.isTurnRunning && !agents.some(one => one.status === 'running' || one.status === 'pending')
+  if (!shouldAutoHandoff({ ...facts, isIdle, isPromptEmpty: box.text.trim() === '' })) {
+    mem.handoffArmed = true
+    return
+  }
   mem.handoff = { tokens: warm.tokens, model: warm.model }
   const sent = await $.prompt.submit({ text: HANDOFF_PROMPT }).catch(() => undefined)
   mem.handoff = pendingAfter(mem.handoff, { kind: 'submitted', isDropped: sent === undefined || sent.drop !== undefined })
@@ -459,7 +467,7 @@ async function noteToolCall($: $, e: Args<'tool.call'>, result: unknown) {
     const explored = exploredTokens(e.tool, result)
     if (explored > 0) {
       mem.explored += explored
-      await noteExploration($).catch(() => undefined)
+      void noteExploration($).catch(() => undefined)
     }
   }
   const items = await itemsOfToolUse($, e.tool, input)
@@ -472,7 +480,7 @@ async function noteToolCall($: $, e: Args<'tool.call'>, result: unknown) {
 
 /** The first time reads and searches fill the main context this session, learn mode explains subagents. */
 async function noteExploration($: $) {
-  if (mem.isExploreTaught || !(await read($, config)).isLearning) return
+  if (mem.isExploreTaught || mem.explored < EXPLORE_MIN || !(await read($, config)).isLearning) return
   const total = (await $.session.usage()).context.tokens ?? 0
   if (!isExplorationHeavy(mem.explored, total)) return
   mem.isExploreTaught = true
@@ -494,10 +502,10 @@ function resetSignals(isClear: boolean) {
 
 const signalFacts = () => ({
   openSteps: openSteps(mem.steps),
-  planPath: mem.planPath === undefined ? undefined : tildePath(mem.planPath, mem.home),
+  planPath: tildePath(mem.planPath, mem.home),
   corrections: mem.corrections,
   hasHandoffSkill: mem.hasHandoffSkill,
-  handoffPath: mem.handoffPath === undefined ? undefined : tildePath(mem.handoffPath, mem.home),
+  handoffPath: tildePath(mem.handoffPath, mem.home),
 })
 
 async function noteCommand($: $, name: string) {
@@ -708,7 +716,7 @@ async function renderPane($: $, e: Args<'ui.render'>) {
       }),
     toggle: () => void setConfig($, c => ({ ...c, isEnabled: !c.isEnabled })),
     setLearning: isOn => void setLearning($, isOn),
-    setAutoHandoff: isOn => void setConfig($, c => ({ ...c, autoHandoff: isOn })),
+    setAutoHandoff: isOn => void setAutoHandoff($, isOn),
     openLearn: () => openPane($)('learn'),
     // Only the routes come from the draft, so on/off or a setting changed while it was open is kept.
     apply: async next => {
@@ -733,7 +741,7 @@ const LEARN_ON_TEXT =
   'Learn mode on: when a cache rewrite, a pricey model, a growing context or busy subagents cost you, a toast explains it with the numbers. /route learn lists them.'
 
 const handoffOnText = (repo: string) =>
-  `Auto-handoff on: when the cache is about to go cold with steps open or a plan not yet started, model-router asks Claude for a handoff while the cache is still warm and saves it under ~/.claude/handoffs/${repo}/. It runs once per prompt and never clears the session itself.`
+  `Auto-handoff on: when the cache is about to go cold with steps open or a plan not yet started, model-router asks Claude for a handoff while the cache is still warm and saves it under ~/${HANDOFF_DIR}/${segment(repo)}/. It runs once per prompt and never clears the session itself.`
 
 const asEffort = (effort: unknown): Effort | undefined =>
   typeof effort === 'string' ? (effort as Effort) : undefined
@@ -927,13 +935,15 @@ export const register: Register = on => {
     const root = repo?.root ?? (await $.session.root().catch(() => ''))
     mem.repo = printable(repo?.name ?? (root.split('/').pop() || 'unknown'))
     // The same session starting again, after a hot reload of this code or a /login, keeps its running prompt, count and unsaved calls.
-    const [sessionId, before, idleDev, home] = await Promise.all([
+    const [sessionId, before, idleDev, home, commands] = await Promise.all([
       $.session.id().catch(() => undefined),
       read($, carried),
       $.env.get('MODEL_ROUTER_IDLE_DEV').catch(() => undefined),
       $.env.get('HOME').catch(() => undefined),
+      listCommands($),
     ])
     mem.home = home
+    mem.hasHandoffSkill = hasHandoffCommand(commands.map(one => one.name))
     const isSame = sessionId !== undefined && before?.sessionId === sessionId
     // A copy: noteUse writes into `used`, and the atom's own value is not ours to change in place.
     mem.kept = isSame ? { ...before, used: { ...before.used } } : { sessionId, used: {}, isUncounted: true }
@@ -947,8 +957,6 @@ export const register: Register = on => {
     mem.tick?.cancel()
     mem.tick = $.clock.every(60_000, () => void refreshStatus($).catch(() => undefined))
     await $.command.register({ name: 'route', description: 'Model router: open the pane, or one of the verbs', argumentHint: USAGE })
-    const commands = await listCommands($)
-    mem.hasHandoffSkill = hasHandoffCommand(commands.map(one => one.name))
     const hasCacheTax = (await read($, config)).coldGuard !== 'off' && commands.some(one => one.name === 'cache-tax')
     if (hasCacheTax) {
       $.ui.log('model-router: cache-tax is installed too, so a cold send is guarded twice. Run /route guard off to leave it to cache-tax.')
@@ -1186,7 +1194,7 @@ export const register: Register = on => {
     if (verb === 'handoff') {
       if (rest[0] !== 'on' && rest[0] !== 'off') return { text: 'Usage: /route handoff on|off (save a handoff while the cache is still warm, before it goes cold with work open)' }
       const isOn = rest[0] === 'on'
-      await setConfig($, c => ({ ...c, autoHandoff: isOn }))
+      await setAutoHandoff($, isOn)
       return { text: isOn ? handoffOnText(mem.repo) : 'Auto-handoff off.' }
     }
     if (verb === 'guard') {
