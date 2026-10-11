@@ -1,5 +1,11 @@
 # Release notes
 
+## 0.8.2 — 2026-10-11
+
+### Changed
+
+- The mod no longer names or looks for other plugins: `/route away`'s "Keep warm" option, the field guide and the README describe idle pings without pointing to a tool, and the startup check for a second cold-send guard is gone.
+
 ## 0.8.1 — 2026-10-11
 
 ### Added
