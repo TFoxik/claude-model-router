@@ -1,5 +1,12 @@
 # Release notes
 
+## 0.8.6 — 2026-10-11
+
+### Fixed
+
+- **Auto-handoff.** The handoff is now saved. Before, Claude was asked for it but the reply never reached `~/.claude/handoffs/`, and another plugin's prompt arriving at the same time could be saved as the handoff instead.
+- **Corrections.** A correction typed while Claude is still working now counts toward the "corrections in a row" advice.
+
 ## 0.8.5 — 2026-10-11
 
 ### Fixed
