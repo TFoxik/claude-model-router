@@ -1,5 +1,11 @@
 # Release notes
 
+## 0.8.4 — 2026-10-11
+
+### Changed
+
+- **Learn pane.** Clicking an earlier lesson only shows its full text, without repeating the date and repo the pane already shows. The newest lesson, never cut short, is no longer clickable.
+
 ## 0.8.3 — 2026-10-11
 
 ### Changed
