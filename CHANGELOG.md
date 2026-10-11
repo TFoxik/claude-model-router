@@ -1,5 +1,15 @@
 # Release notes
 
+## Unreleased
+
+### Added
+
+- **Handoffs pane.** `/route handoffs` lists this repo's handoffs with Resume, Done and Not relevant. Handoffs close on their own when superseded by a newer one from the same session or resumed by a prompt naming them, and fold away as stale after 14 days. The band shows `handoffs ●N` for handoffs other sessions left open.
+
+### Fixed
+
+- **Panes come to the front.** Clicking a band or footer button for a pane that is already open behind another, such as **today** for Stats, now brings it to the front.
+
 ## 0.8.6 — 2026-10-11
 
 ### Fixed

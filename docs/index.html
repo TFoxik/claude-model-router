@@ -202,6 +202,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
     <a href="#guard">Cold-send guard</a>
     <a href="#learn">Learn mode</a>
     <a href="#away">Stepping away</a>
+    <a href="#handoffs">Handoffs</a>
     <a href="#unused">Unused servers</a>
     <a href="#commands">Commands</a>
   </nav>
@@ -699,6 +700,30 @@ td .ex { color: var(--muted); font-size: 13.5px; }
         <div class="note" data-z="a4"><span class="n">4</span><h3>Rename and resume</h3><div class="body"><p>Nothing now. On Pro and Max, resuming a big session after a long break offers to continue from a summary instead of the full history.</p></div></div>
         <div class="note" data-z="a5"><span class="n">5</span><h3>Keep warm</h3><div class="body"><p>A tiny send before each expiry keeps the cache alive for one warm read per hour (twelve on the 5-minute cache). Worth it for a few hours away; overnight it adds up, and on a subscription it counts against your limits.</p></div></div>
         <div class="note" data-z="a6"><span class="n">6</span><h3>Do nothing</h3><div class="body"><p>Free now, and the first send after the break re-writes everything. The <a href="#guard">cold-send guard</a> will hold that send once with its price.</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HANDOFFS -->
+  <section class="part" id="handoffs">
+    <div class="part-head">
+      <div class="where">/route handoffs · the band's <b>handoffs ●N</b></div>
+      <h2>Handoffs</h2>
+      <p>Handoffs saved by auto-handoff or your own <code>/handoff</code> live in <code>~/.claude/handoffs/&lt;repo&gt;/</code>. The Handoffs pane keeps track of which ones are still open, so you can pick one up in a fresh session, and gets the rest out of the way. The files themselves are never edited or deleted.</p>
+    </div>
+    <div class="grid">
+      <div class="stick">
+        <div class="pane mono tab">
+          <div class="zone" data-z="h1"><span class="pin">1</span><span class="b">Handoffs · my-app</span>   This repo  All</div>
+          <div class="zone" data-z="h2"><span class="pin">2</span><span class="dim">11.10. 14:29</span> Handoff: review of the auto-handoff change<br><span class="ind">Resume  <span class="dim">Done  Not relevant</span></span></div>
+          <div class="zone" data-z="h3"><span class="pin">3</span><span class="dim">show 3 closed</span></div>
+          <div class="dim">~/.claude/handoffs/my-app</div>
+        </div>
+      </div>
+      <div class="notes">
+        <div class="note" data-z="h1"><span class="n">1</span><h3>This repo or all</h3><div class="body"><p><b>This repo</b> lists the folder for the session's repo; <b>All</b> lists every repo's, each title starting with its repo.</p></div></div>
+        <div class="note" data-z="h2"><span class="n">2</span><h3>An open handoff</h3><div class="body"><p>Its date and its title, the file's first <code>#</code> heading. <b>Resume</b> puts <code>resume from &lt;path&gt;</code> in the prompt box without sending it. <b>Done</b> and <b>Not relevant</b> close it.</p></div></div>
+        <div class="note" data-z="h3"><span class="n">3</span><h3>Closed on their own</h3><div class="body"><p>A handoff closes when a newer one is saved in the same session (superseded), or when you send a prompt naming its path (resumed). One left open for 14 days folds away as stale but keeps its buttons. Each closed one says why, and <b>Reopen</b> brings it back. The band shows <b>handoffs ●N</b> for open handoffs other sessions left in this repo, until you open the pane or send your first prompt.</p></div></div>
       </div>
     </div>
   </section>
