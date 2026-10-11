@@ -1,5 +1,11 @@
 # Release notes
 
+## 0.9.1 — 2026-10-11
+
+### Changed
+
+- **Handoffs pane, under the hood.** Fewer store writes and file reads: a refresh that finds nothing new saves nothing, folders and titles are read in parallel, and session start lists only the current repo's handoffs. Handoff titles and repo names drop control characters, as history and lessons already do.
+
 ## 0.9.0 — 2026-10-11
 
 ### Added
