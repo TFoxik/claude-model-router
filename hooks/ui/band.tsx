@@ -18,7 +18,7 @@ function bandHead(cfg: RouterConfig, now: ActiveRoute | null): string {
 
 /** Text only: a desktop draws every Button as a native control, which would break up the line's spacing. */
 function healthRowView({ Text }: Els, health: Health | null) {
-  if (health === null) return <Text> </Text>
+  if (health === null) return null
   const cacheColor = health.cache < 50 ? 'error' : health.cache < 80 ? 'warning' : 'success'
   const limits = [['5h', health.fiveHour], ['7d', health.sevenDay]].filter((one): one is [string, number] => one[1] !== undefined)
   return (
@@ -34,8 +34,7 @@ function healthRowView({ Text }: Els, health: Health | null) {
       )}
       {' · context '}
       <Text color={health.ctxLevel}>{health.ctx}%</Text>
-      {' · '}
-      {`last ${money(health.last)}`}
+      {` · last ${money(health.last)}`}
       {limits.map(([name, pct]) => (
         <Text key={`l:${name}`}>
           {` · ${name} `}
@@ -67,14 +66,14 @@ export function bandView(els: Els, { cfg, now, pending, total, health, learnUnre
         </Text>
         {pending ? <Text color="warning">● draft</Text> : null}
       </Box>
-      <Box key="band-health" flexDirection="row">
+      <Box key="band-health" height={1}>
         {healthRowView(els, health)}
       </Box>
       <Box key="band-actions" flexDirection="row" justifyContent="flex-end" gap={1}>
         {handoffsOpen > 0 ? <Button key="band-handoffs" label={`Handoffs ●${handoffsOpen}`} plain onPress={() => open('handoffs')} /> : null}
         {learnUnread > 0 ? <Button key="band-learn" label={`Learn ●${learnUnread}`} plain onPress={() => open('learn')} /> : null}
         {health?.advice === undefined ? null : (
-          <Button key="advice" label={`next ${health.advice.command ?? `/${health.advice.verdict}`}`} variant="primary" onPress={() => open('context')} />
+          <Button key="advice" label={`next ${health.advice.command}`} variant="primary" onPress={() => open('context')} />
         )}
         <Button key="ctx" label="Context" plain dimColor onPress={() => open('context')} />
         <Button key="band-last" label="Last" plain dimColor onPress={() => open('last')} />

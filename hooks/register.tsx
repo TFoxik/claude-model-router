@@ -73,7 +73,7 @@ import {
 } from './routes'
 import { HANDOFF_DIR, HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, pendingAfter, segment, shouldAutoHandoff, tildePath } from './handoff'
 import type { PendingHandoff } from './handoff'
-import { bandCount, handoffDir, handoffRows, handoffsRoot, mergeListing, recordWritten, reopen, repoOfHandoff, resumeIn, sanitizeHandoffs, setStatus, titleOf, withTitles } from './handoffs'
+import { bandCount, handoffDir, handoffRows, handoffsRoot, mergeListing, recordWritten, reopen, repoOfHandoff, resumeIn, sanitizeHandoffs, setStatus, detailsOf, withDetails } from './handoffs'
 import type { HandoffStatus, Handoffs } from './handoffs'
 import { EXPLORE_MIN, NO_STEPS, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
 import type { Steps } from './signals'
@@ -210,9 +210,11 @@ async function applyHandoffs($: $, fn: (all: Handoffs) => Handoffs): Promise<Han
   return next
 }
 
-async function recordHandoff($: $, path: string, repo: string, title: string | undefined) {
+/** Without the text, title and gist are left for the next listing to read from the file. */
+async function recordHandoff($: $, path: string, repo: string, text: string | undefined) {
   const [at, sessionId] = [await nowOf($), mem.kept.sessionId]
-  await setHandoffs($, all => recordWritten(all, path, { repo, at, ...(sessionId === undefined ? {} : { sessionId }), ...(title === undefined ? {} : { title }) })).catch(() => undefined)
+  const details = text === undefined ? {} : detailsOf(text)
+  await setHandoffs($, all => recordWritten(all, path, { repo, at, ...(sessionId === undefined ? {} : { sessionId }), ...details })).catch(() => undefined)
 }
 
 type Listed = { path: string; mtimeMs: number }[]
@@ -227,7 +229,7 @@ async function listHandoffs($: $, dir: string): Promise<Listed | undefined> {
   }
 }
 
-/** Brings the records in line with the folder on disk, and reads the titles of files seen there first. */
+/** Brings the records in line with the folder on disk, and reads the title and gist of files not read yet. */
 async function refreshHandoffs($: $, scope?: Scope) {
   const home = mem.home
   if (home === undefined) return
@@ -237,11 +239,10 @@ async function refreshHandoffs($: $, scope?: Scope) {
   const lists = await Promise.all(repos.map(repo => listHandoffs($, handoffDir(home, repo))))
   const listing: Record<string, Listed> = Object.fromEntries(repos.flatMap((repo, i) => (lists[i] === undefined ? [] : [[repo, lists[i]!]])))
   const preview = mergeListing(await read($, handoffs), listing, listedAt)
-  const untitled = Object.entries(preview).filter(([, r]) => r.title === undefined).sort((a, b) => b[1].at - a[1].at).slice(0, 20)
-  // An empty title marks a file read and found without a heading, so it isn't read again.
-  const found = await Promise.all(untitled.map(([path]) => $.fs.read(path).then(text => titleOf(typeof text === 'string' ? text : '') ?? '', () => '')))
-  const titles = Object.fromEntries(untitled.map(([path], i) => [path, found[i]!]))
-  await setHandoffs($, all => withTitles(mergeListing(all, listing, listedAt), titles))
+  const unread = Object.entries(preview).filter(([, r]) => r.gist === undefined).sort((a, b) => b[1].at - a[1].at).slice(0, 20)
+  const found = await Promise.all(unread.map(([path]) => $.fs.read(path).then(text => detailsOf(typeof text === 'string' ? text : ''), () => detailsOf(''))))
+  const details = Object.fromEntries(unread.map(([path], i) => [path, found[i]!]))
+  await setHandoffs($, all => withDetails(mergeListing(all, listing, listedAt), details))
 }
 
 async function renderHandoffsPane($: $, e: Args<'ui.render'>) {
@@ -286,7 +287,7 @@ async function finishHandoff($: $, e: Args<'turn.complete'>) {
     return
   }
   mem.handoffPath = path
-  await recordHandoff($, path, segment(mem.repo), titleOf(e.answer))
+  await recordHandoff($, path, segment(mem.repo), e.answer)
   if (cfg.isLearning) {
     const avoidedUsd = rewritePrice(asked.model, asked.tokens, cfg.cacheTtlMinutes).write
     mem.pendingLessons.push(lessonFromAutoHandoff({ spentUsd: cost?.usd ?? 0, avoidedUsd, tokens: asked.tokens, path: tildePath(path, mem.home) }))
@@ -553,7 +554,7 @@ async function noteToolCall($: $, e: Args<'tool.call'>, result: unknown) {
     mem.steps = stepsAfter(mem.steps, e.tool, input, result)
     const written = e.tool === 'Write' && typeof input.file_path === 'string' ? input.file_path : undefined
     const handoffRepo = written === undefined ? undefined : repoOfHandoff(written, mem.home)
-    if (written !== undefined && handoffRepo !== undefined) await recordHandoff($, written, handoffRepo, typeof input.content === 'string' ? titleOf(input.content) : undefined)
+    if (written !== undefined && handoffRepo !== undefined) await recordHandoff($, written, handoffRepo, typeof input.content === 'string' ? input.content : undefined)
     const plan = planEventOf(e.tool, input, result)
     if (plan?.kind === 'saved') mem.planPath = plan.path
     if (plan?.kind === 'work') mem.planPath = undefined

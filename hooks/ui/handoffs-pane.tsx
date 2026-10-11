@@ -29,6 +29,7 @@ function row({ Box, Text, Button }: Els, one: HandoffRow, showsRepo: boolean, is
           {showsRepo ? <Text dimColor>{`${one.repo} · `}</Text> : null}
           {one.title}
         </Text>
+        {one.gist === undefined ? null : <Text dimColor wrap="wrap">{one.gist}</Text>}
         <Box flexDirection="row" gap={2}>
           {isClosed ? <Text dimColor italic>{one.reason}</Text> : null}
           <Button key={`resume:${one.path}`} label="Resume" plain onPress={() => act.resume(one.path)} />

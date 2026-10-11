@@ -4,10 +4,11 @@ import { printable } from './routes'
 
 export type { HandoffRecord, HandoffStatus, Handoffs }
 export { handoffDir, handoffsRoot }
-export type HandoffRow = { path: string; repo: string; at: number; title: string; isOpen: boolean; reason?: string }
+export type HandoffRow = { path: string; repo: string; at: number; title: string; gist?: string; isOpen: boolean; reason?: string }
 
 export const STALE_MS = 14 * 86_400_000
 const KEPT = 500
+const GIST_MAX = 160
 const REASON: Record<Exclude<HandoffStatus, 'open'>, string> = { done: 'done', dropped: 'not relevant', resumed: 'resumed', superseded: 'superseded' }
 const STATUSES: ReadonlySet<string> = new Set(['open', ...Object.keys(REASON)])
 
@@ -28,15 +29,17 @@ function isRecord(value: unknown): value is HandoffRecord {
     typeof r.status === 'string' && STATUSES.has(r.status) &&
     (r.sessionId === undefined || typeof r.sessionId === 'string') &&
     (r.title === undefined || typeof r.title === 'string') &&
+    (r.gist === undefined || typeof r.gist === 'string') &&
     (r.reopenedAt === undefined || (typeof r.reopenedAt === 'number' && Number.isFinite(r.reopenedAt)))
   )
 }
 
-const clean = ({ repo, at, sessionId, title, status, reopenedAt }: HandoffRecord): HandoffRecord => ({
+const clean = ({ repo, at, sessionId, title, gist, status, reopenedAt }: HandoffRecord): HandoffRecord => ({
   repo: printable(repo),
   at,
   ...(sessionId === undefined ? {} : { sessionId }),
   ...(title === undefined ? {} : { title: printable(title) }),
+  ...(gist === undefined ? {} : { gist: printable(gist) }),
   status,
   ...(reopenedAt === undefined ? {} : { reopenedAt }),
 })
@@ -94,11 +97,16 @@ export function resumeIn(records: Handoffs, text: string, home: string | undefin
   return resumedBy(text, records, home).reduce((acc, path) => setStatus(acc, path, 'resumed'), records)
 }
 
-/** Titles read from disk, applied to the records they belong to; the same records when none apply. */
-export function withTitles(records: Handoffs, titles: Readonly<Record<string, string>>): Handoffs {
-  const known = Object.entries(titles).filter(([path]) => records[path] !== undefined)
-  return known.length === 0 ? records : { ...records, ...Object.fromEntries(known.map(([path, title]) => [path, { ...records[path]!, title: printable(title) }])) }
+export type Details = { title: string; gist: string }
+
+/** Titles and gists read from disk, applied to the records they belong to; the same records when none apply. */
+export function withDetails(records: Handoffs, details: Readonly<Record<string, Details>>): Handoffs {
+  const known = Object.entries(details).filter(([path]) => records[path] !== undefined)
+  return known.length === 0 ? records : { ...records, ...Object.fromEntries(known.map(([path, d]) => [path, clean({ ...records[path]!, ...d })])) }
 }
+
+/** What a handoff's text yields for its record: empty strings where it has no title or gist. */
+export const detailsOf = (markdown: string): Details => ({ title: titleOf(markdown) ?? '', gist: gistOf(markdown) ?? '' })
 
 export function resumedBy(text: string, records: Handoffs, home: string | undefined): string[] {
   return Object.entries(records)
@@ -119,7 +127,7 @@ export function handoffRows(records: Handoffs, repo: string | undefined, now: nu
     .sort((a, b) => b[1].at - a[1].at)
     .map(([path, r]) => {
       const reason = r.status !== 'open' ? REASON[r.status] : isStale(r, now) ? 'stale, 14+ days' : undefined
-      return { path, repo: r.repo, at: r.at, title: r.title || path.split('/').pop()!, isOpen: r.status === 'open', ...(reason === undefined ? {} : { reason }) }
+      return { path, repo: r.repo, at: r.at, title: r.title || path.split('/').pop()!, ...(r.gist ? { gist: r.gist } : {}), isOpen: r.status === 'open', ...(reason === undefined ? {} : { reason }) }
     })
   return { open: rows.filter(one => one.reason === undefined), closed: rows.filter(one => one.reason !== undefined) }
 }
@@ -127,4 +135,37 @@ export function handoffRows(records: Handoffs, repo: string | undefined, now: nu
 export function titleOf(markdown: string): string | undefined {
   const heading = /^#\s+(.+)$/m.exec(markdown)?.[1]?.trim()
   return heading === undefined || heading === '' ? undefined : heading.slice(0, 80)
+}
+
+const HEADING = /^#{1,6}\s/
+const plain = (line: string) =>
+  line
+    .replace(/^\s*(?:[-*+]|\d+[.)]|>)\s+/, '')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\*\*|__|`/g, '')
+    .trim()
+
+/**
+ * What a handoff is about, in a line or two: the first paragraph under its Goal heading, as an auto-handoff writes one,
+ * else the first paragraph after the title. Plain text, cut at a word.
+ */
+export function gistOf(markdown: string): string | undefined {
+  const lines = markdown.split('\n')
+  const goal = lines.findIndex(line => /^#{2,6}\s+goal\b/i.test(line))
+  const start = goal >= 0 ? goal + 1 : lines.findIndex(line => /^#\s/.test(line)) + 1
+  const paragraph: string[] = []
+  for (const line of lines.slice(start)) {
+    if (HEADING.test(line) && (goal >= 0 || paragraph.length > 0)) break
+    if (HEADING.test(line) || line.trim() === '') {
+      if (paragraph.length > 0) break
+      continue
+    }
+    paragraph.push(plain(line))
+  }
+  const text = paragraph.join(' ').replace(/\s+/g, ' ').trim()
+  if (text === '') return undefined
+  if (text.length <= GIST_MAX) return text
+  const cut = text.slice(0, GIST_MAX - 1)
+  const space = cut.lastIndexOf(' ')
+  return `${(space > 0 ? cut.slice(0, space) : cut).replace(/[\s,;:.]+$/, '')}…`
 }

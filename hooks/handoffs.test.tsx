@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { STALE_MS, bandCount, handoffDir, handoffRows, isStale, mergeListing, recordWritten, repoOfHandoff, resumedBy, sanitizeHandoffs, setStatus, titleOf } from './handoffs'
+import { STALE_MS, bandCount, handoffDir, handoffRows, isStale, mergeListing, recordWritten, repoOfHandoff, resumedBy, sanitizeHandoffs, setStatus, gistOf, titleOf, withDetails } from './handoffs'
 import type { Handoffs } from './handoffs'
 
 const HOME = '/home/me'
@@ -108,6 +108,33 @@ test('the title is the first # heading, cut to 80 characters', () => {
   expect(titleOf('intro\n# Handoff: fix the band\n## Goal')).toBe('Handoff: fix the band')
   expect(titleOf(`# ${'x'.repeat(100)}`)).toHaveLength(80)
   expect(titleOf('## Only a subheading')).toBeUndefined()
+})
+
+test('the gist is the first paragraph under Goal, as plain text', () => {
+  const md = '# Handoff: fix the band\n\n## Done\n- nothing yet\n\n## Goal\nMake the **band** three lines in `band.tsx`,\nsee [the issue](https://x.test/1).\n\nSecond paragraph.\n## Open steps\n1. one'
+  expect(gistOf(md)).toBe('Make the band three lines in band.tsx, see the issue.')
+})
+
+test('without a Goal, the gist is the first paragraph after the title; none without a body', () => {
+  expect(gistOf('# Title\n\n- first point\n- second point\n\nmore')).toBe('first point second point')
+  expect(gistOf('intro line\n# Title\n## Context\n> quoted why\n')).toBe('quoted why')
+  expect(gistOf('# Title only\n\n## Empty\n')).toBeUndefined()
+  expect(gistOf('')).toBeUndefined()
+})
+
+test('a long gist is cut at a word, under 160 characters, with an ellipsis', () => {
+  const gist = gistOf(`## Goal\n${'word '.repeat(60)}`)!
+  expect(gist.length).toBeLessThanOrEqual(160)
+  expect(gist.endsWith('word…')).toBe(true)
+})
+
+test('details read from disk fill title and gist; an empty gist marks a file read', () => {
+  const records: Handoffs = { [`${dir}/a.md`]: { repo: 'app', at: T0, title: 'Kept', status: 'open' } }
+  const next = withDetails(records, { [`${dir}/a.md`]: { title: 'A', gist: 'Why\u0007it matters' }, [`${dir}/gone.md`]: { title: 'X', gist: '' } })
+  expect(next).toEqual({ [`${dir}/a.md`]: { repo: 'app', at: T0, title: 'A', gist: 'Why it matters', status: 'open' } })
+  expect(withDetails(records, {})).toBe(records)
+  expect(sanitizeHandoffs(next)).toEqual(next)
+  expect(handoffRows(next, 'app', T0).open[0]!.gist).toBe('Why it matters')
 })
 
 test('stored handoffs keep only well-formed records, the newest 500', () => {

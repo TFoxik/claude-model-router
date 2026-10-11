@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.1.0 — 2026-10-11
+
+### Added
+
+- **What each handoff is about.** The Handoffs pane shows a dimmed line or two under each title: the first paragraph under the handoff's `## Goal`, or after its title, as plain text. Handoffs you already have get theirs on the next listing.
+
 ## 1.0.1 — 2026-10-11
 
 ### Changed

@@ -719,14 +719,14 @@ td .ex { color: var(--muted); font-size: 13.5px; }
       <div class="stick">
         <div class="pane mono tab">
           <div class="zone" data-z="h1"><span class="pin">1</span><span class="b">Handoffs · my-app</span>   This repo  All</div>
-          <div class="zone" data-z="h2"><span class="pin">2</span><span class="dim">11.10. 14:29</span> Handoff: review of the auto-handoff change<br><span class="ind">Resume  <span class="dim">Done  Not relevant</span></span></div>
+          <div class="zone" data-z="h2"><span class="pin">2</span><span class="dim">11.10. 14:29</span> Handoff: review of the auto-handoff change<br><span class="ind dim">Live test of model-router's auto-handoff: review the plan before ExitPlanMode.</span><br><span class="ind">Resume  <span class="dim">Done  Not relevant</span></span></div>
           <div class="zone" data-z="h3"><span class="pin">3</span><span class="dim">show 3 closed</span></div>
           <div class="dim">~/.claude/handoffs/my-app</div>
         </div>
       </div>
       <div class="notes">
         <div class="note" data-z="h1"><span class="n">1</span><h3>This repo or all</h3><div class="body"><p><b>This repo</b> lists the folder for the session's repo; <b>All</b> lists every repo's, each title starting with its repo.</p></div></div>
-        <div class="note" data-z="h2"><span class="n">2</span><h3>An open handoff</h3><div class="body"><p>Its date and its title, the file's first <code>#</code> heading. <b>Resume</b> puts <code>resume from &lt;path&gt;</code> in the prompt box without sending it. <b>Done</b> and <b>Not relevant</b> close it.</p></div></div>
+        <div class="note" data-z="h2"><span class="n">2</span><h3>An open handoff</h3><div class="body"><p>Its date, its title (the file's first <code>#</code> heading) and, dimmed, what it is about: the first paragraph under <code>## Goal</code>, or after the title, cut to two lines. <b>Resume</b> puts <code>resume from &lt;path&gt;</code> in the prompt box without sending it. <b>Done</b> and <b>Not relevant</b> close it.</p></div></div>
         <div class="note" data-z="h3"><span class="n">3</span><h3>Closed on their own</h3><div class="body"><p>A handoff closes when a newer one is saved in the same session (superseded), or when you send a prompt naming its path (resumed). One left open for 14 days folds away as stale but keeps its buttons. Each closed one says why, and <b>Reopen</b> brings it back. The band shows <b>Handoffs ●N</b> for open handoffs other sessions left in this repo, until you open the pane in that session.</p></div></div>
       </div>
     </div>

@@ -45,6 +45,8 @@ const MINE = withPreset(DEFAULT_CONFIG, 'mine')!
 const PANE_IDS = { route: 'model-router', last: 'model-router-last', context: 'model-router-ctx', stats: 'model-router-stats', learn: 'model-router-learn', handoffs: 'model-router-handoffs' } as const
 const mountPane = ($: Engine, pane: keyof typeof PANE_IDS, surface: 'terminal' | 'desktop' = 'terminal') =>
   $.ui.mount({ plugin: 'model-router', surface, component: 'Pane', requestId: PANE_IDS[pane], props: {} as never })
+const bandOf = ($: Engine) => $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
+const buttonKeys = async (band: Awaited<ReturnType<typeof bandOf>>) => (await band.findAll({ type: 'Button' })).map(one => one.key)
 const useMine = ($: Engine) => $.command.run({ command: 'route', args: 'preset mine', origin: { kind: 'composer' } } as unknown as Args<'command.run'>)
 
 test('plan falls back to main, sub:<type> to sub:*', () => {
@@ -339,12 +341,11 @@ test('footer shows cache, context and the 5h window', async ($, on) => {
   const ui = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
   await step($, 'h1')
   expect((await ui.find({ key: 'stats' }))?.text).toMatch(/^▤ today \$/)
-  const band = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
+  const band = await bandOf($)
   expect(await band.find({ type: 'Text', text: /^cache 96% 60m · context \d+% · last \$0\.06 · 5h 38% · 7d 12%$/ })).toBeDefined()
   expect((await band.find({ key: 'ctx' }))?.text).toBe('Context')
   expect((await band.find({ key: 'band-last' }))?.text).toBe('Last')
-  const actions = await band.findAll({ type: 'Button' })
-  expect(actions.map(one => one.key)).toEqual(['ctx', 'band-last', 'band-open'])
+  expect(await buttonKeys(band)).toEqual(['ctx', 'band-last', 'band-open'])
   await band.unmount()
   await clock.advance(61 * 60_000)
   const band2 = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
@@ -1246,7 +1247,6 @@ test('the band counts unread lessons in the Learn pane scope', async ($, on) => 
 })
 
 const okTool = (on: On) => on('tool.call', () => ({ result: '', text: 'ok' }) as never)
-const bandOf = ($: Engine) => $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
 
 test('a commit over a big context turns the band to next /clear until the next prompt, and learn mode says why', async ($, on) => {
   okTool(on)
@@ -1257,7 +1257,7 @@ test('a commit over a big context turns the band to next /clear until the next p
   const band = await bandOf($)
   expect((await band.find({ key: 'advice' }))?.text).toBe('next /clear')
   expect(await band.find({ type: 'Text', text: /next \/clear/ })).toBeUndefined()
-  expect((await band.findAll({ type: 'Button' })).map(one => one.key)).toEqual(['band-learn', 'advice', 'ctx', 'band-last', 'band-open'])
+  expect(await buttonKeys(band)).toEqual(['band-learn', 'advice', 'ctx', 'band-last', 'band-open'])
   await band.unmount()
   expect(toasts).toEqual([
     'Clear after committing: Work was committed. Each further request re-reads the 200k tokens of finished work ($0.04 warm): /clear and start the next task fresh, or /compact to carry a summary. · /route learn',
@@ -1481,15 +1481,15 @@ test('an auto-handoff and a Write into the folder are recorded with their titles
   const { clock, answer } = await handoffSession($, on, data)
   await clock.advance(58 * 60_000)
   await $.turn.start({ text: HANDOFF_PROMPT, turnId: 'h' })
-  await answer($, 'h', '# Auto: review routes\nbody')
+  await answer($, 'h', '# Auto: review routes\n## Goal\nCheck the routing table.')
   const auto = Object.entries(data.handoffs as Record<string, { title?: string; status: string; repo: string }>)
   expect(auto).toHaveLength(1)
-  expect(auto[0]![1]).toMatchObject({ title: 'Auto: review routes', status: 'open', repo: 'unknown' })
+  expect(auto[0]![1]).toMatchObject({ title: 'Auto: review routes', gist: 'Check the routing table.', status: 'open', repo: 'unknown' })
   await submit($, 'write one by hand')
   await $.turn.start({ text: 'write one by hand', turnId: 'w' })
   await $.tool.call({ tool: 'Write', file_path: '/home/me/.claude/handoffs/unknown/manual.md', content: '# Manual handoff\n', tool_use_id: 'tw' } as never)
   const all = data.handoffs as Record<string, { title?: string; status: string }>
-  expect(all['/home/me/.claude/handoffs/unknown/manual.md']).toMatchObject({ title: 'Manual handoff', status: 'open' })
+  expect(all['/home/me/.claude/handoffs/unknown/manual.md']).toMatchObject({ title: 'Manual handoff', gist: '', status: 'open' })
   expect(all[auto[0]![0]]!.status).toBe('superseded')
 })
 
@@ -1564,6 +1564,26 @@ test('the Handoffs pane lists open handoffs; Done and Not relevant fold them wit
   await pane.unmount()
 })
 
+test('the Handoffs pane shows what each handoff is about under its title', async ($, on) => {
+  await listedSession($, on, { 'a.md': '# Fix the band\n\n## Goal\nMake the band three lines.\n' })
+  const pane = await mountPane($, 'handoffs', 'desktop')
+  expect(await pane.find({ type: 'Text', text: 'Make the band three lines.' })).toBeDefined()
+  await pane.unmount()
+})
+
+test('a handoff recorded before gists gets one on the next listing, read once', async ($, on) => {
+  const path = '/home/me/.claude/handoffs/unknown/old.md'
+  const data: Record<string, unknown> = { handoffs: { [path]: { repo: 'unknown', at: T0 - 60_000, title: 'Old one', status: 'open' } } }
+  const { listing, clock } = await listedSession($, on, { 'old.md': '# Old one\n\nWhat it was about.\n' }, data)
+  await route($, 'handoffs')
+  await clock.settle()
+  expect((data.handoffs as Record<string, { gist?: string }>)[path]!.gist).toBe('What it was about.')
+  const reads = listing.reads
+  await route($, 'handoffs')
+  await clock.settle()
+  expect(listing.reads).toBe(reads)
+})
+
 test('Resume fills the prompt box with the handoff path and sends nothing', async ($, on) => {
   const { filled } = await listedSession($, on, { 'a.md': '# A\n' })
   const pane = await mountPane($, 'handoffs', 'desktop')
@@ -1624,7 +1644,7 @@ test('the band shows handoffs ●N for other sessions\' open handoffs, through p
   await listedSession($, on, { 'a.md': '# A\n', 'b.md': '# B\n' })
   const band = await bandOf($)
   expect((await band.find({ key: 'band-handoffs' }))?.text).toBe('Handoffs ●2')
-  expect((await band.findAll({ type: 'Button' })).map(one => one.key)).toEqual(['band-handoffs', 'ctx', 'band-last', 'band-open'])
+  expect(await buttonKeys(band)).toEqual(['band-handoffs', 'ctx', 'band-last', 'band-open'])
   await band.unmount()
   await submit($, 'hello')
   const still = await bandOf($)
