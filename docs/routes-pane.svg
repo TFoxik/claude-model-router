@@ -1,21 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="820" height="232" viewBox="0 0 820 232" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12">
-  <rect width="820" height="232" rx="12" fill="#1f1e1d"/>
-  <text x="28" y="40" fill="#d97757" font-weight="700" font-size="14">⚙ Model Router</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="452" viewBox="0 0 820 452" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12">
+  <rect width="820" height="452" rx="12" fill="#1f1e1d"/>
+  <text x="28" y="40" fill="#d97757" font-weight="700" font-size="14">⚙ Routes</text>
   <text x="626" y="40" fill="#5fb36b" font-size="13">● on</text>
   <rect x="682" y="24" width="114" height="24" rx="7" fill="#34332f"/>
   <text x="739" y="40" fill="#e9e7e2" font-size="13" text-anchor="middle">Turn off</text>
-  <text x="28" y="78" font-size="13"><tspan fill="#e9e7e2">Learn mode </tspan><tspan fill="#8b8a86">○ off</tspan></text>
-  <text x="28" y="98" fill="#8b8a86">explains cache misses and model costs with your own numbers, when they happen</text>
-  <rect x="616" y="62" width="96" height="24" rx="7" fill="#34332f"/>
-  <text x="664" y="78" fill="#e9e7e2" font-size="13" text-anchor="middle">Turn on</text>
-  <rect x="720" y="62" width="76" height="24" rx="7" fill="#34332f"/>
-  <text x="758" y="78" fill="#e9e7e2" font-size="13" text-anchor="middle">Open</text>
-  <rect x="16" y="116" width="788" height="70" rx="10" fill="none" stroke="#d97757" stroke-width="1.5"/>
-  <text x="30" y="140" fill="#d97757" font-weight="700">▸ main  Opus 5.5 medium</text>
-  <text x="790" y="140" fill="#8b8a86" text-anchor="end">$3.68</text>
-  <text x="30" y="160" fill="#8b8a86">plan mode off · context 76k tokens · plan toggle ≈ $0.59</text>
-  <text x="30" y="176" fill="#8b8a86">last prompt $0.42 · 4 requests · 2 subagents</text>
-  <text x="28" y="214" fill="#8b8a86" font-weight="700">PRESET</text>
-  <rect x="692" y="198" width="104" height="22" rx="6" fill="#2a2927" stroke="#4a4946"/>
-  <text x="704" y="213" fill="#e9e7e2">Mine <tspan fill="#8b8a86">⌄</tspan></text>
+  <rect x="16" y="62" width="788" height="70" rx="10" fill="none" stroke="#d97757" stroke-width="1.5"/>
+  <text x="30" y="86" fill="#d97757" font-weight="700">▸ main  Opus 5.5 medium</text>
+  <text x="790" y="86" fill="#8b8a86" text-anchor="end">$3.68</text>
+  <text x="30" y="106" fill="#8b8a86">plan mode off · context 76k tokens · plan toggle ≈ $0.59</text>
+  <text x="30" y="122" fill="#8b8a86">last prompt $0.42 · 4 requests · 2 subagents</text>
+  <text x="28" y="160" fill="#8b8a86" font-weight="700">PRESET</text>
+  <rect x="692" y="144" width="104" height="22" rx="6" fill="#2a2927" stroke="#4a4946"/>
+  <text x="704" y="159" fill="#e9e7e2">Mine <tspan fill="#8b8a86">⌄</tspan></text>
+  <rect x="16" y="178" width="788" height="88" rx="10" fill="none" stroke="#4a4946"/>
+  <text x="30" y="198" fill="#8b8a86" font-weight="700">MAIN LOOP</text>
+  <text x="44" y="218" fill="#d97757" font-weight="700">Main</text>
+  <text x="44" y="236" fill="#5fb36b" font-weight="700">Plan</text>
+  <text x="30" y="256" fill="#8b8a86" font-weight="700">SUBAGENTS <tspan font-weight="400">· All, Explore, Plan, …</tspan></text>
+  <g fill="#e9e7e2">
+    <rect x="590" y="205" width="96" height="18" rx="5" fill="#2a2927" stroke="#4a4946"/>
+    <text x="600" y="218">Opus <tspan fill="#8b8a86">⌄</tspan></text>
+    <rect x="696" y="205" width="96" height="18" rx="5" fill="#2a2927" stroke="#4a4946"/>
+    <text x="706" y="218">medium <tspan fill="#8b8a86">⌄</tspan></text>
+    <rect x="590" y="224" width="96" height="18" rx="5" fill="#2a2927" stroke="#4a4946"/>
+    <text x="600" y="237">Opus <tspan fill="#8b8a86">⌄</tspan></text>
+    <rect x="696" y="224" width="96" height="18" rx="5" fill="#2a2927" stroke="#4a4946"/>
+    <text x="706" y="237">high <tspan fill="#8b8a86">⌄</tspan></text>
+  </g>
+  <rect x="16" y="278" width="788" height="160" rx="10" fill="none" stroke="#4a4946"/>
+  <text x="30" y="300" fill="#8b8a86" font-weight="700">SETTINGS</text>
+  <text x="30" y="324" fill="#d97757" font-weight="700">Coaching</text>
+  <text x="30" y="346" font-size="13"><tspan fill="#e9e7e2">Learn mode </tspan><tspan fill="#8b8a86">○ off</tspan></text>
+  <rect x="616" y="331" width="96" height="22" rx="7" fill="#34332f"/>
+  <text x="664" y="346" fill="#e9e7e2" font-size="13" text-anchor="middle">Turn on</text>
+  <rect x="720" y="331" width="76" height="22" rx="7" fill="#34332f"/>
+  <text x="758" y="346" fill="#e9e7e2" font-size="13" text-anchor="middle">Open</text>
+  <text x="30" y="364" fill="#8b8a86">explains cache misses and model costs with your own numbers, when they happen</text>
+  <text x="30" y="388" fill="#d97757" font-weight="700">Handoffs <tspan fill="#8b8a86" font-weight="400">· Handoffs, Auto-handoff</tspan></text>
+  <text x="30" y="412" fill="#d97757" font-weight="700">Cache and display <tspan fill="#8b8a86" font-weight="400">· Cold-cache guard, Cache lifetime, Keep prompt text, Band</tspan></text>
 </svg>

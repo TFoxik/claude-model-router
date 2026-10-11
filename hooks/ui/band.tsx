@@ -17,7 +17,7 @@ function bandHead(cfg: RouterConfig, now: ActiveRoute | null): string {
 }
 
 /** Text only: a desktop draws every Button as a native control, which would break up the line's spacing. */
-function healthRowView({ Text }: Els, health: Health | null) {
+function healthRowView({ Text }: Els, health: Health | null, total: number) {
   if (health === null) return null
   const cacheColor = health.cache < 50 ? 'error' : health.cache < 80 ? 'warning' : 'success'
   const limits = [['5h', health.fiveHour], ['7d', health.sevenDay]].filter((one): one is [string, number] => one[1] !== undefined)
@@ -34,7 +34,7 @@ function healthRowView({ Text }: Els, health: Health | null) {
       )}
       {' · context '}
       <Text color={health.ctxLevel}>{health.ctx}%</Text>
-      {` · last ${money(health.last)}`}
+      {` · last ${money(health.last)} · session ${money(total)}`}
       {limits.map(([name, pct]) => (
         <Text key={`l:${name}`}>
           {` · ${name} `}
@@ -62,12 +62,12 @@ export function bandView(els: Els, { cfg, now, pending, total, health, learnUnre
         </Text>
         <Text dimColor wrap="truncate-end">
           │ <Text color="planMode">plan</Text> {shortRoute(cfg, 'plan')} · <Text color="claude">main</Text> {shortRoute(cfg, 'main')} ·{' '}
-          <Text color="suggestion">sub</Text> {shortRoute(cfg, 'sub:*')} · {money(total)}
+          <Text color="suggestion">sub</Text> {shortRoute(cfg, 'sub:*')}
         </Text>
         {pending ? <Text color="warning">● draft</Text> : null}
       </Box>
       <Box key="band-health" height={1}>
-        {healthRowView(els, health)}
+        {healthRowView(els, health, total)}
       </Box>
       <Box key="band-actions" flexDirection="row" justifyContent="flex-end" gap={1}>
         {handoffsOpen > 0 ? <Button key="band-handoffs" label={`Handoffs ●${handoffsOpen}`} plain onPress={() => open('handoffs')} /> : null}
@@ -76,7 +76,7 @@ export function bandView(els: Els, { cfg, now, pending, total, health, learnUnre
           <Button key="advice" label={`next ${health.advice.command}`} variant="primary" onPress={() => open('context')} />
         )}
         <Button key="ctx" label="Context" plain dimColor onPress={() => open('context')} />
-        <Button key="band-last" label="Last" plain dimColor onPress={() => open('last')} />
+        <Button key="band-cost" label="Cost" plain dimColor onPress={() => open('last')} />
         <Button key="band-open" label="Routes" plain onPress={() => open('route')} />
       </Box>
     </Box>

@@ -15,6 +15,8 @@ test('a handoff path names its repo folder; anything else is not a handoff', () 
   expect(repoOfHandoff(`${dir}/deeper/x.md`, HOME)).toBeUndefined()
   expect(repoOfHandoff('/tmp/x.md', HOME)).toBeUndefined()
   expect(repoOfHandoff(`${dir}/x.md`, undefined)).toBeUndefined()
+  expect(repoOfHandoff(`${HOME}/.claude/handoffs/../x.md`, HOME)).toBeUndefined()
+  expect(repoOfHandoff(`${HOME}/.claude/handoffs/./x.md`, HOME)).toBeUndefined()
 })
 
 test('a new handoff supersedes the open ones of its session, and only those', () => {

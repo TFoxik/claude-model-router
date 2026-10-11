@@ -1,20 +1,46 @@
-import type { EngineInterface } from 'claude-code'
+import type { EngineInterface, RenderChildren } from 'claude-code'
 
-import type { Rewrite, RouteSpend } from '../../types'
+import type { CostTab, Rewrite, RouteSpend } from '../../types'
 import { kTokens, money } from '../routes'
 import type { Tip } from '../tips'
 
 export const PANES = {
-  route: { id: 'model-router', title: 'Model router' },
-  stats: { id: 'model-router-stats', title: 'Stats' },
+  route: { id: 'model-router', title: 'Routes' },
+  cost: { id: 'model-router-cost', title: 'Cost' },
   context: { id: 'model-router-ctx', title: 'Context' },
-  last: { id: 'model-router-last', title: 'Last prompt cost' },
   learn: { id: 'model-router-learn', title: 'Learn' },
   handoffs: { id: 'model-router-handoffs', title: 'Handoffs' },
 } as const
 
-/** Opens a pane by name; the view gets it from the hooks module, which holds `$`. */
-export type Open = (pane: keyof typeof PANES) => void
+/** Ids of panes merged into Cost: one left open across an update still renders. */
+export const OLD_COST_IDS = ['model-router-last', 'model-router-stats'] as const
+
+export const COST_TABS: readonly CostTab[] = ['last', 'session', 'history']
+export const COST_TAB_LABEL: Record<CostTab, string> = { last: 'Last prompt', session: 'Session', history: 'History' }
+
+type Opened = { pane: keyof typeof PANES; tab?: CostTab }
+
+/** What `/route <name>` and the views can open: a pane, or the Cost pane on a tab. `stats` is the History tab's older name. */
+const TARGETS = {
+  route: { pane: 'route' },
+  cost: { pane: 'cost' },
+  context: { pane: 'context' },
+  learn: { pane: 'learn' },
+  handoffs: { pane: 'handoffs' },
+  last: { pane: 'cost', tab: 'last' },
+  session: { pane: 'cost', tab: 'session' },
+  history: { pane: 'cost', tab: 'history' },
+  stats: { pane: 'cost', tab: 'history' },
+} satisfies Record<keyof typeof PANES, Opened> & Record<string, Opened>
+
+export type Target = keyof typeof TARGETS
+
+export const isTarget = (name: string): name is Target => Object.hasOwn(TARGETS, name)
+
+export const paneOf = (target: Target): Opened => TARGETS[target]
+
+/** Opens a pane, or the Cost pane on a tab; the view gets it from the hooks module, which holds `$`. */
+export type Open = (target: Target) => void
 
 export type Els = ReturnType<EngineInterface['ui']['resolve']>
 
@@ -88,22 +114,41 @@ export function ledgerRow({ Box, Text }: Els, r: Row) {
 /** Each row's share of `total`, or 0 when nothing was spent. */
 export const shareOf = (usd: number, total: number) => (total > 0 ? usd / total : 0)
 
-/** A pane's TIPS section, boxed apart from the figures above it, or nothing when there are none. */
-export function tipsSection({ Box, Text }: Els, tips: readonly Tip[]) {
-  if (tips.length === 0) return null
+type Bullets = {
+  title: string
+  color: string
+  items: ReadonlyArray<{ key: string; body: RenderChildren }>
+  /** Dim lines above and below the bullets. */
+  lead?: string
+  tail?: readonly string[]
+}
+
+/** A section boxed apart from the figures above it: a coloured title, then `›` bullets. */
+export function bulletSection({ Box, Text }: Els, { title, color, items, lead, tail = [] }: Bullets) {
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="warning" borderDimColor paddingX={1}>
-      <Text bold color="warning">TIPS</Text>
-      {tips.map(one => (
+    <Box flexDirection="column" borderStyle="round" borderColor={color} borderDimColor paddingX={1}>
+      <Text bold color={color}>{title}</Text>
+      {lead === undefined ? null : <Text dimColor wrap="wrap">{lead}</Text>}
+      {items.map(one => (
         <Box key={`t:${one.key}`} flexDirection="row" gap={1}>
           <Box width={2} flexShrink={0}>
-            <Text color="warning">›</Text>
+            <Text color={color}>›</Text>
           </Box>
-          <Box flexGrow={1} flexShrink={1} minWidth={0}>
-            <Text>{one.text}</Text>
+          <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+            {one.body}
           </Box>
         </Box>
       ))}
+      {tail.map((one, i) => (
+        <Text key={`tail:${i}`} dimColor wrap="wrap">{one}</Text>
+      ))}
     </Box>
   )
+}
+
+/** A pane's TIPS section, or nothing when there are none. */
+export function tipsSection(els: Els, tips: readonly Tip[]) {
+  const { Text } = els
+  if (tips.length === 0) return null
+  return bulletSection(els, { title: 'TIPS', color: 'warning', items: tips.map(one => ({ key: one.key, body: <Text>{one.text}</Text> })) })
 }

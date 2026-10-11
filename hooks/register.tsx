@@ -1,11 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, Register, Timer } from 'claude-code'
 
-import type { ActiveRoute, Carried, ColdGuard, Effort, Health, LastUsage, Lesson, LessonKind, PromptCost, PromptRecord, RouteSpend, RouterConfig, Scope } from '../types'
+import type { ActiveRoute, Carried, ColdGuard, CostTab, Effort, Health, LastUsage, Lesson, LessonKind, PromptCost, PromptRecord, RouteSpend, RouterConfig, Scope } from '../types'
 import {
   CONCEPTS,
   TOAST_MS,
   TOPICS,
+  awayOptions,
   awayText,
   capLessons,
   lessonFromAdvice,
@@ -22,9 +23,10 @@ import {
   toastText,
   unreadCount,
 } from './lessons'
-import type { LessonDraft } from './lessons'
+import type { AwayFacts, LessonDraft } from './lessons'
 import {
   AUTO_LABELS,
+  CACHE_TTLS,
   DEFAULT_CONFIG,
   EMPTY_PROMPT,
   EMPTY_SPEND,
@@ -84,13 +86,13 @@ import { DEV_PATIENCE, PATIENCE, applyUsage, connectedServers, idleItems, idleRe
 import type { ItemKey, Patience, UsageStore } from './usage'
 import { bandView } from './ui/band'
 import { contextMobileView, contextPaneView } from './ui/context-pane'
-import { PANES } from './ui/kit'
-import type { Open } from './ui/kit'
-import { lastPaneView } from './ui/last-pane'
+import { COST_TAB_LABEL, OLD_COST_IDS, PANES, isTarget, paneOf } from './ui/kit'
+import type { Open, Target } from './ui/kit'
+import { costPaneView } from './ui/cost-pane'
 import { handoffsPaneView } from './ui/handoffs-pane'
 import { learnPaneView } from './ui/learn-pane'
 import { routesMobileView, routesPaneView } from './ui/routes-pane'
-import { statsFooterView, statsPaneView } from './ui/stats'
+import { statsFooterView } from './ui/stats'
 
 // Everything that takes `$` or reads an atom lives in this file: the engine's
 // scan follows `$` only into functions declared here and accepts atoms only
@@ -104,6 +106,7 @@ const lastUsage = atom({ plugin: 'model-router', key: 'lastUsage' } as const, nu
 const health = atom({ plugin: 'model-router', key: 'health' } as const, null as Health | null)
 const history = atom({ plugin: 'model-router', key: 'history' } as const, [] as PromptRecord[])
 const statsScope = atom({ plugin: 'model-router', key: 'statsScope' } as const, 'repo' as 'repo' | 'all')
+const costTab = atom({ plugin: 'model-router', key: 'costTab' } as const, 'last' as CostTab)
 const promptCost = atom({ plugin: 'model-router', key: 'promptCost' } as const, null as PromptCost | null)
 const isBandShown = atom({ plugin: 'model-router', key: 'isBandShown' } as const, true)
 const lessons = atom({ plugin: 'model-router', key: 'lessons' } as const, [] as Lesson[])
@@ -328,6 +331,15 @@ async function setShowNext($: $, isOn: boolean) {
   await setConfig($, c => ({ ...c, showNext: isOn }))
 }
 
+/** Turning it off also removes the text already kept, this prompt's included. */
+async function setKeepText($: $, keep: boolean) {
+  await setConfig($, c => ({ ...c, keepPromptText: keep }))
+  if (keep) return
+  if (mem.kept.current) mem.kept = { ...mem.kept, current: { ...mem.kept.current, text: '' } }
+  await carry($)
+  await setHistory($, withoutText)
+}
+
 async function setMuted($: $, kind: LessonKind, isMuted: boolean) {
   await setConfig($, c => ({ ...c, learnMuted: isMuted ? [...new Set([...c.learnMuted, kind])] : c.learnMuted.filter(one => one !== kind) }))
 }
@@ -395,14 +407,19 @@ async function coldSend($: $, cfg: RouterConfig): Promise<{ at: number; text: st
   }
 }
 
+/** This session as it stands, for pricing the ways to step away; undefined before anything is cached. `tokens` saves a usage read. */
+async function awayFacts($: $, cfg: RouterConfig, tokens?: number): Promise<AwayFacts | undefined> {
+  const last = await read($, lastUsage)
+  if (last === null) return undefined
+  tokens ??= (await $.session.usage()).context.tokens ?? promptTokens(last)
+  const warmMinutes = warmMinutesLeft(last.at, await nowOf($), cfg.cacheTtlMinutes)
+  return { tokens, model: await routedMainModel($, cfg, last.model), ttlMinutes: cfg.cacheTtlMinutes, warmMinutes }
+}
+
 /** `/route away`: the ways to step away, priced for this session as it stands. */
 async function awayReport($: $): Promise<string> {
-  const last = await read($, lastUsage)
-  if (last === null) return 'Nothing is cached in this session yet.'
-  const cfg = await read($, config)
-  const tokens = (await $.session.usage()).context.tokens ?? promptTokens(last)
-  const warmMinutes = warmMinutesLeft(last.at, await nowOf($), cfg.cacheTtlMinutes)
-  return awayText({ tokens, model: await routedMainModel($, cfg, last.model), ttlMinutes: cfg.cacheTtlMinutes, warmMinutes })
+  const facts = await awayFacts($, await read($, config))
+  return facts === undefined ? 'Nothing is cached in this session yet.' : awayText(facts)
 }
 
 async function refreshStatus($: $) {
@@ -706,11 +723,6 @@ async function recordPrompt($: $) {
   await setHistory($, all => [...all, rec].slice(-HISTORY_LIMIT))
 }
 
-async function renderLastPane($: $, e: Args<'ui.render'>) {
-  const [p, cfg] = await Promise.all([read($, promptCost), read($, config)])
-  return lastPaneView($.ui.resolve(e), p, cfg.cacheTtlMinutes)
-}
-
 /** Opening an open pane only retitles it, so one open behind another is reopened to come to the front. */
 async function raisePane($: $, pane: keyof typeof PANES) {
   const open = (await $.ui.panes().catch(() => [])).find(one => one.id === PANES[pane].id)
@@ -727,11 +739,13 @@ async function onOpen($: $, pane: keyof typeof PANES) {
   }
 }
 
-async function showPane($: $, pane: keyof typeof PANES) {
+async function showPane($: $, target: Target) {
+  const { pane, tab } = paneOf(target)
+  if (tab !== undefined) await update($, costTab, () => tab)
   await Promise.all([onOpen($, pane).catch(() => undefined), raisePane($, pane).catch(() => undefined)])
 }
 
-const openPane = ($: $): Open => pane => void showPane($, pane)
+const openPane = ($: $): Open => target => void showPane($, target)
 
 async function renderLearnPane($: $, e: Args<'ui.render'>) {
   const [cfg, all, expanded, rows, scope] = await Promise.all([read($, config), read($, lessons), read($, learnOpen), read($, learnRows), read($, learnScope)])
@@ -747,7 +761,7 @@ async function renderLearnPane($: $, e: Args<'ui.render'>) {
   })
 }
 
-/** Saved history plus the prompt still running, every repo; the Stats pane narrows it to one. */
+/** Saved history plus the prompt still running, every repo; the Cost pane's History tab narrows it to one. */
 async function allRecords($: $): Promise<{ records: PromptRecord[]; now: number }> {
   const [saved, live, now] = await Promise.all([read($, history), read($, promptCost), nowOf($)])
   const current = mem.kept.current
@@ -759,11 +773,14 @@ async function renderStatsFooter($: $, e: Args<'ui.render'>, modes: readonly str
   return statsFooterView($.ui.resolve(e), { modes, today: todayUsd(records, now) }, { open: openPane($) })
 }
 
-async function renderStatsPane($: $, e: Args<'ui.render'>) {
-  const [scope, { records: all, now }] = await Promise.all([read($, statsScope), allRecords($)])
+async function renderCostPane($: $, e: Args<'ui.render'>) {
+  const [tab, scope, lastPrompt, costs, cfg] = await Promise.all([read($, costTab), read($, statsScope), read($, promptCost), read($, spend), read($, config)])
+  const { records: all, now } = tab === 'history' ? await allRecords($) : { records: [], now: 0 }
   const records = scope === 'repo' ? all.filter(r => r.repo === mem.repo) : all
-  const setScope = async (next: Scope) => void save($, STORE.statsScope, await update($, statsScope, () => next))
-  return statsPaneView($.ui.resolve(e), { records, scope, repo: mem.repo, now }, { setScope })
+  return costPaneView($.ui.resolve(e), { tab, lastPrompt, costs, records, scope, repo: mem.repo, now, ttlMinutes: cfg.cacheTtlMinutes }, {
+    setTab: next => void update($, costTab, () => next),
+    setScope: async next => void save($, STORE.statsScope, await update($, statsScope, () => next)),
+  })
 }
 
 const setBand = async ($: $, isShown: boolean) => save($, STORE.bandShown, await update($, isBandShown, () => isShown))
@@ -805,7 +822,10 @@ async function renderCtxPane($: $, e: Args<'ui.render'>) {
     boundary: mem.boundary,
     ...signalFacts(),
   })
-  const data = { breakdown: b, isTerminal: e.surface === 'terminal', columns, advice: advice || undefined, explored: mem.explored, idle: idleTips(idle, withServerNames(loaded.names, servers), tokensByServer(servers)) }
+  // Only once there is enough cached to be worth planning a break around: the cold guard's threshold.
+  const facts = (context.tokens ?? 0) >= GUARD_MIN_TOKENS ? await awayFacts($, cfg, context.tokens) : undefined
+  const away = facts && awayOptions(facts)
+  const data = { breakdown: b, isTerminal: e.surface === 'terminal', columns, advice: advice || undefined, explored: mem.explored, idle: idleTips(idle, withServerNames(loaded.names, servers), tokensByServer(servers)), away }
   return contextPaneView($.ui.resolve(e), data)
 }
 
@@ -823,7 +843,7 @@ async function renderPane($: $, e: Args<'ui.render'>) {
     read($, isBandShown),
   ])
   const sessionModel = now?.model ?? (await $.session.model())
-  const data = { cfg, costs, now, isPlanning, pending, lastPrompt, contextTokens: usage.context.tokens ?? 0, sessionModel, isBand }
+  const data = { cfg, total: sumUsd(Object.values(costs)), now, isPlanning, pending, lastPrompt, contextTokens: usage.context.tokens ?? 0, sessionModel, isBand }
   return routesPaneView(els, data, {
     editDraft: fn =>
       void update($, draft, d => {
@@ -838,6 +858,9 @@ async function renderPane($: $, e: Args<'ui.render'>) {
     openHandoffs: () => openPane($)('handoffs'),
     setShowNext: isOn => void setShowNext($, isOn),
     openLearn: () => openPane($)('learn'),
+    setGuard: mode => void setConfig($, c => ({ ...c, coldGuard: mode })),
+    setTtl: minutes => void setConfig($, c => ({ ...c, cacheTtlMinutes: minutes })),
+    setKeepText: keep => void setKeepText($, keep),
     // Only the routes come from the draft, so on/off or a setting changed while it was open is kept.
     apply: async next => {
       await update($, draft, () => null)
@@ -860,16 +883,27 @@ const guardText = (cfg: RouterConfig, cold: { text: string }, tail: string) =>
 const LEARN_ON_TEXT =
   'Learn mode on: when a cache rewrite, a pricey model, a growing context or busy subagents cost you, a toast explains it with the numbers. /route learn lists them.'
 
-const HANDOFFS_ON_TEXT = 'Handoffs on: the band counts handoffs other sessions left open, and auto-handoff runs when it is on (/route handoff on|off).'
+const HANDOFFS_ON_TEXT = 'Handoffs on: the band counts handoffs other sessions left open, and auto-handoff runs when it is on (/route handoffs auto on|off).'
 const HANDOFFS_OFF_TEXT = 'Handoffs off: no count in the band and no auto-handoff. Handoffs you save with /handoff are still listed in /route handoffs.'
 
 const handoffOnText = (repo: string) =>
   `Auto-handoff on: when the cache is about to go cold with steps open or a plan not yet started, model-router asks Claude for a handoff while the cache is still warm and saves it under ~/${HANDOFF_DIR}/${segment(repo)}/. It runs once per prompt and never clears the session itself.`
 
+/**
+ * `/route` words in their current form: `cost <tab>` opens a tab as `<tab>` does, and
+ * `handoff on|off` is the older name of `handoffs auto on|off`.
+ */
+function aliased(words: readonly string[]): string[] {
+  const [verb, ...rest] = words
+  if (verb === 'cost' && rest.length === 1) return rest
+  if (verb === 'handoff') return ['handoffs', 'auto', ...rest]
+  return [...words]
+}
+
 const asEffort = (effort: unknown): Effort | undefined =>
   typeof effort === 'string' ? (effort as Effort) : undefined
 
-const USAGE = '[stats [clear | text on|off] | context | last | learn [on|off | mute|unmute <topic>] | handoffs [on|off] | handoff on|off | next on|off | away | unused | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
+const USAGE = '[cost [last|session|history] | last | stats [clear | text on|off] | context | learn [on|off | mute|unmute <topic>] | handoffs [on|off | auto on|off] | next on|off | away | unused | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
 
 // Origins a person typed or drove: only these may change the routes, and only these are held by the cold guard.
 const USER_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
@@ -1291,11 +1325,11 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'route' }, async ($, e) => {
-    const [verb = 'route', ...rest] = e.args.trim().split(/\s+/).filter(Boolean)
-    if (Object.hasOwn(PANES, verb) && rest.length === 0) {
-      const pane = verb as keyof typeof PANES
-      await showPane($, pane)
-      return { text: `${PANES[pane].title} pane opened.` }
+    const [verb = 'route', ...rest] = aliased(e.args.trim().split(/\s+/).filter(Boolean))
+    if (rest.length === 0 && isTarget(verb)) {
+      await showPane($, verb)
+      const { pane, tab } = paneOf(verb)
+      return { text: tab === undefined ? `${PANES[pane].title} pane opened.` : `Cost pane opened on ${COST_TAB_LABEL[tab]}.` }
     }
     if (verb === 'away') return { text: await awayReport($) }
     if (verb === 'unused') return { text: await unusedReport($) }
@@ -1319,16 +1353,12 @@ export const register: Register = on => {
     }
     if (verb === 'stats' && rest[0] === 'text' && (rest[1] === 'on' || rest[1] === 'off')) {
       const keep = rest[1] === 'on'
-      await setConfig($, c => ({ ...c, keepPromptText: keep }))
-      if (keep) return { text: 'Stats keeps the first 120 characters of each prompt again.' }
-      if (mem.kept.current) mem.kept = { ...mem.kept, current: { ...mem.kept.current, text: '' } }
-      await carry($)
-      await setHistory($, withoutText)
-      return { text: 'Stats keeps only labels and costs now; saved prompt text was removed.' }
+      await setKeepText($, keep)
+      return { text: keep ? 'Stats keeps the first 120 characters of each prompt again.' : 'Stats keeps only labels and costs now; saved prompt text was removed.' }
     }
     if (verb === 'ttl') {
       const minutes = Number(rest[0])
-      if (minutes !== 5 && minutes !== 60) return { text: 'Usage: /route ttl 5|60 (prompt-cache lifetime in minutes)' }
+      if (!CACHE_TTLS.includes(minutes)) return { text: 'Usage: /route ttl 5|60 (prompt-cache lifetime in minutes)' }
       await setConfig($, c => ({ ...c, cacheTtlMinutes: minutes }))
       return { text: `Cache lifetime set to ${minutes} minutes.` }
     }
@@ -1338,17 +1368,18 @@ export const register: Register = on => {
       await setShowNext($, isOn)
       return { text: isOn ? 'Next-step advice on: the band shows next /clear, /compact or /handoff when carrying on is not the best move, with the reason in the Context pane.' : 'Next-step advice off: the band and the Context pane no longer suggest when to clear, compact or hand off.' }
     }
+    if (verb === 'handoffs' && rest[0] === 'auto') {
+      const autoSwitch = rest[1]
+      if (autoSwitch !== 'on' && autoSwitch !== 'off') return { text: 'Usage: /route handoffs auto on|off (save a handoff while the cache is still warm, before it goes cold with work open)' }
+      const isOn = autoSwitch === 'on'
+      await setAutoHandoff($, isOn)
+      return { text: isOn ? handoffOnText(mem.repo) : 'Auto-handoff off.' }
+    }
     if (verb === 'handoffs') {
-      if (rest[0] !== 'on' && rest[0] !== 'off') return { text: 'Usage: /route handoffs on|off (the Handoffs pane, the band\'s count and auto-handoff), or /route handoffs to open the pane' }
+      if (rest[0] !== 'on' && rest[0] !== 'off') return { text: 'Usage: /route handoffs on|off (the Handoffs pane, the band\'s count and auto-handoff), /route handoffs auto on|off, or /route handoffs to open the pane' }
       const isOn = rest[0] === 'on'
       await setHandoffsOn($, isOn)
       return { text: isOn ? HANDOFFS_ON_TEXT : HANDOFFS_OFF_TEXT }
-    }
-    if (verb === 'handoff') {
-      if (rest[0] !== 'on' && rest[0] !== 'off') return { text: 'Usage: /route handoff on|off (save a handoff while the cache is still warm, before it goes cold with work open)' }
-      const isOn = rest[0] === 'on'
-      await setAutoHandoff($, isOn)
-      return { text: isOn ? handoffOnText(mem.repo) : 'Auto-handoff off.' }
     }
     if (verb === 'guard') {
       const mode = rest[0] as ColdGuard
@@ -1385,11 +1416,11 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANES.route.id }, ($, e) => renderPane($, e))
 
-  on('ui.render', { component: 'Pane', requestId: PANES.last.id }, ($, e) => renderLastPane($, e))
-
   on('ui.render', { component: 'Pane', requestId: PANES.context.id }, ($, e) => renderCtxPane($, e))
 
-  on('ui.render', { component: 'Pane', requestId: PANES.stats.id }, ($, e) => renderStatsPane($, e))
+  on('ui.render', { component: 'Pane', requestId: PANES.cost.id }, ($, e) => renderCostPane($, e))
+
+  for (const id of OLD_COST_IDS) on('ui.render', { component: 'Pane', requestId: id }, ($, e) => renderCostPane($, e))
 
   on('ui.render', { component: 'Pane', requestId: PANES.learn.id }, ($, e) => renderLearnPane($, e))
 

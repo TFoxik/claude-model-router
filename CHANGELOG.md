@@ -1,5 +1,23 @@
 # Release notes
 
+## 1.2.0 — 2026-10-11
+
+### Changed
+
+- **One Cost pane.** The Last pane, Stats and the Routes pane's "Spend this session" box are now one **Cost** pane with three tabs: **Last prompt**, **Session** (spend per route) and **History** (kept across sessions, for this repo or all). The band's **Last** button is now **Cost** and opens it on Last prompt; the footer's `▤ today` opens History. `/route cost [last|session|history]` picks a tab; `/route last` and `/route stats` still work.
+- **The band's session total moved to the cost line**: `… · last $0.05 · session $1.23 · 5h …`. The route line now shows only routes.
+- **Routes pane: routing first.** The pane is titled Routes. The live route, preset and route table come first; every setting sits in one **Settings** box below them, grouped into Coaching, Handoffs, and Cache and display. The cold-cache guard, the cache lifetime and keeping prompt text, until now commands only, have controls there too.
+- **`/route handoffs auto on|off`** turns auto-handoff on or off, next to `/route handoffs on|off`. The old `/route handoff on|off` still works.
+
+### Added
+
+- **Before a break, in the Context pane.** Once a sizeable context is cached, the Context pane prices the ways to step away, the same as `/route away`.
+
+### Fixed
+
+- **README and field guide: what the mod reads, writes and spends.** They now say it reads and writes handoffs in `~/.claude/handoffs/`, and that auto-handoff, when on, is a second optional model call.
+- A file written to `~/.claude/handoffs/../` is no longer taken for a handoff.
+
 ## 1.1.0 — 2026-10-11
 
 ### Added

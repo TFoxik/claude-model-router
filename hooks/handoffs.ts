@@ -17,7 +17,8 @@ export function repoOfHandoff(path: string, home: string | undefined): string | 
   const root = `${handoffsRoot(home)}/`
   if (!path.startsWith(root) || !path.endsWith('.md')) return undefined
   const parts = path.slice(root.length).split('/')
-  return parts.length === 2 && parts[0] !== '' ? parts[0] : undefined
+  // `..` would name a file outside the handoffs folder.
+  return parts.length === 2 && parts[0] !== '' && parts[0] !== '.' && parts[0] !== '..' ? parts[0] : undefined
 }
 
 function isRecord(value: unknown): value is HandoffRecord {

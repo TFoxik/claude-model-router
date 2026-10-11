@@ -66,7 +66,7 @@ export const CONCEPTS: Record<LessonKind, { title: string; body: string }> = {
   },
   'auto-handoff': {
     title: 'Handoff saved before the cache went cold',
-    body: 'With auto-handoff on, when the prompt cache is about to expire while steps are still open, model-router asks Claude for a handoff while the cache is still warm. That send reads the context at the cache price, a fraction of the rewrite after expiry. The plugin saves the reply under ~/.claude/handoffs/ and never clears the session itself. /route handoff off turns it off.',
+    body: 'With auto-handoff on, when the prompt cache is about to expire while steps are still open, model-router asks Claude for a handoff while the cache is still warm. That send reads the context at the cache price, a fraction of the rewrite after expiry. The plugin saves the reply under ~/.claude/handoffs/ and never clears the session itself. /route handoffs auto off turns it off.',
   },
   subagents: {
     title: 'Subagents did most of the spending',
@@ -229,7 +229,7 @@ export function lessonFromExploration(explored: number, total: number): LessonDr
 type AutoHandoffFacts = { spentUsd: number; avoidedUsd: number; tokens: number; path: string }
 
 export function lessonFromAutoHandoff({ spentUsd, avoidedUsd, tokens, path }: AutoHandoffFacts): LessonDraft {
-  const off = '/route handoff off turns this off.'
+  const off = '/route handoffs auto off turns this off.'
   if (avoidedUsd <= 0) return { kind: 'auto-handoff', fact: `Saved a handoff to ${path} before the cache went cold. ${off}` }
   return {
     kind: 'auto-handoff',
@@ -314,38 +314,51 @@ export function byKind(lessons: readonly Lesson[]): Array<[LessonKind, Lesson[]]
 const NOTE_TOKENS = 1_000
 const SUMMARY_TOKENS = 4_000
 
-type AwayFacts = { tokens: number; model: string; ttlMinutes: number; warmMinutes: number }
+export type AwayFacts = { tokens: number; model: string; ttlMinutes: number; warmMinutes: number }
+
+export type AwayRow = { name: string; now: string; back: string; how: string }
+
+/** One way to step away per row; none when the cache is cold or the model has no prices, which `header` and `notes` then explain. */
+export type Away = { header: string; rows: readonly AwayRow[]; notes: readonly string[] }
 
 /** The ways to step away from a session, priced for its context, routed model and cache state. */
-export function awayText(f: AwayFacts): string {
+export function awayOptions(f: AwayFacts): Away {
   const key = modelKeyOf(f.model)
   if (key === undefined) {
-    return `No prices for ${f.model}. Before a long break: have Claude write the work in progress to a note, /rename, then /clear; or /compact while the cache is warm.`
+    return { header: `No prices for ${f.model}. Before a long break: have Claude write the work in progress to a note, /rename, then /clear; or /compact while the cache is warm.`, rows: [], notes: [] }
   }
   const out = (tokens: number) => (tokens * MODELS[key].output) / 1e6
   const { write, warm } = rewritePrice(f.model, f.tokens, f.ttlMinutes)
   const ctx = `${kTokens(f.tokens)} tokens of context on ${labelOf(f.model)}`
   if (f.warmMinutes <= 0) {
-    return [
-      `${ctx}. The cache is already cold: anything sent now re-writes the ${kTokens(f.tokens)} tokens for ${money(write)}, so /clear (free) is the cheapest way out.`,
-      'To keep the work: /rename first and /resume later (Pro and Max offer to resume from a summary), or pay the rewrite once and ask Claude for a note before /clear.',
-    ].join('\n')
+    return {
+      header: `${ctx}. The cache is already cold: anything sent now re-writes the ${kTokens(f.tokens)} tokens for ${money(write)}, so /clear (free) is the cheapest way out.`,
+      rows: [],
+      notes: ['To keep the work: /rename first and /resume later (Pro and Max offer to resume from a summary), or pay the rewrite once and ask Claude for a note before /clear.'],
+    }
   }
-  const row = (name: string, now: string, back: string, how: string) => `  ${name.padEnd(18)}${now.padEnd(16)}${back.padEnd(22)}${how}`
-  return [
-    `${ctx}, cache warm for ${f.warmMinutes}m more (${f.ttlMinutes}-minute TTL).`,
-    '',
-    row('Note + /clear', `now ≈ ${money(warm + out(NOTE_TOKENS))}`, 'on return ≈ $0.00', 'Ask Claude to write the work in progress to a file, /rename, /clear; start the next session from the note.'),
-    row(
-      '/compact',
-      `now ≈ ${money(warm + out(SUMMARY_TOKENS))}`,
-      `on return ≈ ${money(rewritePrice(f.model, SUMMARY_TOKENS, f.ttlMinutes).write)}`,
-      'Say what to keep: /compact keep the plan, open TODOs and touched files. Only while warm: cold, it reads everything at full price.',
-    ),
-    row('/rename, /resume', 'now   $0.00', 'on return: summary', 'On Pro and Max, /resume of a big session offers to continue from a summary.'),
-    row('Keep warm', `${money(warm * Math.ceil(60 / f.ttlMinutes))} an hour`, '', 'An idle ping before each expiry; pays off for a few hours, not overnight.'),
-    row('Do nothing', 'now   $0.00', `on return   ${money(write)}`, 'The first send re-writes the whole context.'),
-    '',
-    `Prices as of ${PRICES_AS_OF}, estimates; ≈ also guesses the note (${kTokens(NOTE_TOKENS)}) and summary (${kTokens(SUMMARY_TOKENS)}) sizes.`,
-  ].join('\n')
+  return {
+    header: `${ctx}, cache warm for ${f.warmMinutes}m more (${f.ttlMinutes}-minute TTL).`,
+    rows: [
+      { name: 'Note + /clear', now: `now ≈ ${money(warm + out(NOTE_TOKENS))}`, back: 'on return ≈ $0.00', how: 'Ask Claude to write the work in progress to a file, /rename, /clear; start the next session from the note.' },
+      {
+        name: '/compact',
+        now: `now ≈ ${money(warm + out(SUMMARY_TOKENS))}`,
+        back: `on return ≈ ${money(rewritePrice(f.model, SUMMARY_TOKENS, f.ttlMinutes).write)}`,
+        how: 'Say what to keep: /compact keep the plan, open TODOs and touched files. Only while warm: cold, it reads everything at full price.',
+      },
+      { name: '/rename, /resume', now: 'now   $0.00', back: 'on return: summary', how: 'On Pro and Max, /resume of a big session offers to continue from a summary.' },
+      { name: 'Keep warm', now: `${money(warm * Math.ceil(60 / f.ttlMinutes))} an hour`, back: '', how: 'An idle ping before each expiry; pays off for a few hours, not overnight.' },
+      { name: 'Do nothing', now: 'now   $0.00', back: `on return   ${money(write)}`, how: 'The first send re-writes the whole context.' },
+    ],
+    notes: [`Prices as of ${PRICES_AS_OF}, estimates; ≈ also guesses the note (${kTokens(NOTE_TOKENS)}) and summary (${kTokens(SUMMARY_TOKENS)}) sizes.`],
+  }
+}
+
+/** `/route away`: `awayOptions` as a padded table. */
+export function awayText(f: AwayFacts): string {
+  const { header, rows, notes } = awayOptions(f)
+  if (rows.length === 0) return [header, ...notes].join('\n')
+  const row = (one: AwayRow) => `  ${one.name.padEnd(18)}${one.now.padEnd(16)}${one.back.padEnd(22)}${one.how}`
+  return [header, '', ...rows.map(row), '', ...notes].join('\n')
 }

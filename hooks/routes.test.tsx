@@ -1,9 +1,9 @@
 import type { Args, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { Lesson } from '../types'
+import type { CostTab, Lesson } from '../types'
 import { HANDOFF_PROMPT } from './handoff'
-import { stamp } from './ui/kit'
+import { paneOf, stamp } from './ui/kit'
 
 import {
   DEFAULT_CONFIG,
@@ -42,9 +42,14 @@ const opus = MODELS.opus.id
 const sonnet = MODELS.sonnet.id
 const haiku = MODELS.haiku.id
 const MINE = withPreset(DEFAULT_CONFIG, 'mine')!
-const PANE_IDS = { route: 'model-router', last: 'model-router-last', context: 'model-router-ctx', stats: 'model-router-stats', learn: 'model-router-learn', handoffs: 'model-router-handoffs' } as const
+const PANE_IDS = { route: 'model-router', cost: 'model-router-cost', context: 'model-router-ctx', learn: 'model-router-learn', handoffs: 'model-router-handoffs' } as const
 const mountPane = ($: Engine, pane: keyof typeof PANE_IDS, surface: 'terminal' | 'desktop' = 'terminal') =>
   $.ui.mount({ plugin: 'model-router', surface, component: 'Pane', requestId: PANE_IDS[pane], props: {} as never })
+/** The Cost pane, switched to `tab` the way `/route cost <tab>` does. */
+const mountCost = async ($: Engine, tab: CostTab) => {
+  await $.command.run({ command: 'route', args: `cost ${tab}`, origin: { kind: 'composer' } } as unknown as Args<'command.run'>)
+  return mountPane($, 'cost')
+}
 const bandOf = ($: Engine) => $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
 const buttonKeys = async (band: Awaited<ReturnType<typeof bandOf>>) => (await band.findAll({ type: 'Button' })).map(one => one.key)
 const useMine = ($: Engine) => $.command.run({ command: 'route', args: 'preset mine', origin: { kind: 'composer' } } as unknown as Args<'command.run'>)
@@ -342,10 +347,10 @@ test('footer shows cache, context and the 5h window', async ($, on) => {
   await step($, 'h1')
   expect((await ui.find({ key: 'stats' }))?.text).toMatch(/^▤ today \$/)
   const band = await bandOf($)
-  expect(await band.find({ type: 'Text', text: /^cache 96% 60m · context \d+% · last \$0\.06 · 5h 38% · 7d 12%$/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /^cache 96% 60m · context \d+% · last \$0\.06 · session \$0\.06 · 5h 38% · 7d 12%$/ })).toBeDefined()
   expect((await band.find({ key: 'ctx' }))?.text).toBe('Context')
-  expect((await band.find({ key: 'band-last' }))?.text).toBe('Last')
-  expect(await buttonKeys(band)).toEqual(['ctx', 'band-last', 'band-open'])
+  expect((await band.find({ key: 'band-cost' }))?.text).toBe('Cost')
+  expect(await buttonKeys(band)).toEqual(['ctx', 'band-cost', 'band-open'])
   await band.unmount()
   await clock.advance(61 * 60_000)
   const band2 = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
@@ -378,7 +383,7 @@ test('last is the whole prompt: main steps and its subagents, reset on the next 
   await step($, 's1', 'sub-1')
   await step($, 'p1')
   expect(await ui.find({ type: 'Text', text: / · last \$0\.02( · |$)/ })).toBeDefined()
-  const breakdown = await mountPane($, 'last')
+  const breakdown = await mountCost($, 'last')
   expect(await breakdown.find({ type: 'Text', text: '2 requests · main $0.0080 · 1 subagent $0.0080' })).toBeUndefined()
   expect(await breakdown.find({ type: 'Text', text: '4 requests · main $0.0080 · 1 subagent $0.0080' })).toBeDefined()
   expect(await breakdown.find({ type: 'Text', text: 'Main loop' })).toBeDefined()
@@ -485,8 +490,8 @@ test('finished prompts are saved across sessions and shown in Stats', async ($, 
   await $.prompt.submit({ text: 'fix typo', origin: { kind: 'composer' } } as Args<'prompt.submit'>)
   await $.turn.start({ text: 'fix typo', turnId: 'b' })
 
-  const ui = await mountPane($, 'stats')
-  expect(await ui.find({ type: 'Text', text: 'Stats · my-app' })).toBeDefined()
+  const ui = await mountCost($, 'history')
+  expect(await ui.find({ type: 'Text', text: 'Cost · my-app' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '/simplify' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /1 run · total \$1\.00/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Opus 5\.5 medium \$1\.00/ })).toBeDefined()
@@ -519,8 +524,8 @@ type StepUsage = { model: string; input_tokens: number; cache_read_input_tokens:
 const usageOf = (read: number, write = 0): StepUsage => ({ model: opus, input_tokens: 0, cache_read_input_tokens: read, cache_creation_input_tokens: write, output_tokens: 0 })
 
 /** A session whose context size and step usage the test can change as it goes. */
-function guardSession(on: On, facts: { context: number; usage: StepUsage }) {
-  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: facts.context, window: 1_000_000, percent: 20 }, rateLimits: [] } }))
+function guardSession(on: On, facts: { context: number; usage: StepUsage; breakdown?: unknown }) {
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: facts.context, window: 1_000_000, percent: 20, ...(facts.breakdown ? { breakdown: facts.breakdown } : {}) }, rateLimits: [] } }) as never)
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
   on('command.run', () => ({ text: 'engine' }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
@@ -592,7 +597,7 @@ test('cache rewrites are tallied by cause and shown in Last and Stats', async ($
   await prompt('a', warm)
   await clock.advance(61 * 60_000)
   await prompt('cold', rebuilt)
-  const last = await mountPane($, 'last')
+  const last = await mountCost($, 'last')
   expect(await last.find({ type: 'Text', text: 'includes a cold cache rewrite of 100k tokens, $0.78' })).toBeDefined()
   expect(await last.find({ type: 'Text', text: /^The cache had gone cold, which cost \$0\.78/ })).toBeDefined()
   await last.unmount()
@@ -606,7 +611,7 @@ test('cache rewrites are tallied by cause and shown in Last and Stats', async ($
   await prompt('after-compact', rebuilt)
   await prompt('done', warm)
 
-  const stats = await mountPane($, 'stats')
+  const stats = await mountCost($, 'history')
   expect(await stats.find({ type: 'Text', text: /^↻ 2 cache rewrites \$1\.56$/ })).toBeDefined()
   expect(await stats.find({ type: 'Text', text: /^↻ route switch rewrite of 100k tokens, \$0\.78$/ })).toBeDefined()
   expect(await stats.find({ type: 'Text', text: /^Cache rewrites cost \$1\.56/ })).toBeDefined()
@@ -691,8 +696,8 @@ test('only a person can change routes; anyone can open a pane; stats clear empti
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   const run = (args: string, kind: string) => $.command.run({ command: 'route', args, origin: { kind } } as unknown as Args<'command.run'>)
   expect((await run('off', 'peer')).text).toMatch(/only runs when you type it/)
-  expect((await run('stats', 'peer')).text).toBe('Stats pane opened.')
-  const mountStats = () => mountPane($, 'stats')
+  expect((await run('stats', 'peer')).text).toBe('Cost pane opened on History.')
+  const mountStats = () => mountPane($, 'cost')
   const before = await mountStats()
   expect(await before.find({ type: 'Text', text: /^1 prompt$/ })).toBeDefined()
   await before.unmount()
@@ -713,7 +718,7 @@ test('prompt text can be switched off, which also blanks what was kept', async (
     await $.turn.start({ text, turnId: text })
     await step($, text)
   }
-  const stats = await mountPane($, 'stats')
+  const stats = await mountCost($, 'history')
   expect(await stats.find({ type: 'Text', text: /^3 prompts$/ })).toBeDefined()
   expect(await stats.find({ type: 'Text', text: /secret/ })).toBeUndefined()
   await stats.unmount()
@@ -740,7 +745,7 @@ test('Apply takes only the routing from the draft', async ($, on) => {
   await route($, 'ttl 5')
   await ui.press({ key: 'apply' })
   expect(await ui.find({ key: 'apply' })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /5-minute/ })).toBeDefined()
+  expect(await ui.find({ key: 'ttl' })).toMatchObject({ props: { value: '5' } })
   expect(await ui.find({ key: 'm:main' })).toMatchObject({ props: { value: 'sonnet' } })
   await ui.unmount()
 })
@@ -903,7 +908,7 @@ test('a background agent that outlives its prompt is charged to that prompt', as
 
   const [first] = data.history as Array<{ text: string; usd: number; requests: number }>
   expect([first!.text, first!.usd, first!.requests]).toEqual(['start a background agent', 12, 3])
-  const last = await mountPane($, 'last')
+  const last = await mountCost($, 'last')
   expect(await last.find({ type: 'Text', text: 'No requests in this prompt yet.' })).toBeDefined()
   await last.unmount()
 })
@@ -1257,7 +1262,7 @@ test('a commit over a big context turns the band to next /clear until the next p
   const band = await bandOf($)
   expect((await band.find({ key: 'advice' }))?.text).toBe('next /clear')
   expect(await band.find({ type: 'Text', text: /next \/clear/ })).toBeUndefined()
-  expect(await buttonKeys(band)).toEqual(['band-learn', 'advice', 'ctx', 'band-last', 'band-open'])
+  expect(await buttonKeys(band)).toEqual(['band-learn', 'advice', 'ctx', 'band-cost', 'band-open'])
   await band.unmount()
   expect(toasts).toEqual([
     'Clear after committing: Work was committed. Each further request re-reads the 200k tokens of finished work ($0.04 warm): /clear and start the next task fresh, or /compact to carry a summary. · /route learn',
@@ -1457,7 +1462,7 @@ test('pressing a pane that is open behind another brings it to the front', async
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   const calls: string[] = []
   const shown = { current: 'model-router-learn' }
-  on('ui.panes', () => ({ value: ['model-router-stats', 'model-router-learn'].map(id => ({ id, title: id, isShown: id === shown.current, isFocused: false, isPlaced: true })) }) as never)
+  on('ui.panes', () => ({ value: ['model-router-cost', 'model-router-learn'].map(id => ({ id, title: id, isShown: id === shown.current, isFocused: false, isPlaced: true })) }) as never)
   on('ui.close', (_$, e) => {
     calls.push(`close ${e.id}`)
     return { value: undefined } as never
@@ -1470,9 +1475,9 @@ test('pressing a pane that is open behind another brings it to the front', async
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   const ui = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
   await ui.press({ key: 'stats' })
-  expect(calls).toEqual(['close model-router-stats', 'open model-router-stats'])
+  expect(calls).toEqual(['close model-router-cost', 'open model-router-cost'])
   await ui.press({ key: 'stats' })
-  expect(calls).toEqual(['close model-router-stats', 'open model-router-stats', 'open model-router-stats'])
+  expect(calls).toEqual(['close model-router-cost', 'open model-router-cost', 'open model-router-cost'])
   await ui.unmount()
 })
 
@@ -1644,7 +1649,7 @@ test('the band shows handoffs ●N for other sessions\' open handoffs, through p
   await listedSession($, on, { 'a.md': '# A\n', 'b.md': '# B\n' })
   const band = await bandOf($)
   expect((await band.find({ key: 'band-handoffs' }))?.text).toBe('Handoffs ●2')
-  expect(await buttonKeys(band)).toEqual(['band-handoffs', 'ctx', 'band-last', 'band-open'])
+  expect(await buttonKeys(band)).toEqual(['band-handoffs', 'ctx', 'band-cost', 'band-open'])
   await band.unmount()
   await submit($, 'hello')
   const still = await bandOf($)
@@ -1750,4 +1755,103 @@ test('a repo folder that is gone forgets its handoffs, and other repos keep thei
   await route($, 'handoffs')
   await clock.settle()
   expect(Object.keys(data.handoffs as object)).toEqual([other])
+})
+
+test('a pane name, a Cost tab, or stats as the History tab', () => {
+  expect(paneOf('context')).toEqual({ pane: 'context' })
+  expect(paneOf('cost')).toEqual({ pane: 'cost' })
+  expect(paneOf('last')).toEqual({ pane: 'cost', tab: 'last' })
+  expect(paneOf('session')).toEqual({ pane: 'cost', tab: 'session' })
+  expect(paneOf('stats')).toEqual({ pane: 'cost', tab: 'history' })
+})
+
+test('the Cost pane switches between Last prompt, Session and History; /route picks a tab, and the old pane ids show it', async ($, on) => {
+  mock.store(on)
+  mock.clock(on, { now: T0 })
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await submit($, 'hello')
+  await $.turn.start({ text: 'hello', turnId: 'a' })
+  await step($, 'a')
+  expect((await route($, 'cost session')).text).toBe('Cost pane opened on Session.')
+  const pane = await mountPane($, 'cost')
+  expect(await pane.find({ type: 'Text', text: 'This session, by route' })).toBeDefined()
+  expect(await pane.find({ key: 'scope-repo' })).toBeUndefined()
+  await pane.press({ key: 'tab-history' })
+  expect(await pane.find({ key: 'scope-repo' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^1 prompt$/ })).toBeDefined()
+  await pane.press({ key: 'tab-last' })
+  expect(await pane.find({ type: 'Text', text: /^1 request · main/ })).toBeDefined()
+  await pane.unmount()
+  expect((await route($, 'last')).text).toBe('Cost pane opened on Last prompt.')
+  expect((await route($, 'cost')).text).toBe('Cost pane opened.')
+  expect((await route($, 'cost bogus')).text).toMatch(/^Usage: \/route /)
+  const old = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'Pane', requestId: 'model-router-stats', props: {} as never })
+  expect(await old.find({ key: 'tab-history' })).toBeDefined()
+  await old.unmount()
+})
+
+test('the Routes pane holds every setting: guard and cache lifetime apply at once, and keeping prompt text off removes it', async ($, on) => {
+  const data: Record<string, unknown> = { config: MINE, history: [record('secret plan')] }
+  sharedStore(on, data)
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  on('session.model', () => ({ value: opus }))
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const pane = await mountPane($, 'route')
+  await pane.select({ key: 'guard', value: 'warn' })
+  await pane.select({ key: 'ttl', value: '5' })
+  expect(await pane.find({ key: 'guard' })).toMatchObject({ props: { value: 'warn' } })
+  expect(await pane.find({ key: 'ttl' })).toMatchObject({ props: { value: '5' } })
+  expect(data.config).toMatchObject({ coldGuard: 'warn', cacheTtlMinutes: 5 })
+  expect((await pane.find({ key: 'text-toggle' }))?.text).toBe('Turn off')
+  await pane.press({ key: 'text-toggle' })
+  expect((await pane.find({ key: 'text-toggle' }))?.text).toBe('Turn on')
+  expect(data.config).toMatchObject({ keepPromptText: false })
+  expect((data.history as Array<{ text: string }>).map(one => one.text)).toEqual([''])
+  await pane.unmount()
+})
+
+test('/route handoffs auto on|off sets auto-handoff, and the older /route handoff on|off still does', async ($, on) => {
+  on('session.model', () => ({ value: opus }))
+  await listedSession($, on, {})
+  expect((await route($, 'handoffs auto on')).text).toMatch(/^Auto-handoff on/)
+  const pane = await mountPane($, 'route')
+  expect((await pane.find({ key: 'handoff-toggle' }))?.text).toBe('Turn off')
+  expect((await route($, 'handoff off')).text).toBe('Auto-handoff off.')
+  expect((await pane.find({ key: 'handoff-toggle' }))?.text).toBe('Turn on')
+  expect((await route($, 'handoffs auto')).text).toMatch(/^Usage: \/route handoffs auto on\|off/)
+  await pane.unmount()
+})
+
+test('the Context pane prices the ways to step away once a big context is cached, as /route away does', async ($, on) => {
+  mock.store(on, { config: MINE })
+  mock.clock(on, { now: T0 })
+  const breakdown = {
+    categories: [{ name: 'Messages', tokens: 190_000, color: 'claude', isDeferred: false, kind: 'used' }],
+    totalTokens: 200_000,
+    maxTokens: 1_000_000,
+    rawMaxTokens: 1_000_000,
+    autocompactSource: 'model-default',
+    percentage: 20,
+    gridRows: [],
+    model: opus,
+    memoryFiles: [],
+    mcpTools: [],
+    agents: [],
+    autoCompactThreshold: 800_000,
+    isAutoCompactEnabled: true,
+    apiUsage: null,
+  }
+  guardSession(on, { context: 200_000, usage: usageOf(200_000), breakdown })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const before = await mountPane($, 'context')
+  expect(await before.find({ type: 'Text', text: 'BEFORE A BREAK' })).toBeUndefined()
+  await before.unmount()
+  await step($, 'a')
+  const after = await mountPane($, 'context')
+  expect(await after.find({ type: 'Text', text: 'BEFORE A BREAK' })).toBeDefined()
+  const [header] = ((await route($, 'away')).text ?? '').split('\n')
+  expect(header).toMatch(/^200k tokens of context on .+, cache warm for 60m more/)
+  expect(await after.find({ type: 'Text', text: header! })).toBeDefined()
+  await after.unmount()
 })

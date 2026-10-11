@@ -33,15 +33,16 @@ export function statsFooterView({ Box, Text, Button }: Els, { modes, today }: { 
   return (
     <Box flexDirection="row" flexShrink={0}>
       {modes.length > 0 ? <Text dimColor>{`${modes.join(' & ')}  `}</Text> : null}
-      <Button key="stats" label={`▤ today ${money(today)}`} plain dimColor onPress={() => open('stats')} />
+      <Button key="stats" label={`▤ today ${money(today)}`} plain dimColor onPress={() => open('history')} />
     </Box>
   )
 }
 
-type StatsData = { records: readonly PromptRecord[]; scope: Scope; repo: string; now: number }
+type StatsData = { records: readonly PromptRecord[]; scope: Scope; now: number }
 
-export function statsPaneView(els: Els, { records, scope, repo, now }: StatsData, { setScope }: { setScope: (scope: Scope) => void }) {
-  const { Box, Text, Button } = els
+/** The Cost pane's History tab: spend kept across sessions, in the repo or every repo. */
+export function historyTabView(els: Els, { records, scope, now }: StatsData) {
+  const { Box, Text } = els
   const { today, week, rewrites, commands, priciest } = statsSummary(records, now)
   const topAvg = Math.max(0, ...commands.map(c => c.avg))
 
@@ -78,14 +79,6 @@ export function statsPaneView(els: Els, { records, scope, repo, now }: StatsData
 
   return (
     <Box flexDirection="column" gap={1}>
-      <Box flexDirection="row" justifyContent="space-between">
-        <Text bold color="claude">Stats · {scope === 'repo' ? repo : 'all repos'}</Text>
-        <Box flexDirection="row" gap={1}>
-          <Button key="scope-repo" label="This repo" plain dimColor={scope !== 'repo'} onPress={() => setScope('repo')} />
-          <Button key="scope-all" label="All" plain dimColor={scope !== 'all'} onPress={() => setScope('all')} />
-        </Box>
-      </Box>
-
       <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
         <Box flexDirection="row" columnGap={4} flexWrap="wrap">
           {tile('t:today', 'today', today, 'claude')}

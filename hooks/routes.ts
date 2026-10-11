@@ -150,7 +150,10 @@ export const withRoute = (config: RouterConfig, route: string, setting: RouteSet
 const isModel = (m: unknown): m is RouteSetting['model'] => m === 'inherit' || (typeof m === 'string' && Object.hasOwn(MODELS, m))
 const isEffort = (e: unknown): e is RouteEffort =>
   e === 'inherit' || e === 'auto' || (typeof e === 'string' && EFFORTS.includes(e as Effort))
-const GUARDS: readonly ColdGuard[] = ['refuse', 'warn', 'off']
+export const GUARDS: readonly ColdGuard[] = ['refuse', 'warn', 'off']
+
+/** The prompt-cache lifetimes the API offers, in minutes. */
+export const CACHE_TTLS: readonly number[] = [60, 5]
 const LESSON_KINDS: Record<LessonKind, true> = {
   'cold-rewrite': true,
   'switch-rewrite': true,

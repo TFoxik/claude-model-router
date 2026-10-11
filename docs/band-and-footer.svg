@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="820" height="224" viewBox="0 0 820 224" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12">
   <rect width="820" height="224" rx="12" fill="#1f1e1d"/>
   <rect x="12" y="14" width="796" height="86" rx="8" fill="#2a2927"/>
-  <text x="28" y="38"><tspan fill="#d97757" font-weight="700">▸ main · Opus 5.5 medium</tspan><tspan fill="#8b8a86"> │ </tspan><tspan fill="#5fb36b">plan</tspan><tspan fill="#8b8a86"> Opus high · </tspan><tspan fill="#d97757">main</tspan><tspan fill="#8b8a86"> Opus medium · </tspan><tspan fill="#6ea8e0">sub</tspan><tspan fill="#8b8a86"> Sonnet high · $3.68</tspan></text>
-  <text x="28" y="62"><tspan fill="#8b8a86">cache </tspan><tspan fill="#5fb36b">96%</tspan><tspan fill="#8b8a86"> 42m · context </tspan><tspan fill="#5fb36b">31%</tspan><tspan fill="#8b8a86"> · last $0.05 · 5h </tspan><tspan fill="#e0b24f">74%</tspan><tspan fill="#8b8a86"> · 7d 12%</tspan></text>
+  <text x="28" y="38"><tspan fill="#d97757" font-weight="700">▸ main · Opus 5.5 medium</tspan><tspan fill="#8b8a86"> │ </tspan><tspan fill="#5fb36b">plan</tspan><tspan fill="#8b8a86"> Opus high · </tspan><tspan fill="#d97757">main</tspan><tspan fill="#8b8a86"> Opus medium · </tspan><tspan fill="#6ea8e0">sub</tspan><tspan fill="#8b8a86"> Sonnet high</tspan></text>
+  <text x="28" y="62"><tspan fill="#8b8a86">cache </tspan><tspan fill="#5fb36b">96%</tspan><tspan fill="#8b8a86"> 42m · context </tspan><tspan fill="#5fb36b">31%</tspan><tspan fill="#8b8a86"> · last $0.05 · session $3.68 · 5h </tspan><tspan fill="#e0b24f">74%</tspan><tspan fill="#8b8a86"> · 7d 12%</tspan></text>
   <rect x="499" y="72" width="102" height="21" rx="5" fill="#3a3936"/>
-  <text x="788" y="87" font-size="13" text-anchor="end"><tspan fill="#d6d4cf">Handoffs ●1</tspan><tspan dx="18" fill="#d6d4cf">Learn ●2</tspan><tspan dx="26" fill="#f0eee9" font-weight="700">next /clear</tspan><tspan dx="26" fill="#a9a7a2">Context</tspan><tspan dx="18" fill="#a9a7a2">Last</tspan><tspan dx="18" fill="#d6d4cf">Routes</tspan></text>
+  <text x="788" y="87" font-size="13" text-anchor="end"><tspan fill="#d6d4cf">Handoffs ●1</tspan><tspan dx="18" fill="#d6d4cf">Learn ●2</tspan><tspan dx="26" fill="#f0eee9" font-weight="700">next /clear</tspan><tspan dx="26" fill="#a9a7a2">Context</tspan><tspan dx="18" fill="#a9a7a2">Cost</tspan><tspan dx="18" fill="#d6d4cf">Routes</tspan></text>
   <rect x="12" y="112" width="796" height="44" rx="10" fill="#262624" stroke="#4a4946"/>
   <text x="28" y="139" fill="#8b8a86" font-size="13">Ask Claude to do something…</text>
   <text x="28" y="194" fill="#8b8a86" font-size="13">+  Auto</text>

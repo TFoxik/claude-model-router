@@ -2,7 +2,8 @@ import { contextLevel, kTokens, printable, shortPath } from '../routes'
 import { contextTips, tokensByServer } from '../tips'
 import type { Breakdown, Tip } from '../tips'
 import type { Advice } from '../strategy'
-import { tipsSection } from './kit'
+import type { Away } from '../lessons'
+import { bulletSection, tipsSection } from './kit'
 import type { Els } from './kit'
 
 // Theme keys as hex, for the one place a theme key cannot go: an SVG drawn as an image.
@@ -49,13 +50,30 @@ function stackedCells(segments: readonly Segment[], whole: number, width: number
   return used < width ? [...out, { text: '░'.repeat(width - used), color: undefined }] : out
 }
 
+/** `/route away` as a section: the ways to step away from this session, each priced now and on return. */
+function awaySection(els: Els, away: Away) {
+  const { Text } = els
+  const squeeze = (text: string) => text.replace(/ {2,}/g, ' ')
+  const items = away.rows.map(one => ({
+    key: one.name,
+    body: [
+      <Text key="what" wrap="wrap">
+        <Text bold>{one.name}</Text>
+        {` ${[one.now, one.back].filter(Boolean).map(squeeze).join(' · ')}`}
+      </Text>,
+      <Text key="how" dimColor wrap="wrap">{one.how}</Text>,
+    ],
+  }))
+  return bulletSection(els, { title: 'BEFORE A BREAK', color: 'claude', lead: away.header, items, tail: away.notes })
+}
+
 export function contextMobileView({ Text }: Els) {
   return <Text dimColor>Open the context breakdown from a terminal or desktop.</Text>
 }
 
-type ContextData = { breakdown: Breakdown | undefined; isTerminal: boolean; columns: number; advice?: Pick<Advice, 'verdict' | 'text'>; idle?: readonly Tip[]; explored?: number }
+type ContextData = { breakdown: Breakdown | undefined; isTerminal: boolean; columns: number; advice?: Pick<Advice, 'verdict' | 'text'>; idle?: readonly Tip[]; explored?: number; away?: Away }
 
-export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, advice, idle, explored }: ContextData) {
+export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, advice, idle, explored, away }: ContextData) {
   const { Box, Text } = els
   const Svg = 'Svg' in els ? els.Svg : undefined
   if (b === undefined) return <Text dimColor>No context breakdown available yet.</Text>
@@ -132,6 +150,7 @@ export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, a
         </Box>
       ) : null}
       {tipsSection(els, contextTips(b, { advice, more: idle, explored }))}
+      {away === undefined ? null : awaySection(els, away)}
       <Text dimColor>
         {b.skills ? `skills listing ${kTokens(b.skills.tokens)} (${b.skills.includedSkills}/${b.skills.totalSkills}) · ` : ''}
         {b.model} · estimated locally, as /context does

@@ -1,10 +1,13 @@
 
-import type { ActiveRoute, PromptCost, RouteSetting, RouteSpend, RouterConfig } from '../../types'
+import type { RenderChildren } from 'claude-code'
+
+import type { ActiveRoute, ColdGuard, PromptCost, RouteSetting, RouterConfig } from '../../types'
 import {
+  CACHE_TTLS,
   EFFORTS,
+  GUARDS,
   MODELS,
   PRESETS,
-  PRICES_AS_OF,
   ROUTES,
   SUB_CONTEXT,
   draftSummary,
@@ -17,11 +20,10 @@ import {
   routeText,
   shortLabel,
   subagentCount,
-  sumUsd,
   withPreset,
   withRoute,
 } from '../routes'
-import { colorOf, ledgerRow, shareOf, tokenLine } from './kit'
+import { colorOf } from './kit'
 import type { Els } from './kit'
 
 const MODEL_OPTIONS = [
@@ -49,7 +51,8 @@ const signed = (usd: number) => `${usd >= 0 ? '+' : '−'}${money(Math.abs(usd))
 
 type PaneData = {
   cfg: RouterConfig
-  costs: Record<string, RouteSpend>
+  /** This session's spend, every route. */
+  total: number
   now: ActiveRoute | null
   isPlanning: boolean
   pending: RouterConfig | null
@@ -70,8 +73,102 @@ type PaneActions = {
   openHandoffs: () => void
   setShowNext: (isOn: boolean) => void
   openLearn: () => void
+  setGuard: (mode: ColdGuard) => void
+  setTtl: (minutes: number) => void
+  setKeepText: (keep: boolean) => void
   apply: (next: RouterConfig) => void
   discard: () => void
+}
+
+const GUARD_OPTIONS = GUARDS.map(value => ({ value, label: value }))
+const TTL_OPTIONS = CACHE_TTLS.map(minutes => ({ value: String(minutes), label: `${minutes} min` }))
+const SELECT_W = 12
+
+type Setting = {
+  key: string
+  name: string
+  /** On/off settings show their state after the name. */
+  state?: { isOn: boolean; on?: string; off?: string }
+  note?: string
+  controls: RenderChildren
+  isChild?: boolean
+}
+
+/** A setting: its name and state, a dim line saying what it does, and its controls on the right. */
+function settingRow({ Box, Text }: InputEls, { key, name, state, note, controls, isChild }: Setting) {
+  return (
+    <Box key={key} flexDirection="row" justifyContent="space-between" alignItems="center" gap={1} paddingLeft={isChild ? 2 : 0}>
+      <Box flexDirection="column" flexShrink={1} minWidth={0}>
+        <Text>
+          {name}
+          {state ? <Text color={state.isOn ? 'success' : 'subtle'}>{state.isOn ? ` ● ${state.on ?? 'on'}` : ` ○ ${state.off ?? 'off'}`}</Text> : null}
+        </Text>
+        {note ? <Text dimColor>{note}</Text> : null}
+      </Box>
+      <Box flexDirection="row" gap={1} flexShrink={0}>
+        {controls}
+      </Box>
+    </Box>
+  )
+}
+
+/** Every setting in one place, below the routing it serves; each applies at once, not through the draft. */
+function settingsSection(els: InputEls, { cfg, isBand }: PaneData, a: PaneActions) {
+  const { Box, Text, Button, Select } = els
+  const group = (title: string) => <Text key={`sg:${title}`} bold color="claude">{title}</Text>
+  const turn = (key: string, isOn: boolean, set: (isOn: boolean) => void) => <Button key={key} label={isOn ? 'Turn off' : 'Turn on'} onPress={() => set(!isOn)} />
+  /** An on/off setting whose note says what turning it on would do. */
+  const toggle = (key: string, name: string, isOn: boolean, set: (isOn: boolean) => void, offNote: string, extra?: RenderChildren, isChild?: boolean) =>
+    settingRow(els, { key: `set-${key}`, name, state: { isOn }, note: isOn ? undefined : offNote, controls: [turn(`${key}-toggle`, isOn, set), extra], isChild })
+  const select = (key: string, options: Array<{ value: string; label: string }>, value: string, onSelect: (value: string) => void) => (
+    <Box width={SELECT_W}>
+      <Select key={key} options={options} value={value} onSelect={onSelect} />
+    </Box>
+  )
+  return (
+    <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1} gap={1}>
+      <Text bold dimColor>SETTINGS</Text>
+      <Box flexDirection="column" gap={1}>
+        {group('Coaching')}
+        {toggle('learn', 'Learn mode', cfg.isLearning, a.setLearning, 'explains cache misses and model costs with your own numbers, when they happen', <Button key="learn-open" label="Open" onPress={a.openLearn} />)}
+        {toggle('next', 'Next-step advice', cfg.showNext, a.setShowNext, 'shows next /clear, /compact or /handoff in the band when carrying on is not the best move')}
+      </Box>
+      <Box flexDirection="column" gap={1}>
+        {group('Handoffs')}
+        {toggle('handoffs', 'Handoffs', cfg.isHandoffs, a.setHandoffs, 'counts open handoffs in the band and lets auto-handoff run', <Button key="handoffs-open" label="Open" onPress={a.openHandoffs} />)}
+        {cfg.isHandoffs ? toggle('handoff', 'Auto-handoff', cfg.autoHandoff, a.setAutoHandoff, 'saves a handoff while the cache is warm, before it goes cold with work open', undefined, true) : null}
+      </Box>
+      <Box flexDirection="column" gap={1}>
+        {group('Cache and display')}
+        {settingRow(els, {
+          key: 'set-guard',
+          name: 'Cold-cache guard',
+          note: 'a send onto a cold cache: held once with its price, sent with it, or not checked',
+          controls: select('guard', GUARD_OPTIONS, cfg.coldGuard, value => a.setGuard(value as ColdGuard)),
+        })}
+        {settingRow(els, {
+          key: 'set-ttl',
+          name: 'Cache lifetime',
+          note: 'the prompt-cache TTL the warm/cold timer counts down',
+          controls: select('ttl', TTL_OPTIONS, String(cfg.cacheTtlMinutes), value => a.setTtl(Number(value))),
+        })}
+        {settingRow(els, {
+          key: 'set-text',
+          name: 'Keep prompt text',
+          state: { isOn: cfg.keepPromptText },
+          note: cfg.keepPromptText ? 'the first 120 characters of each prompt, for Cost › History; off also removes text already kept' : 'Cost › History keeps only labels and costs',
+          controls: turn('text-toggle', cfg.keepPromptText, a.setKeepText),
+        })}
+        {settingRow(els, {
+          key: 'set-band',
+          name: 'Band',
+          state: { isOn: isBand, on: 'shown', off: 'hidden' },
+          note: 'the route, cache and cost lines above the prompt; routing works either way',
+          controls: <Button key="band-toggle" label={isBand ? 'Hide' : 'Show'} onPress={() => a.setBand(!isBand)} />,
+        })}
+      </Box>
+    </Box>
+  )
 }
 
 export function routesMobileView({ Box, Text }: Els, now: ActiveRoute | null) {
@@ -89,8 +186,8 @@ export function routesMobileView({ Box, Text }: Els, now: ActiveRoute | null) {
 type InputEls = Extract<Els, { Select: unknown }>
 
 export function routesPaneView(els: InputEls, data: PaneData, actions: PaneActions) {
-  const { cfg, costs, now, isPlanning, pending, lastPrompt, contextTokens, sessionModel, isBand } = data
-  const { editDraft, toggle, setLearning, setHandoffs, setAutoHandoff, setBand, setShowNext, openLearn, openHandoffs, apply, discard } = actions
+  const { cfg, total, now, isPlanning, pending, lastPrompt, contextTokens, sessionModel } = data
+  const { editDraft, toggle, apply, discard } = actions
   const { Box, Text, Button, Select } = els
   const shown = pending ?? cfg
   const ttlMinutes = cfg.cacheTtlMinutes
@@ -104,77 +201,17 @@ export function routesPaneView(els: InputEls, data: PaneData, actions: PaneActio
     ...(presetOf(shown.preset) ? [] : [{ value: shown.preset, label: 'Custom' }]),
   ]
 
-  const spendRows = Object.entries(costs).sort((a, b) => b[1].usd - a[1].usd)
-  const total = sumUsd(Object.values(costs))
   const subs = lastPrompt ? subagentCount(lastPrompt) : 0
   const nowColor = now ? colorOf(now.route) : 'subtle'
 
   return (
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="row" justifyContent="space-between" alignItems="center">
-        <Text bold color="claude">⚙ Model Router</Text>
+        <Text bold color="claude">⚙ Routes</Text>
         <Box flexDirection="row" gap={1} alignItems="center">
           <Text color={cfg.isEnabled ? 'success' : 'subtle'}>{cfg.isEnabled ? '● on' : '○ off'}</Text>
           <Button key="toggle" label={cfg.isEnabled ? 'Turn off' : 'Turn on'} onPress={toggle} />
         </Box>
-      </Box>
-
-      <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
-        <Box flexDirection="column" flexShrink={1}>
-          <Text>
-            Learn mode <Text color={cfg.isLearning ? 'success' : 'subtle'}>{cfg.isLearning ? '● on' : '○ off'}</Text>
-          </Text>
-          {cfg.isLearning ? null : <Text dimColor>explains cache misses and model costs with your own numbers, when they happen</Text>}
-        </Box>
-        <Box flexDirection="row" gap={1} flexShrink={0}>
-          <Button key="learn-toggle" label={cfg.isLearning ? 'Turn off' : 'Turn on'} onPress={() => setLearning(!cfg.isLearning)} />
-          <Button key="learn-open" label="Open" onPress={openLearn} />
-        </Box>
-      </Box>
-
-      <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
-        <Box flexDirection="column" flexShrink={1}>
-          <Text>
-            Handoffs <Text color={cfg.isHandoffs ? 'success' : 'subtle'}>{cfg.isHandoffs ? '● on' : '○ off'}</Text>
-          </Text>
-          {cfg.isHandoffs ? null : <Text dimColor>counts open handoffs in the band and lets auto-handoff run</Text>}
-        </Box>
-        <Box flexDirection="row" gap={1} flexShrink={0}>
-          <Button key="handoffs-toggle" label={cfg.isHandoffs ? 'Turn off' : 'Turn on'} onPress={() => setHandoffs(!cfg.isHandoffs)} />
-          <Button key="handoffs-open" label="Open" onPress={openHandoffs} />
-        </Box>
-      </Box>
-
-      {cfg.isHandoffs ? (
-        <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1} paddingLeft={2}>
-          <Box flexDirection="column" flexShrink={1}>
-            <Text>
-              Auto-handoff <Text color={cfg.autoHandoff ? 'success' : 'subtle'}>{cfg.autoHandoff ? '● on' : '○ off'}</Text>
-            </Text>
-            {cfg.autoHandoff ? null : <Text dimColor>saves a handoff while the cache is warm, before it goes cold with work open</Text>}
-          </Box>
-          <Button key="handoff-toggle" label={cfg.autoHandoff ? 'Turn off' : 'Turn on'} onPress={() => setAutoHandoff(!cfg.autoHandoff)} />
-        </Box>
-      ) : null}
-
-      <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
-        <Box flexDirection="column" flexShrink={1}>
-          <Text>
-            Next-step advice <Text color={cfg.showNext ? 'success' : 'subtle'}>{cfg.showNext ? '● on' : '○ off'}</Text>
-          </Text>
-          <Text dimColor>shows next /clear, /compact or /handoff in the band when carrying on is not the best move</Text>
-        </Box>
-        <Button key="next-toggle" label={cfg.showNext ? 'Turn off' : 'Turn on'} onPress={() => setShowNext(!cfg.showNext)} />
-      </Box>
-
-      <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
-        <Box flexDirection="column" flexShrink={1}>
-          <Text>
-            Band <Text color={isBand ? 'success' : 'subtle'}>{isBand ? '● shown' : '○ hidden'}</Text>
-          </Text>
-          <Text dimColor>the route, cache and cost lines above the prompt; routing works either way</Text>
-        </Box>
-        <Button key="band-toggle" label={isBand ? 'Hide' : 'Show'} onPress={() => setBand(!isBand)} />
       </Box>
 
       <Box flexDirection="column" borderStyle="round" borderColor={nowColor} paddingX={1}>
@@ -292,26 +329,7 @@ export function routesPaneView(els: InputEls, data: PaneData, actions: PaneActio
         </Box>
       )}
 
-      <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
-        <Box flexDirection="row" justifyContent="space-between">
-          <Text bold dimColor>SPEND THIS SESSION</Text>
-          <Text bold>{money(total)}</Text>
-        </Box>
-        {spendRows.length === 0 && <Text dimColor>No requests yet.</Text>}
-        <Box flexDirection="column" gap={1}>
-          {spendRows.map(([route, one]) =>
-            ledgerRow(els, {
-              key: `s:${route}`,
-              route,
-              name: routeLabel(route),
-              usd: one.usd,
-              share: shareOf(one.usd, total),
-              sub: [tokenLine(one)],
-            }),
-          )}
-        </Box>
-        <Text dimColor>estimate · prices as of {PRICES_AS_OF} · cache writes at the {ttlMinutes === 60 ? '1-hour (2× input)' : '5-minute (1.25× input)'} rate</Text>
-      </Box>
+      {settingsSection(els, data, actions)}
     </Box>
   )
 }

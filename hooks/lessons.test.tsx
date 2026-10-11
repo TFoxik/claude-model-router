@@ -5,6 +5,7 @@ import {
   CONCEPTS,
   HABITS,
   TOPICS,
+  awayOptions,
   awayText,
   byKind,
   capLessons,
@@ -227,6 +228,17 @@ test('awayText prices the ways to step away for this session', () => {
   expect(awayText({ tokens: 200_000, model: 'gpt-x', ttlMinutes: 60, warmMinutes: 10 })).toMatch(/^No prices for gpt-x\./)
 })
 
+test('awayOptions gives the same ways to step away as rows, and none when cold or unpriced', () => {
+  const warm = awayOptions({ tokens: 200_000, model: opus, ttlMinutes: 60, warmMinutes: 42 })
+  expect(warm.header).toBe('200k tokens of context on Opus 5.5, cache warm for 42m more (60-minute TTL).')
+  expect(warm.rows.map(one => one.name)).toEqual(['Note + /clear', '/compact', '/rename, /resume', 'Keep warm', 'Do nothing'])
+  expect(warm.rows[1]).toMatchObject({ now: 'now ≈ $0.12', back: 'on return ≈ $0.03' })
+  expect(warm.notes).toHaveLength(1)
+  const cold = awayOptions({ tokens: 200_000, model: opus, ttlMinutes: 60, warmMinutes: 0 })
+  expect([cold.rows.length, cold.notes.length]).toEqual([0, 1])
+  expect(awayOptions({ tokens: 200_000, model: 'gpt-x', ttlMinutes: 60, warmMinutes: 10 })).toMatchObject({ rows: [], notes: [] })
+})
+
 test('advice teaches when a commit makes clearing the better move, once', () => {
   const advice = adviseSession({ tokens: 200_000, window: 1_000_000, model: opus, ttlMinutes: 60, warmMinutes: 40, boundary: 'commit' })
   expect(lessonFromAdvice({ verdict: 'continue', reason: 'fine' }, advice)).toEqual({ kind: 'strategy', usd: advice.perRequestUsd, fact: advice.text })
@@ -256,9 +268,9 @@ test('exploration and auto-handoff lessons carry their numbers', () => {
   expect(lessonFromAutoHandoff({ spentUsd: 0.04, avoidedUsd: 0.52, tokens: 140_000, path: '~/.claude/handoffs/r/x.md' })).toEqual({
     kind: 'auto-handoff',
     usd: 0.48,
-    fact: 'Saved a handoff to ~/.claude/handoffs/r/x.md for $0.04 before the cache went cold. Resending 140k tokens cold would have cost $0.52. /route handoff off turns this off.',
+    fact: 'Saved a handoff to ~/.claude/handoffs/r/x.md for $0.04 before the cache went cold. Resending 140k tokens cold would have cost $0.52. /route handoffs auto off turns this off.',
   })
-  expect(lessonFromAutoHandoff({ spentUsd: 0, avoidedUsd: 0, tokens: 140_000, path: 'x.md' }).fact).toBe('Saved a handoff to x.md before the cache went cold. /route handoff off turns this off.')
+  expect(lessonFromAutoHandoff({ spentUsd: 0, avoidedUsd: 0, tokens: 140_000, path: 'x.md' }).fact).toBe('Saved a handoff to x.md before the cache went cold. /route handoffs auto off turns this off.')
 })
 
 test('every lesson kind has a concept, and the habits are the three agreed', () => {

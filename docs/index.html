@@ -180,7 +180,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
     <p class="lead">The right model for each job, and the bill before you pay it.</p>
     <ul class="what">
       <li><b>Routes models by kind of work.</b> Opus plans, Sonnet edits, Haiku searches: plan mode, normal work and each subagent type get their own model and effort.</li>
-      <li><b>Shows the cost as you go.</b> Cache health, context, last prompt and plan limits above the prompt; today's spend below it.</li>
+      <li><b>Shows the cost as you go.</b> Cache health, context, last prompt, session total and plan limits above the prompt; today's spend below it.</li>
       <li><b>Says when to compact or clear.</b> After a commit, near auto-compact or on a cold cache, the band says what to do next, with the reason in dollars.</li>
       <li><b>Spots what you don't use.</b> MCP servers and plugins a repo never touches, with the exact setting that turns each off there.</li>
       <li><b>Stops the expensive send.</b> When the cache has gone cold over a big context, your next message is held once with its price.</li>
@@ -197,8 +197,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
     <a href="#footer">Footer</a>
     <a href="#routes">Routes pane</a>
     <a href="#draft">Draft &amp; Apply</a>
-    <a href="#stats">Stats</a>
-    <a href="#last">Last prompt</a>
+    <a href="#cost">Cost</a>
     <a href="#context">Context</a>
     <a href="#guard">Cold-send guard</a>
     <a href="#learn">Learn mode</a>
@@ -213,7 +212,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
     <div class="part-head">
       <div class="where">above the prompt box</div>
       <h2>The band</h2>
-      <p>Three lines that sit above where you type. The top line is about routing, the second about the health of the session; both update after every request. The third, right-aligned, holds every button, so the band keeps its height and the text lines share one left edge.</p>
+      <p>Three lines that sit above where you type. The top line is about routing, the second about the health and cost of the session; both update after every request. The third, right-aligned, holds every button, so the band keeps its height and the text lines share one left edge.</p>
     </div>
     <div class="grid wide">
       <div class="pane mono scroll">
@@ -223,41 +222,38 @@ td .ex { color: var(--muted); font-size: 13.5px; }
               <span class="zone inl" data-z="b1"><span class="pin">1</span><span class="main b">▸ main · Opus 5.5 medium</span></span>
               <span class="dim">│</span>
               <span class="zone inl" data-z="b2"><span class="pin">2</span><span class="plan">plan</span><span class="dim"> Opus high · </span><span class="main">main</span><span class="dim"> Opus medium · </span><span class="sub">sub</span><span class="dim"> Sonnet high</span></span>
-              <span class="dim">·</span>
-              <span class="zone inl" data-z="b3"><span class="pin">3</span><span class="dim">$3.68</span></span>
-              <span class="zone inl" data-z="b4"><span class="pin">4</span><span class="warn">● draft</span></span>
+              <span class="zone inl" data-z="b3"><span class="pin">3</span><span class="warn">● draft</span></span>
             </div>
             <div>
-              <span class="zone inl" data-z="b5"><span class="pin">5</span><span class="dim">cache </span><span class="ok">96%</span><span class="dim"> 42m</span></span>
+              <span class="zone inl" data-z="b4"><span class="pin">4</span><span class="dim">cache </span><span class="ok">96%</span><span class="dim"> 42m</span></span>
               <span class="dim">·</span>
-              <span class="zone inl" data-z="b6"><span class="pin">6</span><span class="dim">context </span><span class="ok">31%</span></span>
+              <span class="zone inl" data-z="b5"><span class="pin">5</span><span class="dim">context </span><span class="ok">31%</span></span>
               <span class="dim">·</span>
-              <span class="zone inl" data-z="b7"><span class="pin">7</span><span class="dim">last $0.05</span></span>
+              <span class="zone inl" data-z="b6"><span class="pin">6</span><span class="dim">last $0.05 · session $3.68</span></span>
               <span class="dim">·</span>
-              <span class="zone inl" data-z="b8"><span class="pin">8</span><span class="dim">5h </span><span class="warn">74%</span><span class="dim"> · 7d 12%</span></span>
+              <span class="zone inl" data-z="b7"><span class="pin">7</span><span class="dim">5h </span><span class="warn">74%</span><span class="dim"> · 7d 12%</span></span>
             </div>
           </div>
           <div class="btns">
-            <span class="zone inl" data-z="b12"><span class="pin">12</span><span class="main">Handoffs ●1</span></span>
-            <span class="zone inl" data-z="b10"><span class="pin">10</span><span class="main">Learn ●2</span></span>
-            <span class="zone inl" data-z="b11"><span class="pin">11</span><span class="primary">next /clear</span></span>
-            <span class="zone inl" data-z="b9"><span class="pin">9</span><span class="dim">Context</span> &nbsp;<span class="dim">Last</span> &nbsp;<span>Routes</span></span>
+            <span class="zone inl" data-z="b8"><span class="pin">8</span><span class="main">Handoffs ●1</span></span>
+            <span class="zone inl" data-z="b9"><span class="pin">9</span><span class="main">Learn ●2</span></span>
+            <span class="zone inl" data-z="b10"><span class="pin">10</span><span class="primary">next /clear</span></span>
+            <span class="zone inl" data-z="b11"><span class="pin">11</span><span class="dim">Context</span> &nbsp;<span class="dim">Cost</span> &nbsp;<span>Routes</span></span>
           </div>
         </div>
       </div>
       <div class="notes" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));">
         <div class="note" data-z="b1"><span class="n">1</span><h3>Current route</h3><div class="body"><p>The route the last request went through and the model and effort it got. Orange is normal work, green is plan mode, blue is a subagent. It says <code>router off</code> when routing is off, and <code>(held)</code> when <code>auto</code> effort kept the current level so it wouldn't rebuild the cache.</p></div></div>
         <div class="note" data-z="b2"><span class="n">2</span><h3>Configured routes</h3><div class="body"><p>A short summary of what plan mode, normal work and subagents are set to.</p></div></div>
-        <div class="note" data-z="b3"><span class="n">3</span><h3>Session total</h3><div class="body"><p>Estimated spend in this session so far, across all routes.</p></div></div>
-        <div class="note" data-z="b4"><span class="n">4</span><h3>Draft marker</h3><div class="body"><p>Appears while you have unapplied changes in the Routes pane.</p></div></div>
-        <div class="note" data-z="b5"><span class="n">5</span><h3>Cache</h3><div class="body"><p><b>96%</b> is how much of the last request was read from the prompt cache (green above 80%, yellow above 50%, red below). <b>42m</b> is how long the cache stays warm; it turns yellow in the last 5 minutes. Once it runs out it shows <span class="m">cold $1.60</span>: what your next send would cost to rebuild the cache.</p></div></div>
-        <div class="note" data-z="b6"><span class="n">6</span><h3>Context</h3><div class="body"><p>How full the context window is. Green until 60% of the way to auto-compaction, yellow to 85%, red after. <b>Context</b> on the last line opens the <a href="#context">Context pane</a>.</p></div></div>
-        <div class="note" data-z="b7"><span class="n">7</span><h3>Last prompt cost</h3><div class="body"><p>What your whole last prompt cost, including every subagent it started. It grows live while the prompt runs. <b>Last</b> on the last line opens the <a href="#last">Last prompt pane</a>.</p></div></div>
-        <div class="note" data-z="b8"><span class="n">8</span><h3>Usage limits</h3><div class="body"><p>How much of your 5-hour and 7-day plan limits is used. Yellow from 70%, red from 90%.</p></div></div>
-        <div class="note" data-z="b9"><span class="n">9</span><h3>Context / Last / Routes</h3><div class="body"><p>Open the <a href="#context">Context pane</a>, the <a href="#last">Last prompt pane</a> and the <a href="#routes">Routes pane</a>. To hide the band, use its <b>Band</b> row or <code>/route band off</code>; it is kept off the band so a stray click can't hide it.</p></div></div>
-        <div class="note" data-z="b11"><span class="n">11</span><h3>Next step</h3><div class="body"><p>Only when carrying on is not the best move. <b>next /clear</b> after a <code>git commit</code> or a pull request over 50k tokens or more, until your next prompt; once a plan is written to disk (implement it in a fresh context); after two corrections in a row; once the cache has gone cold over a big context; or after an auto-handoff was saved. <b>next /handoff</b> (or <b>next handoff</b> without the skill) instead of clearing after a commit or compacting, when two or more todos or tasks are still open. <b>next /compact</b> within 15% of auto-compact, or when the conversation is most of a context that is 60% of the way there. A highlighted button on the last line; click it for the reason, priced, at the top of the <a href="#context">Context pane</a>'s tips. It shows with learn mode on or off; <code>/route next off</code> hides it and the Context pane's advice tip.</p></div></div>
-        <div class="note" data-z="b10"><span class="n">10</span><h3>Learn</h3><div class="body"><p>Only while <a href="#learn">learn mode</a> is on and there are lessons you haven't opened: the number is how many, counted in the Learn pane's scope (this repo, or all repos). Click it for the Learn pane.</p></div></div>
-        <div class="note" data-z="b12"><span class="n">12</span><h3>Handoffs</h3><div class="body"><p>Only when other sessions left handoffs open in this repo, until you open the <a href="#handoffs">Handoffs pane</a>. Never shown while handoffs are off (<code>/route handoffs off</code>).</p></div></div>
+        <div class="note" data-z="b3"><span class="n">3</span><h3>Draft marker</h3><div class="body"><p>Appears while you have unapplied changes in the Routes pane.</p></div></div>
+        <div class="note" data-z="b4"><span class="n">4</span><h3>Cache</h3><div class="body"><p><b>96%</b> is how much of the last request was read from the prompt cache (green above 80%, yellow above 50%, red below). <b>42m</b> is how long the cache stays warm; it turns yellow in the last 5 minutes. Once it runs out it shows <span class="m">cold $1.60</span>: what your next send would cost to rebuild the cache.</p></div></div>
+        <div class="note" data-z="b5"><span class="n">5</span><h3>Context</h3><div class="body"><p>How full the context window is. Green until 60% of the way to auto-compaction, yellow to 85%, red after. <b>Context</b> on the last line opens the <a href="#context">Context pane</a>.</p></div></div>
+        <div class="note" data-z="b6"><span class="n">6</span><h3>Last prompt and session cost</h3><div class="body"><p><b>last</b> is what your whole last prompt cost, including every subagent it started. It grows live while the prompt runs. <b>session</b> is the estimated spend in this session so far, across all routes. <b>Cost</b> on the last line opens the <a href="#cost">Cost pane</a> on its Last prompt tab.</p></div></div>
+        <div class="note" data-z="b7"><span class="n">7</span><h3>Usage limits</h3><div class="body"><p>How much of your 5-hour and 7-day plan limits is used. Yellow from 70%, red from 90%.</p></div></div>
+        <div class="note" data-z="b8"><span class="n">8</span><h3>Handoffs</h3><div class="body"><p>Only when other sessions left handoffs open in this repo, until you open the <a href="#handoffs">Handoffs pane</a>. Never shown while handoffs are off (<code>/route handoffs off</code>).</p></div></div>
+        <div class="note" data-z="b9"><span class="n">9</span><h3>Learn</h3><div class="body"><p>Only while <a href="#learn">learn mode</a> is on and there are lessons you haven't opened: the number is how many, counted in the Learn pane's scope (this repo, or all repos). Click it for the Learn pane.</p></div></div>
+        <div class="note" data-z="b10"><span class="n">10</span><h3>Next step</h3><div class="body"><p>Only when carrying on is not the best move. <b>next /clear</b> after a <code>git commit</code> or a pull request over 50k tokens or more, until your next prompt; once a plan is written to disk (implement it in a fresh context); after two corrections in a row; once the cache has gone cold over a big context; or after an auto-handoff was saved. <b>next /handoff</b> (or <b>next handoff</b> without the skill) instead of clearing after a commit or compacting, when two or more todos or tasks are still open. <b>next /compact</b> within 15% of auto-compact, or when the conversation is most of a context that is 60% of the way there. A highlighted button on the last line; click it for the reason, priced, at the top of the <a href="#context">Context pane</a>'s tips. It shows with learn mode on or off; <code>/route next off</code> hides it and the Context pane's advice tip.</p></div></div>
+        <div class="note" data-z="b11"><span class="n">11</span><h3>Context / Cost / Routes</h3><div class="body"><p>Open the <a href="#context">Context pane</a>, the <a href="#cost">Cost pane</a> and the <a href="#routes">Routes pane</a>. To hide the band, use the <b>Band</b> row in Routes or <code>/route band off</code>; it is kept off the band so a stray click can't hide it.</p></div></div>
       </div>
     </div>
   </section>
@@ -280,7 +276,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
         </div>
       </div>
       <div class="notes">
-        <div class="note" data-z="f1"><span class="n">1</span><h3>Today's spend</h3><div class="body"><p>What you have spent today, across every session in every repo. Click it to open <a href="#stats">Stats</a>.</p></div></div>
+        <div class="note" data-z="f1"><span class="n">1</span><h3>Today's spend</h3><div class="body"><p>What you have spent today, across every session in every repo. Click it to open <a href="#cost">Cost</a> on its History tab.</p></div></div>
       </div>
     </div>
   </section>
@@ -290,36 +286,32 @@ td .ex { color: var(--muted); font-size: 13.5px; }
     <div class="part-head">
       <div class="where">/route · or Routes in the band</div>
       <h2>The Routes pane</h2>
-      <p>Where you choose the model and effort for each kind of work, and see what the session has cost per route.</p>
+      <p>Where you choose the model and effort for each kind of work, and the settings for everything else, in a box at the bottom. What the session has cost per route is in <a href="#cost">Cost</a> › Session.</p>
     </div>
     <div class="grid">
       <div class="stick">
         <div class="pane">
-          <div class="titlebar"><span>Model router</span><span>⤢ ✕</span></div>
+          <div class="titlebar"><span>Routes</span><span>⤢ ✕</span></div>
           <div class="zone" data-z="r1"><span class="pin">1</span>
-            <div class="row"><span class="main b">⚙ Model Router</span><span><span class="ok">● on</span> &nbsp;<span class="btn">Turn off</span></span></div>
+            <div class="row"><span class="main b">⚙ Routes</span><span><span class="ok">● on</span> &nbsp;<span class="btn">Turn off</span></span></div>
           </div>
           <div class="zone" data-z="r2"><span class="pin">2</span>
-            <div class="row"><span>Learn mode <span class="dim">○ off</span></span><span><span class="btn">Turn on</span> <span class="btn">Open</span></span></div>
-            <div class="dim">explains cache misses and model costs with your own numbers, when they happen</div>
-          </div>
-          <div class="zone" data-z="r3"><span class="pin">3</span>
             <div class="live">
               <div class="row"><span class="main b">▸ main&nbsp; Opus 5.5 medium</span><span class="dim">$3.68</span></div>
               <div class="dim">plan mode off · context 76k tokens · plan toggle ≈ $0.59</div>
               <div class="dim">last prompt $0.42 · 4 requests · 2 subagents</div>
             </div>
           </div>
-          <div class="zone" data-z="r4"><span class="pin">4</span>
+          <div class="zone" data-z="r3"><span class="pin">3</span>
             <div class="row"><span class="label">PRESET</span><span class="sel">Mine</span></div>
           </div>
           <div class="box">
-            <div class="zone" data-z="r5"><span class="pin">5</span>
+            <div class="zone" data-z="r4"><span class="pin">4</span>
               <div class="label">MAIN LOOP</div>
               <div class="rrow"><span class="plan b">&nbsp;&nbsp;Plan mode</span><span class="sel">Opus</span><span class="sel">high</span></div>
               <div class="rrow"><span class="main b">▸ Normal work</span><span class="sel">Opus</span><span class="sel">medium</span></div>
             </div>
-            <div class="zone" data-z="r6" style="margin-top:8px"><span class="pin">6</span>
+            <div class="zone" data-z="r5" style="margin-top:8px"><span class="pin">5</span>
               <div class="label">SUBAGENTS</div>
               <div class="rrow"><span class="sub b">&nbsp;&nbsp;Default</span><span class="sel">Sonnet</span><span class="sel">high</span></div>
               <div class="rrow"><span class="child">└ Explore</span><span class="sel">inherit</span><span class="sel">inherit</span></div>
@@ -328,29 +320,34 @@ td .ex { color: var(--muted); font-size: 13.5px; }
               <div class="rrow"><span class="child">└ Workflow</span><span class="sel">inherit</span><span class="sel">inherit</span></div>
               <div class="rrow"><span class="child">└ Teammates</span><span class="sel">inherit</span><span class="sel">inherit</span></div>
             </div>
-            <div class="zone dim" data-z="r7" style="margin-top:8px"><span class="pin">7</span>inherit → falls back to the row above, then the session · forks always use the parent's model</div>
+            <div class="zone dim" data-z="r6" style="margin-top:8px"><span class="pin">6</span>inherit → falls back to the row above, then the session · forks always use the parent's model</div>
           </div>
-          <div class="zone dim" data-z="r8"><span class="pin">8</span>Changes above are a draft until you press Apply.</div>
-          <div class="zone" data-z="r9"><span class="pin">9</span>
-            <div class="box tab">
-              <div class="row b"><span class="label">SPEND THIS SESSION</span><span>$3.68</span></div>
-              <div class="row"><span class="main"><span class="dot" style="background:var(--p-main)"></span>Normal work</span><span><span class="b">$2.95</span> &nbsp; 80%</span></div>
-              <div class="dim ind">21 req · in 8k · cache 3.2M/180k · out 42k</div>
-              <div class="row"><span class="sub"><span class="dot" style="background:var(--p-sub)"></span>General</span><span><span class="b">$0.73</span> &nbsp; 20%</span></div>
-              <div class="dim ind">34 req · in 41k · cache 610k/80k · out 21k</div>
-              <div class="dim">estimate · prices as of 2026-10-06 · cache writes at the 1-hour (2× input) rate</div>
+          <div class="zone dim" data-z="r7"><span class="pin">7</span>Changes above are a draft until you press Apply.</div>
+          <div class="box" style="gap:10px">
+            <div class="label">SETTINGS</div>
+            <div style="display:grid; gap:8px">
+              <div class="main b">Coaching</div>
+              <div class="zone row" data-z="r8"><span class="pin">8</span><span style="min-width:0">Learn mode <span class="dim">○ off</span><br><span class="dim">explains cache misses and model costs with your own numbers, when they happen</span></span><span style="display:flex; gap:6px"><span class="btn">Turn on</span><span class="btn">Open</span></span></div>
+              <div class="zone row" data-z="r9"><span class="pin">9</span><span>Next-step advice <span class="ok">● on</span></span><span class="btn">Turn off</span></div>
+            </div>
+            <div style="display:grid; gap:8px">
+              <div class="main b">Handoffs</div>
+              <div class="zone row" data-z="r10"><span class="pin">10</span><span>Handoffs <span class="ok">● on</span></span><span style="display:flex; gap:6px"><span class="btn">Turn off</span><span class="btn">Open</span></span></div>
+              <div class="zone row child" data-z="r11"><span class="pin">11</span><span style="min-width:0">Auto-handoff <span class="dim">○ off</span><br><span class="dim">saves a handoff while the cache is warm, before it goes cold with work open</span></span><span class="btn">Turn on</span></div>
+            </div>
+            <div style="display:grid; gap:8px">
+              <div class="main b">Cache and display</div>
+              <div class="zone row" data-z="r12"><span class="pin">12</span><span style="min-width:0">Cold-cache guard<br><span class="dim">a send onto a cold cache: held once with its price, sent with it, or not checked</span></span><span class="sel">refuse</span></div>
+              <div class="zone row" data-z="r13"><span class="pin">13</span><span style="min-width:0">Cache lifetime<br><span class="dim">the prompt-cache TTL the warm/cold timer counts down</span></span><span class="sel">60 min</span></div>
+              <div class="zone row" data-z="r14"><span class="pin">14</span><span style="min-width:0">Keep prompt text <span class="ok">● on</span><br><span class="dim">the first 120 characters of each prompt, for Cost › History; off also removes text already kept</span></span><span class="btn">Turn off</span></div>
+              <div class="zone row" data-z="r15"><span class="pin">15</span><span style="min-width:0">Band <span class="ok">● shown</span><br><span class="dim">the route, cache and cost lines above the prompt; routing works either way</span></span><span class="btn">Hide</span></div>
             </div>
           </div>
         </div>
       </div>
       <div class="notes">
         <div class="note" data-z="r1"><span class="n">1</span><h3>On / off</h3><div class="body"><p><b>● on</b> means the router picks the model and effort for every request. <b>Turn off</b> stops that, and everything uses the session's own model. Cost tracking, the band and the cold-send guard keep working either way. Same as <code>/route on</code> / <code>/route off</code>.</p></div></div>
-        <div class="note" data-z="r2"><span class="n">2</span><h3>Learn mode</h3><div class="body"><p>Off by default. <b>Turn on</b> starts the lessons described in <a href="#learn">Learn mode</a>; the line under it disappears and the button becomes <b>Turn off</b>. <b>Open</b> shows the Learn pane. Same as <code>/route learn on</code> / <code>off</code>.</p></div></div>
-        <div class="note"><h3>Handoffs</h3><div class="body"><p>On by default. <b>Turn off</b> switches the whole feature off: no <b>Handoffs ●N</b> in the band and no auto-handoff, while handoffs you save with <code>/handoff</code> stay listed. <b>Open</b> shows the <a href="#handoffs">Handoffs pane</a>. Same as <code>/route handoffs on</code> / <code>off</code>.</p></div></div>
-        <div class="note"><h3>Auto-handoff</h3><div class="body"><p>Shown under Handoffs while it is on. Off by default. When on, and the cache is in its last minutes with two or more steps open or a plan not yet started, model-router asks Claude for a handoff while the cache is still warm and saves the reply under <code>~/.claude/handoffs/&lt;repo&gt;/</code>. It waits while you type or anything runs, goes once per prompt, and never clears the session. Same as <code>/route handoff on</code> / <code>off</code>.</p></div></div>
-        <div class="note"><h3>Next-step advice</h3><div class="body"><p>On by default. Shows <b>next /clear</b>, <b>next /compact</b> or <b>next /handoff</b> in the band when carrying on is not the best move, with the reason at the top of the Context pane's tips. <b>Turn off</b> hides both, and learn mode stops teaching from that advice. Same as <code>/route next on</code> / <code>off</code>.</p></div></div>
-        <div class="note"><h3>Band</h3><div class="body"><p>Shown by default. <b>Hide</b> takes the <a href="#band">band</a> away from above the prompt; routing, the guard and cost tracking keep working. Same as <code>/route band off</code> / <code>on</code>.</p></div></div>
-        <div class="note" data-z="r3"><span class="n">3</span><h3>What is running now</h3><div class="body"><dl>
+        <div class="note" data-z="r2"><span class="n">2</span><h3>What is running now</h3><div class="body"><dl>
           <dt>▸ main Opus 5.5 medium</dt><dd>The route of the most recent request, with its model and effort.</dd>
           <dt>$3.68</dt><dd>Estimated session total.</dd>
           <dt>plan mode off</dt><dd>Whether plan mode is on. While it's on, the main loop uses the Plan mode row.</dd>
@@ -358,9 +355,9 @@ td .ex { color: var(--muted); font-size: 13.5px; }
           <dt>plan toggle ≈ $0.59</dt><dd>Plan mode and Normal work use different settings here, so each switch rebuilds the cache at this cost. When both rows match, it says <code>plan toggle keeps cache</code>.</dd>
           <dt>last prompt $0.42</dt><dd>Cost of your last prompt, its requests and any subagents it started.</dd>
         </dl></div></div>
-        <div class="note" data-z="r4"><span class="n">4</span><h3>Preset</h3><div class="body"><p>A ready-made set of routes. It shows <b>Custom</b> once you change any row yourself. The presets are listed <a href="#commands">at the end</a>.</p></div></div>
-        <div class="note" data-z="r5"><span class="n">5</span><h3>Main loop</h3><div class="body"><p>The model that talks to you directly. <b>Plan mode</b> is used while plan mode is on, <b>Normal work</b> the rest of the time. Each row has a model (Opus, Sonnet, Haiku, Fable, inherit) and an effort (low to max, inherit, or <code>auto</code>).</p><p><code>auto</code> exists only here: it sends the start of each prompt to Haiku, which rates it trivial, standard or hard, and the effort follows. Changing a main-loop row rebuilds the prompt cache once, because a cache belongs to one model and effort. ▸ marks the live row.</p></div></div>
-        <div class="note" data-z="r6"><span class="n">6</span><h3>Subagents</h3><div class="body"><p>Helpers Claude starts. They begin with an empty context, so sending them to a cheaper model costs nothing up front.</p><dl>
+        <div class="note" data-z="r3"><span class="n">3</span><h3>Preset</h3><div class="body"><p>A ready-made set of routes. It shows <b>Custom</b> once you change any row yourself. The presets are listed <a href="#commands">at the end</a>.</p></div></div>
+        <div class="note" data-z="r4"><span class="n">4</span><h3>Main loop</h3><div class="body"><p>The model that talks to you directly. <b>Plan mode</b> is used while plan mode is on, <b>Normal work</b> the rest of the time. Each row has a model (Opus, Sonnet, Haiku, Fable, inherit) and an effort (low to max, inherit, or <code>auto</code>).</p><p><code>auto</code> exists only here: it sends the start of each prompt to Haiku, which rates it trivial, standard or hard, and the effort follows. Changing a main-loop row rebuilds the prompt cache once, because a cache belongs to one model and effort. ▸ marks the live row.</p></div></div>
+        <div class="note" data-z="r5"><span class="n">5</span><h3>Subagents</h3><div class="body"><p>Helpers Claude starts. They begin with an empty context, so sending them to a cheaper model costs nothing up front.</p><dl>
           <dt>Default</dt><dd>Every subagent, unless a row below overrides it.</dd>
           <dt>Explore</dt><dd>The read-only codebase search agent.</dd>
           <dt>Plan agent</dt><dd>The agent that drafts implementation plans (separate from plan mode).</dd>
@@ -368,14 +365,16 @@ td .ex { color: var(--muted); font-size: 13.5px; }
           <dt>Workflow</dt><dd>Agents started by a multi-agent workflow.</dd>
           <dt>Teammates</dt><dd>Agents running as teammates.</dd>
         </dl><p>Other agent types use Default. Give one its own route with <code>/route set sub:&lt;agent-type&gt; haiku low</code>.</p></div></div>
-        <div class="note" data-z="r7"><span class="n">7</span><h3>How inherit works</h3><div class="body"><p><code>inherit</code> means “use the row above”. Model and effort are looked up separately, walking up until a real value is found, then falling back to the session.</p><div class="chain">Plan mode → Normal work → session</div><div class="chain">Explore / Plan agent / General / Workflow / Teammates → Default → session</div><p><b>Forks</b>, background copies of the current conversation, always use the parent's model.</p></div></div>
-        <div class="note" data-z="r8"><span class="n">8</span><h3>Draft notice</h3><div class="body"><p>Changing a drop-down doesn't take effect yet. Once you change something, this line becomes the Draft box shown <a href="#draft">below</a>.</p></div></div>
-        <div class="note" data-z="r9"><span class="n">9</span><h3>Spend this session</h3><div class="body"><p>Spend per route, most expensive first, with each route's share.</p><dl>
-          <dt>21 req</dt><dd>Requests sent on that route.</dd>
-          <dt>in 8k</dt><dd>Input tokens not served from the cache (full input price).</dd>
-          <dt>cache 1.4M/96k</dt><dd>Tokens read from the cache (a tenth of the input price or less) / written to it (2× input with the 1-hour cache). A big first number and a small second one means the cache is doing its job.</dd>
-          <dt>out 18k</dt><dd>Tokens the model wrote.</dd>
-        </dl><p>All costs are estimates from prices built into the mod. Cache writes are priced for the cache lifetime set with <code>/route ttl 5|60</code>.</p></div></div>
+        <div class="note" data-z="r6"><span class="n">6</span><h3>How inherit works</h3><div class="body"><p><code>inherit</code> means “use the row above”. Model and effort are looked up separately, walking up until a real value is found, then falling back to the session.</p><div class="chain">Plan mode → Normal work → session</div><div class="chain">Explore / Plan agent / General / Workflow / Teammates → Default → session</div><p><b>Forks</b>, background copies of the current conversation, always use the parent's model.</p></div></div>
+        <div class="note" data-z="r7"><span class="n">7</span><h3>Draft notice</h3><div class="body"><p>Changing a drop-down above doesn't take effect yet. Once you change something, this line becomes the Draft box shown <a href="#draft">below</a>. The settings under it don't use the draft: each one applies at once.</p></div></div>
+        <div class="note" data-z="r8"><span class="n">8</span><h3>Learn mode</h3><div class="body"><p>Settings › Coaching. Off by default. <b>Turn on</b> starts the lessons described in <a href="#learn">Learn mode</a>; the line under it disappears and the button becomes <b>Turn off</b>. <b>Open</b> shows the Learn pane. Same as <code>/route learn on</code> / <code>off</code>.</p></div></div>
+        <div class="note" data-z="r9"><span class="n">9</span><h3>Next-step advice</h3><div class="body"><p>Settings › Coaching. On by default. Shows <b>next /clear</b>, <b>next /compact</b> or <b>next /handoff</b> in the band when carrying on is not the best move, with the reason at the top of the Context pane's tips. <b>Turn off</b> hides both, and learn mode stops teaching from that advice. Same as <code>/route next on</code> / <code>off</code>.</p></div></div>
+        <div class="note" data-z="r10"><span class="n">10</span><h3>Handoffs</h3><div class="body"><p>Settings › Handoffs. On by default. <b>Turn off</b> switches the whole feature off: no <b>Handoffs ●N</b> in the band and no auto-handoff, while handoffs you save with <code>/handoff</code> stay listed. <b>Open</b> shows the <a href="#handoffs">Handoffs pane</a>. Same as <code>/route handoffs on</code> / <code>off</code>.</p></div></div>
+        <div class="note" data-z="r11"><span class="n">11</span><h3>Auto-handoff</h3><div class="body"><p>Indented under Handoffs, and shown only while Handoffs is on. Off by default. When on, and the cache is in its last minutes with two or more steps open or a plan not yet started, model-router asks Claude for a handoff while the cache is still warm and saves the reply under <code>~/.claude/handoffs/&lt;repo&gt;/</code>. It waits while you type or anything runs, goes once per prompt, and never clears the session. Same as <code>/route handoffs auto on</code> / <code>off</code>.</p></div></div>
+        <div class="note" data-z="r12"><span class="n">12</span><h3>Cold-cache guard</h3><div class="body"><p>Settings › Cache and display. What a send onto a cold cache does: <b>refuse</b> holds it once with its price (the default), <b>warn</b> sends it with the price shown, <b>off</b> doesn't check. See <a href="#guard">Cold-send guard</a>. Same as <code>/route guard refuse|warn|off</code>.</p></div></div>
+        <div class="note" data-z="r13"><span class="n">13</span><h3>Cache lifetime</h3><div class="body"><p><b>60 min</b> (the default) or <b>5 min</b>: the prompt-cache lifetime that the band's warm/cold timer counts down and that cache writes are priced at. Same as <code>/route ttl 5|60</code>.</p></div></div>
+        <div class="note" data-z="r14"><span class="n">14</span><h3>Keep prompt text</h3><div class="body"><p>On by default: the first 120 characters of each prompt are kept for <a href="#cost">Cost › History</a>. <b>Turn off</b> keeps only labels and costs, and also removes text already kept. Same as <code>/route stats text on</code> / <code>off</code>.</p></div></div>
+        <div class="note" data-z="r15"><span class="n">15</span><h3>Band</h3><div class="body"><p>Shown by default. <b>Hide</b> takes the <a href="#band">band</a> away from above the prompt; routing, the guard and cost tracking keep working. Same as <code>/route band off</code> / <code>on</code>.</p></div></div>
       </div>
     </div>
   </section>
@@ -422,20 +421,71 @@ td .ex { color: var(--muted); font-size: 13.5px; }
     </div>
   </section>
 
-  <!-- STATS -->
-  <section class="part" id="stats">
+  <!-- COST -->
+  <section class="part" id="cost">
+    <span id="stats"></span><span id="last"></span>
     <div class="part-head">
-      <div class="where">▤ today in the footer · /route stats</div>
-      <h2>Stats</h2>
-      <p>Cost history kept across sessions, so you learn which commands and prompts are expensive over time.</p>
+      <div class="where">Cost in the band · ▤ today in the footer · /route cost</div>
+      <h2>Cost</h2>
+      <p>Where the money went: your last prompt, this session by route, and a history kept across sessions, so you learn which commands and prompts are expensive over time. One pane with three tabs.</p>
     </div>
     <div class="grid">
-      <div class="stick">
+      <div style="display:grid; gap:18px; min-width:0; align-content:start">
         <div class="pane tab">
-          <div class="zone" data-z="s1"><span class="pin">1</span>
-            <div class="row"><span class="main b">Stats · my-app</span><span><span>This repo</span> &nbsp;<span class="dim">All</span></span></div>
+          <div class="row"><span class="main b">Cost</span></div>
+          <div class="zone" data-z="k1" style="display:flex; gap:8px; flex-wrap:wrap"><span class="pin">1</span><span class="btn primary">Last prompt</span><span class="btn">Session</span><span class="btn">History</span></div>
+          <div class="zone" data-z="k2"><span class="pin">2</span>
+            <div class="row"><span class="b">Last prompt</span><span class="b">$0.95</span></div>
+            <div class="dim">9 requests · main $0.42 · 2 subagents $0.53</div>
           </div>
-          <div class="zone" data-z="s2"><span class="pin">2</span>
+          <div class="zone warn" data-z="k3"><span class="pin">3</span>includes a cold cache rewrite of 40k tokens, $0.31</div>
+          <div class="zone" data-z="k4" style="display:grid; gap:8px"><span class="pin">4</span>
+            <div>
+              <div class="row"><span class="main"><span class="dot" style="background:var(--p-main)"></span>Main loop</span><span><span class="b">$0.42</span> &nbsp;<span class="dim">45%</span></span></div>
+              <div class="dim ind">Opus 5.5 medium · 3 req · in 2k · cache 180k/40k · out 3k</div>
+            </div>
+            <div>
+              <div class="row"><span class="sub" style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"><span class="dot" style="background:var(--p-sub)"></span>Explore · find auth callers</span><span><span class="b">$0.22</span> &nbsp;<span class="dim">23%</span></span></div>
+              <div class="dim ind">Sonnet 5.5 low · 3 req · in 40k · cache 90k/20k · out 4k</div>
+            </div>
+            <div>
+              <div class="row"><span class="sub" style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"><span class="dot" style="background:var(--p-sub)"></span>general-purpose · write tests</span><span><span class="b">$0.31</span> &nbsp;<span class="dim">32%</span></span></div>
+              <div class="dim ind">Sonnet 5.5 high · 3 req · in 30k · cache 40k/30k · out 12k</div>
+            </div>
+          </div>
+          <div class="zone" data-z="k5"><span class="pin">5</span>
+            <div class="label">TIPS</div>
+            <div><span style="color:#e0b24f">›</span> 2 subagents made up 55% of this prompt ($0.53), most of it sub:general-purpose on Sonnet 5.5. Subagents start with a fresh context, so they never pay a cache rewrite when rerouted.</div>
+            <div><span style="color:#e0b24f">›</span> The cache had gone cold, which cost $0.31 over a warm read: send before it expires, or /clear before a break; /route away compares the options</div>
+          </div>
+          <div class="dim">estimate · resets when you send the next prompt</div>
+        </div>
+
+        <div class="pane tab">
+          <div class="row"><span class="main b">Cost</span></div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap"><span class="btn">Last prompt</span><span class="btn primary">Session</span><span class="btn">History</span></div>
+          <div class="zone" data-z="k6"><span class="pin">6</span>
+            <div class="row"><span class="b">This session, by route</span><span class="b">$3.68</span></div>
+          </div>
+          <div class="zone" data-z="k7" style="display:grid; gap:8px"><span class="pin">7</span>
+            <div>
+              <div class="row"><span class="main"><span class="dot" style="background:var(--p-main)"></span>Normal work</span><span><span class="b">$2.95</span> &nbsp;<span class="dim">80%</span></span></div>
+              <div class="dim ind">21 req · in 8k · cache 3.2M/180k · out 42k</div>
+            </div>
+            <div>
+              <div class="row"><span class="sub"><span class="dot" style="background:var(--p-sub)"></span>General</span><span><span class="b">$0.73</span> &nbsp;<span class="dim">20%</span></span></div>
+              <div class="dim ind">34 req · in 41k · cache 610k/80k · out 21k</div>
+            </div>
+          </div>
+          <div class="dim">estimate · prices as of 2026-10-06 · cache writes at the 1-hour (2× input) rate</div>
+        </div>
+
+        <div class="pane tab">
+          <div class="zone" data-z="k8"><span class="pin">8</span>
+            <div class="row"><span class="main b">Cost · my-app</span><span><span>This repo</span> &nbsp;<span class="dim">All</span></span></div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap"><span class="btn">Last prompt</span><span class="btn">Session</span><span class="btn primary">History</span></div>
+          <div class="zone" data-z="k9"><span class="pin">9</span>
             <div class="box">
               <div class="tiles">
                 <div><span class="dim">today</span><span class="b main">$12.30</span></div>
@@ -446,7 +496,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
               <div class="warn">↻ 6 cache rewrites $5.20</div>
             </div>
           </div>
-          <div class="zone" data-z="s3" style="display:grid; gap:10px"><span class="pin">3</span>
+          <div class="zone" data-z="k10" style="display:grid; gap:10px"><span class="pin">10</span>
             <div class="label">AVERAGE COST PER RUN</div>
             <div>
               <div class="row"><span class="sub b" style="flex:1">/code-review</span><span><span class="main bar">━━━━━━━━</span></span><span class="b" style="width:56px; text-align:right">$1.84</span></div>
@@ -463,7 +513,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
               <div class="dim ind">370 runs · total $107.30 · max $4.60</div>
             </div>
           </div>
-          <div class="zone" data-z="s4" style="display:grid; gap:10px"><span class="pin">4</span>
+          <div class="zone" data-z="k11" style="display:grid; gap:10px"><span class="pin">11</span>
             <div class="label">MOST EXPENSIVE PROMPTS</div>
             <div>
               <div class="row"><span class="dim" style="width:52px">7.10.</span><span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">refactor the auth module to…</span><span class="b" style="width:56px; text-align:right">$4.60</span></div>
@@ -472,67 +522,33 @@ td .ex { color: var(--muted); font-size: 13.5px; }
               <div class="warn ind">↻ cold cache rewrite of 140k tokens, $1.09</div>
             </div>
           </div>
-          <div class="zone" data-z="s5"><span class="pin">5</span>
+          <div class="zone" data-z="k12"><span class="pin">12</span>
             <div class="label">TIPS</div>
             <div><span style="color:#e0b24f">›</span> /code-review averages $1.84 a run over 9 runs, 6× a plain prompt, mostly on Opus 5.5 high: give it a narrower scope, or route its subagents cheaper in /route</div>
             <div><span style="color:#e0b24f">›</span> /simplify averages $1.12 a run over 14 runs, 4× a plain prompt, mostly on Sonnet 5.5 high: give it a narrower scope, or route its subagents cheaper in /route</div>
           </div>
-          <div class="dim zone" data-z="s6"><span class="pin">6</span>estimate · kept across sessions, last 2000 prompts</div>
+          <div class="dim zone" data-z="k13"><span class="pin">13</span>estimate · kept across sessions, last 2000 prompts</div>
         </div>
       </div>
       <div class="notes">
-        <div class="note" data-z="s1"><span class="n">1</span><h3>Scope</h3><div class="body"><p>Show prompts from <b>This repo</b> only, or from <b>All</b> repos. With All, each prompt also shows which repo it came from.</p></div></div>
-        <div class="note" data-z="s2"><span class="n">2</span><h3>Totals</h3><div class="body"><p>Spend today, over the last 7 days and in all kept history, plus how many prompts that covers.</p><p><span class="m">↻ cache rewrites</span> counts requests that had to rebuild the whole cache, because it went cold or because a route switched model or effort. The amount is what that cost above a normal warm read.</p></div></div>
-        <div class="note" data-z="s3"><span class="n">3</span><h3>Average cost per run</h3><div class="body"><p>Each slash command (and <code>prompt</code> for plain messages), ranked by what one run costs on average. The bar compares it to the most expensive command. Below it: number of runs, total, the single most expensive run, and which models the money went to.</p><p>Model colours: <span style="color:#d97757">● Opus</span> · <span style="color:#6ea8e0">● Sonnet</span> · <span style="color:#5fb36b">● Haiku</span> · <span style="color:#a87fd6">● Fable</span>.</p></div></div>
-        <div class="note" data-z="s4"><span class="n">4</span><h3>Most expensive prompts</h3><div class="body"><p>The 8 priciest prompts: date, the start of the prompt, cost. Below: requests and subagents, the models used, and any cache rewrite it paid for in yellow.</p></div></div>
-        <div class="note" data-z="s5"><span class="n">5</span><h3>Tips</h3><div class="body"><p>Up to three patterns in the history worth changing, biggest first: cache rewrites that add up to $1 and a tenth of spend, a command run 3+ times that averages 3× a plain prompt or more, or Opus and Fable doing 80% of $5+ of spend.</p></div></div>
-        <div class="note" data-z="s6"><span class="n">6</span><h3>What is kept</h3><div class="body"><p>History lives in the mod's local store and never leaves your machine: per prompt, the first 120 characters of text, the repo name, cost and models. The last 2,000 prompts are kept. <code>/route stats text off</code> stops keeping the text, <code>/route stats clear</code> deletes everything.</p></div></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- LAST -->
-  <section class="part" id="last">
-    <div class="part-head">
-      <div class="where">last $… in the band · /route last</div>
-      <h2>Last prompt</h2>
-      <p>Where the money for your last prompt went, request by request. It resets when you send the next one.</p>
-    </div>
-    <div class="grid">
-      <div class="stick">
-        <div class="pane tab">
-          <div class="zone" data-z="l1"><span class="pin">1</span>
-            <div class="row"><span class="main b">Last prompt</span><span class="b">$0.95</span></div>
-            <div class="dim">9 requests · main $0.42 · 2 subagents $0.53</div>
-          </div>
-          <div class="zone warn" data-z="l2"><span class="pin">2</span>includes a cold cache rewrite of 40k tokens, $0.31</div>
-          <div class="zone" data-z="l3" style="display:grid; gap:8px"><span class="pin">3</span>
-            <div>
-              <div class="row"><span class="main"><span class="dot" style="background:var(--p-main)"></span>Main loop</span><span><span class="b">$0.42</span> &nbsp;<span class="dim">45%</span></span></div>
-              <div class="dim ind">Opus 5.5 medium · 3 req · in 2k · cache 180k/40k · out 3k</div>
-            </div>
-            <div>
-              <div class="row"><span class="sub" style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"><span class="dot" style="background:var(--p-sub)"></span>Explore · find auth callers</span><span><span class="b">$0.22</span> &nbsp;<span class="dim">23%</span></span></div>
-              <div class="dim ind">Sonnet 5.5 low · 3 req · in 40k · cache 90k/20k · out 4k</div>
-            </div>
-            <div>
-              <div class="row"><span class="sub" style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"><span class="dot" style="background:var(--p-sub)"></span>general-purpose · write tests</span><span><span class="b">$0.31</span> &nbsp;<span class="dim">32%</span></span></div>
-              <div class="dim ind">Sonnet 5.5 high · 3 req · in 30k · cache 40k/30k · out 12k</div>
-            </div>
-          </div>
-          <div class="zone" data-z="l4"><span class="pin">4</span>
-            <div class="label">TIPS</div>
-            <div><span style="color:#e0b24f">›</span> 2 subagents made up 55% of this prompt ($0.53), most of it sub:general-purpose on Sonnet 5.5. Subagents start with a fresh context, so they never pay a cache rewrite when rerouted.</div>
-            <div><span style="color:#e0b24f">›</span> The cache had gone cold, which cost $0.31 over a warm read: send before it expires, or /clear before a break; /route away compares the options</div>
-          </div>
-          <div class="dim">estimate · resets when you send the next prompt</div>
-        </div>
-      </div>
-      <div class="notes">
-        <div class="note" data-z="l1"><span class="n">1</span><h3>Summary</h3><div class="body"><p>Total for the prompt, and how it splits between the main loop and subagents.</p></div></div>
-        <div class="note" data-z="l2"><span class="n">2</span><h3>Cache rewrite warning</h3><div class="body"><p>Shown when part of the cost came from rebuilding the cache, with the reason (<b>cold cache</b> or <b>route switch</b>) and the extra cost.</p></div></div>
-        <div class="note" data-z="l3"><span class="n">3</span><h3>One row per agent</h3><div class="body"><p>The main loop first, then each subagent with its type and task, most expensive first. Each row shows its share of the prompt, then the model and effort it ran on and its token counts (same format as in the <a href="#routes">Routes pane</a>).</p></div></div>
-        <div class="note" data-z="l4"><span class="n">4</span><h3>Tips</h3><div class="body"><p>Up to three changes for this prompt, biggest saving first: how to avoid the cache rewrite it paid for, a cheaper route when Opus or Fable did most of the work, or which subagent route to move when subagents did most of the spending.</p></div></div>
+        <div class="note" data-z="k1"><span class="n">1</span><h3>Tabs</h3><div class="body"><p>Three buttons under the title; the selected one is highlighted. Each pane below shows one tab. <b>Last prompt</b> is where the band's <b>Cost</b> opens. <b>History</b> is where the footer's <b>▤ today</b> opens. <code>/route cost [last|session|history]</code> opens a tab by name; <code>/route last</code> and <code>/route stats</code> still open Last prompt and History.</p></div></div>
+        <div class="note" data-z="k2"><span class="n">2</span><h3>Last prompt: summary</h3><div class="body"><p>Where the money for your last prompt went, request by request: the total, and how it splits between the main loop and subagents. It resets when you send the next one.</p></div></div>
+        <div class="note" data-z="k3"><span class="n">3</span><h3>Cache rewrite warning</h3><div class="body"><p>Shown when part of the cost came from rebuilding the cache, with the reason (<b>cold cache</b> or <b>route switch</b>) and the extra cost.</p></div></div>
+        <div class="note" data-z="k4"><span class="n">4</span><h3>One row per agent</h3><div class="body"><p>The main loop first, then each subagent with its type and task, most expensive first. Each row shows its share of the prompt, then the model and effort it ran on and its token counts (explained in the Session tab's notes below).</p></div></div>
+        <div class="note" data-z="k5"><span class="n">5</span><h3>Last prompt: tips</h3><div class="body"><p>Up to three changes for this prompt, biggest saving first: how to avoid the cache rewrite it paid for, a cheaper route when Opus or Fable did most of the work, or which subagent route to move when subagents did most of the spending.</p></div></div>
+        <div class="note" data-z="k6"><span class="n">6</span><h3>Session: total</h3><div class="body"><p>Estimated spend in this session so far, across all routes. The band shows the same number next to <b>last</b>.</p></div></div>
+        <div class="note" data-z="k7"><span class="n">7</span><h3>Spend per route</h3><div class="body"><p>Most expensive first, with each route's share.</p><dl>
+          <dt>21 req</dt><dd>Requests sent on that route.</dd>
+          <dt>in 8k</dt><dd>Input tokens not served from the cache (full input price).</dd>
+          <dt>cache 3.2M/180k</dt><dd>Tokens read from the cache (a tenth of the input price or less) / written to it (2× input with the 1-hour cache). A big first number and a small second one means the cache is doing its job.</dd>
+          <dt>out 42k</dt><dd>Tokens the model wrote.</dd>
+        </dl><p>All costs are estimates from prices built into the mod. Cache writes are priced for the cache lifetime set in Routes › Cache lifetime, or with <code>/route ttl 5|60</code>.</p></div></div>
+        <div class="note" data-z="k8"><span class="n">8</span><h3>History: scope</h3><div class="body"><p>The title reads <code>Cost</code> on the other tabs and <code>Cost · &lt;repo&gt;</code> here, with a switch that appears only on this tab. Show prompts from <b>This repo</b> only, or from <b>All</b> repos. With All, each prompt also shows which repo it came from.</p></div></div>
+        <div class="note" data-z="k9"><span class="n">9</span><h3>Totals</h3><div class="body"><p>Spend today, over the last 7 days and in all kept history, plus how many prompts that covers.</p><p><span class="m">↻ cache rewrites</span> counts requests that had to rebuild the whole cache, because it went cold or because a route switched model or effort. The amount is what that cost above a normal warm read.</p></div></div>
+        <div class="note" data-z="k10"><span class="n">10</span><h3>Average cost per run</h3><div class="body"><p>Each slash command (and <code>prompt</code> for plain messages), ranked by what one run costs on average. The bar compares it to the most expensive command. Below it: number of runs, total, the single most expensive run, and which models the money went to.</p><p>Model colours: <span style="color:#d97757">● Opus</span> · <span style="color:#6ea8e0">● Sonnet</span> · <span style="color:#5fb36b">● Haiku</span> · <span style="color:#a87fd6">● Fable</span>.</p></div></div>
+        <div class="note" data-z="k11"><span class="n">11</span><h3>Most expensive prompts</h3><div class="body"><p>The 8 priciest prompts: date, the start of the prompt, cost. Below: requests and subagents, the models used, and any cache rewrite it paid for in yellow.</p></div></div>
+        <div class="note" data-z="k12"><span class="n">12</span><h3>History: tips</h3><div class="body"><p>Up to three patterns in the history worth changing, biggest first: cache rewrites that add up to $1 and a tenth of spend, a command run 3+ times that averages 3× a plain prompt or more, or Opus and Fable doing 80% of $5+ of spend.</p></div></div>
+        <div class="note" data-z="k13"><span class="n">13</span><h3>What is kept</h3><div class="body"><p>History lives in the mod's local store and never leaves your machine: per prompt, the first 120 characters of text, the repo name, cost and models. The last 2,000 prompts are kept. Routes › Keep prompt text (or <code>/route stats text off</code>) stops keeping the text and removes what is already kept; <code>/route stats clear</code> deletes everything.</p></div></div>
       </div>
     </div>
   </section>
@@ -577,6 +593,21 @@ td .ex { color: var(--muted); font-size: 13.5px; }
             <div><span style="color:#e0b24f">›</span> MCP server github has not been used in this repo over 14 sessions: turn it off in /mcp, which keeps it off for this repo only</div>
             <div><span style="color:#e0b24f">›</span> my-app/CLAUDE.md (Project) is 6k, re-sent every turn: move rarely needed parts into a skill or a doc Claude reads when it needs it</div>
           </div>
+          <div class="zone box" data-z="c7"><span class="pin">7</span>
+            <div class="b main">BEFORE A BREAK</div>
+            <div class="dim">312k tokens of context on Opus 5.5, cache warm for 42m more (60-minute TTL).</div>
+            <div><span class="main">›</span> <span class="b">Note + /clear</span> now ≈ $0.08 · on return ≈ $0.00</div>
+            <div class="dim ind">Ask Claude to write the work in progress to a file, /rename, /clear; start the next session from the note.</div>
+            <div><span class="main">›</span> <span class="b">/compact</span> now ≈ $0.14 · on return ≈ $0.03</div>
+            <div class="dim ind">Say what to keep: /compact keep the plan, open TODOs and touched files. Only while warm: cold, it reads everything at full price.</div>
+            <div><span class="main">›</span> <span class="b">/rename, /resume</span> now $0.00 · on return: summary</div>
+            <div class="dim ind">On Pro and Max, /resume of a big session offers to continue from a summary.</div>
+            <div><span class="main">›</span> <span class="b">Keep warm</span> $0.06 an hour</div>
+            <div class="dim ind">An idle ping before each expiry; pays off for a few hours, not overnight.</div>
+            <div><span class="main">›</span> <span class="b">Do nothing</span> now $0.00 · on return $2.50</div>
+            <div class="dim ind">The first send re-writes the whole context.</div>
+            <div class="dim">Prices as of 2026-10-06, estimates; ≈ also guesses the note (1k) and summary (4k) sizes.</div>
+          </div>
         </div>
       </div>
       <div class="notes">
@@ -586,6 +617,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
         <div class="note" data-z="c4"><span class="n">4</span><h3>In use / not sent</h3><div class="body"><p><b>In use</b> is what is sent with every request: messages, tools, memory files, and so on. <b>Not sent</b> covers deferred tools (loaded only when needed), free space and the buffer kept for compaction.</p></div></div>
         <div class="note" data-z="c5"><span class="n">5</span><h3>Biggest MCP servers and memory files</h3><div class="body"><p>The top five of each by size: the first places to look when context fills up quickly.</p></div></div>
         <div class="note" data-z="c6"><span class="n">6</span><h3>Tips</h3><div class="body"><p>Up to three things worth doing, biggest first. Advice to compact or clear always comes first, with its reason, the same advice the band's <b>next</b> shows. An MCP server or plugin this repo has left unused is named with how to turn it off; see <a href="#unused">Unused servers and plugins</a>, and <code>/route unused</code> for the full list.</p><p>The rest are things worth trimming, each with what to do: a memory file of 3k or more, an MCP server whose loaded tool schemas reach 5k (deferred ones cost nothing), a skills listing of 3k or more, or custom agent descriptions of 2k or more. Worked out from the breakdown alone, with no model call; nothing shows when there is nothing to trim.</p></div></div>
+        <div class="note" data-z="c7"><span class="n">7</span><h3>Before a break</h3><div class="body"><p>The ways to leave the session for a while, priced for its context, model and cache, the same numbers <code>/route away</code> gives; see <a href="#away">Stepping away</a> for what each one does. It shows once the context is as big as the <a href="#guard">cold-send guard</a> cares about (50k tokens) and cached. The header says how much cache time is left; once it has run out, it says so and points to <code>/clear</code>.</p><p>Each option has <b>now</b>, the cost of doing it today, and <b>on return</b>, what your first send after the break costs. Prices are estimates.</p></div></div>
       </div>
     </div>
   </section>
@@ -649,7 +681,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
         <div class="note" data-z="n1"><span class="n">1</span><h3>The toast</h3><div class="body"><p>Appears when a lesson is worth your attention right now. The first time a topic comes up it starts with the topic's name; after that with ▸.</p><p>To stay out of the way: at most one toast per turn (the costliest lesson wins), each topic at most once an hour, and a topic stops toasting after three times. Lessons that don't toast still land in the pane. The band's <b>Learn ●N</b> button counts the ones that toasted and the first of each topic, not quiet repeats.</p></div></div>
         <div class="note" data-z="n2"><span class="n">2</span><h3>One card per topic</h3><div class="body"><p>The pane shows lessons from <b>This repo</b> first; <b>All</b> shows every repo's, each fact starting with its repo. Mutes and learn mode itself are shared by all your sessions. Topics are ordered by their newest lesson. <b>why?</b> shows or hides the explanation. <b>mute</b> stops a topic you already know, such as the expensive-model lesson when you route Opus on purpose: no lessons, toasts or count for it. Muted topics are listed at the bottom; press one to unmute it.</p></div></div>
         <div class="note" data-z="n3"><span class="n">3</span><h3>The explanation</h3><div class="body"><p>What the concept is, why it costs, and what to do about it. It is shown open until a topic has come up three times, then folded behind <b>why?</b>, so newcomers get the full story and regulars just the numbers.</p></div></div>
-        <div class="note" data-z="n4"><span class="n">4</span><h3>The facts</h3><div class="body"><p>The newest lesson with its date and time, then up to two older ones dimmed under <b>Earlier</b>, one line each; <b>show N more</b> lists the rest. Click an earlier one to read it whole; click its time to fold it. Prices come from the same table as the rest of the mod, so they match the band and Stats. The last 20 lessons of each topic are kept.</p></div></div>
+        <div class="note" data-z="n4"><span class="n">4</span><h3>The facts</h3><div class="body"><p>The newest lesson with its date and time, then up to two older ones dimmed under <b>Earlier</b>, one line each; <b>show N more</b> lists the rest. Click an earlier one to read it whole; click its time to fold it. Prices come from the same table as the rest of the mod, so they match the band and Cost. The last 20 lessons of each topic are kept.</p></div></div>
         <div class="note" data-z="n5"><span class="n">5</span><h3>Turn off</h3><div class="body"><p>Stops new lessons and drops any the current turn had drafted. Lessons already kept stay. While learn mode is off, the pane offers <b>Turn on</b> instead.</p></div></div>
       </div>
     </div>
@@ -683,7 +715,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
     <div class="part-head">
       <div class="where">/route away · works with learn mode on or off</div>
       <h2>Stepping away</h2>
-      <p>Going to lunch or into a meeting with work in progress? <code>/route away</code> compares the ways to leave a session, priced for its context, routed model and cache right now. The options follow Anthropic's <a href="https://code.claude.com/docs/en/costs">cost guide</a> and <a href="https://claude.com/blog/maximizing-the-value-of-your-claude-code-sessions">session tips</a>. The cache lasts an hour on a subscription and five minutes on an API key, and any send resets it.</p>
+      <p>Going to lunch or into a meeting with work in progress? <code>/route away</code> compares the ways to leave a session, priced for its context, routed model and cache right now. The <a href="#context">Context pane</a> shows the same options in its <b>Before a break</b> box. The options follow Anthropic's <a href="https://code.claude.com/docs/en/costs">cost guide</a> and <a href="https://claude.com/blog/maximizing-the-value-of-your-claude-code-sessions">session tips</a>. The cache lasts an hour on a subscription and five minutes on an API key, and any send resets it.</p>
     </div>
     <div class="grid">
       <div class="stick">
@@ -771,20 +803,25 @@ td .ex { color: var(--muted); font-size: 13.5px; }
           <thead><tr><th>Command</th><th>What it does</th></tr></thead>
           <tbody>
             <tr><td><code>/route</code></td><td>Open the Routes pane</td></tr>
-            <tr><td><code>/route stats</code> · <code>context</code> · <code>last</code></td><td>Open Stats, Context or Last prompt</td></tr>
+            <tr><td><code>/route cost [last|session|history]</code></td><td>Open the Cost pane, on a tab if you name one</td></tr>
+            <tr><td><code>/route last</code> · <code>stats</code></td><td>Open Cost on Last prompt, or on History</td></tr>
+            <tr><td><code>/route context</code></td><td>Open the Context pane</td></tr>
             <tr><td><code>/route learn</code></td><td>Open the Learn pane</td></tr>
             <tr><td><code>/route learn on|off</code></td><td>Turn learn mode on or off (default off); also in the Routes pane</td></tr>
             <tr><td><code>/route learn mute|unmute &lt;topic&gt;</code></td><td>Silence or bring back one topic, such as <code>pricey-model</code>; also in the Learn pane</td></tr>
+            <tr><td><code>/route handoffs</code></td><td>Open the Handoffs pane</td></tr>
+            <tr><td><code>/route handoffs on|off</code></td><td>Turn the whole Handoffs feature on or off (default on); also in the Routes pane</td></tr>
+            <tr><td><code>/route handoffs auto on|off</code></td><td>Turn auto-handoff on or off (default off); also in the Routes pane</td></tr>
             <tr><td><code>/route away</code></td><td>Before a break: the ways to step away, priced for this session</td></tr>
             <tr><td><code>/route unused</code></td><td>MCP servers and plugins this repo has long left unused, grouped, with the setting that turns them off</td></tr>
             <tr><td><code>/route stats clear</code></td><td>Delete the saved prompt history</td></tr>
-            <tr><td><code>/route stats text on|off</code></td><td>Keep the first 120 characters of each prompt (default on); off also removes text already kept</td></tr>
+            <tr><td><code>/route stats text on|off</code></td><td>Keep the first 120 characters of each prompt (default on); off also removes text already kept; also in the Routes pane</td></tr>
             <tr><td><code>/route preset &lt;name&gt;</code></td><td>Apply a preset: <code>inherit</code>, <code>mine</code>, <code>balanced</code>, <code>frugal</code>, <code>max</code></td></tr>
             <tr><td><code>/route set &lt;route&gt; &lt;model&gt; [effort]</code></td><td>Set one route now, e.g. <code>/route set sub:Explore haiku low</code></td></tr>
             <tr><td><code>/route on</code> · <code>off</code></td><td>Turn routing on or off</td></tr>
             <tr><td><code>/route band on|off</code></td><td>Show or hide the band</td></tr>
-            <tr><td><code>/route guard refuse|warn|off</code></td><td>What a send onto a cold cache does</td></tr>
-            <tr><td><code>/route ttl 5|60</code></td><td>Cache lifetime in minutes used for the warm/cold timer and prices (default 60)</td></tr>
+            <tr><td><code>/route guard refuse|warn|off</code></td><td>What a send onto a cold cache does; also in the Routes pane</td></tr>
+            <tr><td><code>/route ttl 5|60</code></td><td>Cache lifetime in minutes used for the warm/cold timer and prices (default 60); also in the Routes pane</td></tr>
           </tbody>
         </table>
       </div>
@@ -809,6 +846,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
             <li>A prompt cache belongs to one model and effort. Changing the route the main loop is on rebuilds it once; the pane shows that cost before you apply.</li>
             <li>Subagents start with a fresh context, so cheaper subagent models save money from the first run.</li>
             <li><code>auto</code> effort makes one extra small Haiku request per prompt to rate it.</li>
+            <li>Auto-handoff, when you turn it on, sends one prompt asking for a handoff before the cache goes cold: a normal turn, read at the warm cache price.</li>
             <li>Learn mode is off by default and changes no routing; it only explains what the mod measures.</li>
             <li>Model IDs are the Anthropic API's. On a provider that names models differently, turn routing off or use <code>inherit</code>.</li>
           </ul>
@@ -816,7 +854,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
         <div class="card">
           <h3>Privacy</h3>
           <ul>
-            <li>No network, file or process access of its own.</li>
+            <li>No network or process access of its own. Its only files are the handoffs in <code>~/.claude/handoffs/</code>: it lists and reads them and, with auto-handoff on, writes new ones. It never edits or deletes one.</li>
             <li>Prompt history stays in the mod's local store on your machine.</li>
             <li>Per repo, which MCP servers and plugins were loaded and used: names, counts and dates, never tool arguments.</li>
             <li>Learn mode lessons are kept there too: topic, time, repo name and the fact text, never your prompt text. The last 20 of each topic.</li>

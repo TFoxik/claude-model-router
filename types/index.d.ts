@@ -20,6 +20,9 @@ export type RouterConfig = {
 }
 export type ColdGuard = 'refuse' | 'warn' | 'off'
 export type Scope = 'repo' | 'all'
+
+/** A tab of the Cost pane. */
+export type CostTab = 'last' | 'session' | 'history'
 export type HandoffStatus = 'open' | 'done' | 'dropped' | 'resumed' | 'superseded'
 /** `title` and `gist` are read from the file once; an empty string marks a file read and found without one. */
 export type HandoffRecord = { repo: string; at: number; sessionId?: string; title?: string; gist?: string; status: HandoffStatus; reopenedAt?: number }
@@ -113,6 +116,7 @@ declare module 'claude-code' {
       promptCost: PromptCost | null
       history: PromptRecord[]
       statsScope: Scope
+      costTab: CostTab
       lessons: Lesson[]
       lessonsReadAt: number
       learnOpen: LessonKind[]
