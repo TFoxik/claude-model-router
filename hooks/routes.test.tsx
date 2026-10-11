@@ -1416,3 +1416,28 @@ test('a correction typed while Claude is working counts toward the corrections a
   await band.unmount()
   await prompt('c')
 })
+
+test('pressing a pane that is open behind another brings it to the front', async ($, on) => {
+  mock.store(on)
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  const calls: string[] = []
+  const shown = { current: 'model-router-learn' }
+  on('ui.panes', () => ({ value: ['model-router-stats', 'model-router-learn'].map(id => ({ id, title: id, isShown: id === shown.current, isFocused: false, isPlaced: true })) }) as never)
+  on('ui.close', (_$, e) => {
+    calls.push(`close ${e.id}`)
+    return { value: undefined } as never
+  })
+  on('ui.open', (_$, e) => {
+    calls.push(`open ${e.id}`)
+    shown.current = e.id
+    return { value: { isPlaced: true } } as never
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const ui = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
+  await ui.press({ key: 'stats' })
+  expect(calls).toEqual(['close model-router-stats', 'open model-router-stats'])
+  await ui.press({ key: 'stats' })
+  expect(calls).toEqual(['close model-router-stats', 'open model-router-stats', 'open model-router-stats'])
+  await ui.unmount()
+})

@@ -622,9 +622,16 @@ async function renderLastPane($: $, e: Args<'ui.render'>) {
   return lastPaneView($.ui.resolve(e), p, cfg.cacheTtlMinutes)
 }
 
+/** Opening an open pane only retitles it, so one open behind another is reopened to come to the front. */
+async function raisePane($: $, pane: keyof typeof PANES) {
+  const open = (await $.ui.panes().catch(() => [])).find(one => one.id === PANES[pane].id)
+  if (open !== undefined && !open.isShown) await $.ui.close({ id: PANES[pane].id })
+  await $.ui.open(PANES[pane])
+}
+
 const openPane = ($: $): Open => pane => {
   if (pane === 'learn') void markLessonsRead($).catch(() => undefined)
-  void $.ui.open(PANES[pane])
+  void raisePane($, pane).catch(() => undefined)
 }
 
 async function renderLearnPane($: $, e: Args<'ui.render'>) {
