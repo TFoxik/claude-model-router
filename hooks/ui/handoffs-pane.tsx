@@ -7,6 +7,7 @@ type HandoffsData = { open: readonly HandoffRow[]; closed: readonly HandoffRow[]
 type HandoffsActions = {
   resume: (path: string) => void
   setStatus: (path: string, status: HandoffStatus) => void
+  reopen: (path: string) => void
   toggleClosed: () => void
   setScope: (scope: Scope) => void
 }
@@ -30,8 +31,8 @@ function row({ Box, Text, Button }: Els, one: HandoffRow, showsRepo: boolean, is
         <Box flexDirection="row" gap={2}>
           {isClosed ? <Text dimColor italic>{one.reason}</Text> : null}
           <Button key={`resume:${one.path}`} label="Resume" plain onPress={() => act.resume(one.path)} />
-          {isClosed ? (
-            <Button key={`reopen:${one.path}`} label="Reopen" plain dimColor onPress={() => act.setStatus(one.path, 'open')} />
+          {!one.isOpen ? (
+            <Button key={`reopen:${one.path}`} label="Reopen" plain dimColor onPress={() => act.reopen(one.path)} />
           ) : (
             <>
               <Button key={`done:${one.path}`} label="Done" plain dimColor onPress={() => act.setStatus(one.path, 'done')} />

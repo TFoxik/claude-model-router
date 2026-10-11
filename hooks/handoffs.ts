@@ -2,7 +2,7 @@ import type { HandoffRecord, HandoffStatus, Handoffs } from '../types'
 import { HANDOFF_DIR, segment, tildePath } from './handoff'
 
 export type { HandoffRecord, HandoffStatus, Handoffs }
-export type HandoffRow = { path: string; repo: string; at: number; title: string; reason?: string }
+export type HandoffRow = { path: string; repo: string; at: number; title: string; isOpen: boolean; reason?: string }
 
 export const STALE_MS = 14 * 86_400_000
 const KEPT = 500
@@ -28,16 +28,18 @@ function isRecord(value: unknown): value is HandoffRecord {
     typeof r.at === 'number' && Number.isFinite(r.at) &&
     typeof r.status === 'string' && STATUSES.has(r.status) &&
     (r.sessionId === undefined || typeof r.sessionId === 'string') &&
-    (r.title === undefined || typeof r.title === 'string')
+    (r.title === undefined || typeof r.title === 'string') &&
+    (r.reopenedAt === undefined || (typeof r.reopenedAt === 'number' && Number.isFinite(r.reopenedAt)))
   )
 }
 
-const clean = ({ repo, at, sessionId, title, status }: HandoffRecord): HandoffRecord => ({
+const clean = ({ repo, at, sessionId, title, status, reopenedAt }: HandoffRecord): HandoffRecord => ({
   repo,
   at,
   ...(sessionId === undefined ? {} : { sessionId }),
   ...(title === undefined ? {} : { title }),
   status,
+  ...(reopenedAt === undefined ? {} : { reopenedAt }),
 })
 
 const newest = (records: Handoffs): Handoffs =>
@@ -78,13 +80,19 @@ export function setStatus(records: Handoffs, path: string, status: HandoffStatus
   return r === undefined ? records : { ...records, [path]: { ...r, status } }
 }
 
+/** Reopening restarts the stale clock, or an old handoff would fold straight back. */
+export function reopen(records: Handoffs, path: string, now: number): Handoffs {
+  const r = records[path]
+  return r === undefined ? records : { ...records, [path]: { ...r, status: 'open', reopenedAt: now } }
+}
+
 export function resumedBy(text: string, records: Handoffs, home: string | undefined): string[] {
   return Object.entries(records)
     .filter(([path, r]) => r.status === 'open' && (text.includes(path) || text.includes(tildePath(path, home))))
     .map(([path]) => path)
 }
 
-export const isStale = (rec: HandoffRecord, now: number) => rec.status === 'open' && now - rec.at > STALE_MS
+export const isStale = (rec: HandoffRecord, now: number) => rec.status === 'open' && now - Math.max(rec.at, rec.reopenedAt ?? 0) > STALE_MS
 
 /** A handoff on disk with no session is another session's: this one would have recorded its own. */
 export function bandCount(records: Handoffs, repo: string, sessionId: string | undefined, now: number): number {
@@ -97,7 +105,7 @@ export function handoffRows(records: Handoffs, repo: string | undefined, now: nu
     .sort((a, b) => b[1].at - a[1].at)
     .map(([path, r]) => {
       const reason = r.status !== 'open' ? REASON[r.status] : isStale(r, now) ? 'stale, 14+ days' : undefined
-      return { path, repo: r.repo, at: r.at, title: r.title ?? path.split('/').pop()!, ...(reason === undefined ? {} : { reason }) }
+      return { path, repo: r.repo, at: r.at, title: r.title ?? path.split('/').pop()!, isOpen: r.status === 'open', ...(reason === undefined ? {} : { reason }) }
     })
   return { open: rows.filter(one => one.reason === undefined), closed: rows.filter(one => one.reason !== undefined) }
 }

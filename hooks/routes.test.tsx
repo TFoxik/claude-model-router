@@ -1576,3 +1576,24 @@ test('the band shows handoffs ●N for other sessions\' open handoffs until the 
   expect(await after.find({ key: 'band-handoffs' })).toBeUndefined()
   await after.unmount()
 })
+
+test('a stale handoff keeps Done and Not relevant, and Reopen on an old closed one brings it back to the open list', async ($, on) => {
+  const old = T0 - 20 * 86_400_000
+  const data: Record<string, unknown> = {
+    handoffs: {
+      '/home/me/.claude/handoffs/unknown/stale.md': { repo: 'unknown', at: old, title: 'Stale one', status: 'open' },
+      '/home/me/.claude/handoffs/unknown/done.md': { repo: 'unknown', at: old, title: 'Old done', status: 'done' },
+    },
+  }
+  await listedSession($, on, { 'stale.md': '# Stale one\n', 'done.md': '# Old done\n' }, data)
+  const pane = await mountPane($, 'handoffs', 'desktop')
+  await pane.press({ key: 'closed-toggle' })
+  expect(await pane.find({ key: 'done:/home/me/.claude/handoffs/unknown/stale.md' })).toBeDefined()
+  expect(await pane.find({ key: 'drop:/home/me/.claude/handoffs/unknown/stale.md' })).toBeDefined()
+  expect(await pane.find({ key: 'reopen:/home/me/.claude/handoffs/unknown/stale.md' })).toBeUndefined()
+  await pane.press({ key: 'reopen:/home/me/.claude/handoffs/unknown/done.md' })
+  await pane.press({ key: 'closed-toggle' })
+  expect(await pane.find({ type: 'Text', text: 'Old done' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'Stale one' })).toBeUndefined()
+  await pane.unmount()
+})

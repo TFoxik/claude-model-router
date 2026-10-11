@@ -19,7 +19,7 @@ export type RouterConfig = {
 export type ColdGuard = 'refuse' | 'warn' | 'off'
 export type Scope = 'repo' | 'all'
 export type HandoffStatus = 'open' | 'done' | 'dropped' | 'resumed' | 'superseded'
-export type HandoffRecord = { repo: string; at: number; sessionId?: string; title?: string; status: HandoffStatus }
+export type HandoffRecord = { repo: string; at: number; sessionId?: string; title?: string; status: HandoffStatus; reopenedAt?: number }
 /** Keyed by the file's absolute path. */
 export type Handoffs = Record<string, HandoffRecord>
 export type Rewrite = { cause: 'cold' | 'switch'; tokens: number; usd: number }

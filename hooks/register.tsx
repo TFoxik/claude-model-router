@@ -73,7 +73,7 @@ import {
 } from './routes'
 import { HANDOFF_DIR, HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, pendingAfter, segment, shouldAutoHandoff, tildePath } from './handoff'
 import type { PendingHandoff } from './handoff'
-import { bandCount, handoffDir, handoffRows, handoffsRoot, mergeListing, recordWritten, repoOfHandoff, resumedBy, sanitizeHandoffs, setStatus, titleOf } from './handoffs'
+import { bandCount, handoffDir, handoffRows, handoffsRoot, mergeListing, recordWritten, reopen, repoOfHandoff, resumedBy, sanitizeHandoffs, setStatus, titleOf } from './handoffs'
 import type { HandoffStatus, Handoffs } from './handoffs'
 import { EXPLORE_MIN, NO_STEPS, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
 import type { Steps } from './signals'
@@ -238,6 +238,7 @@ async function renderHandoffsPane($: $, e: Args<'ui.render'>) {
   return handoffsPaneView($.ui.resolve(e), { open, closed, isClosedShown, scope, repo, folder }, {
     resume: path => void $.prompt.fill({ text: `resume from ${tildePath(path, mem.home)}`, mode: 'replace' }).catch(() => undefined),
     setStatus: (path, status: HandoffStatus) => void setHandoffs($, records => setStatus(records, path, status)),
+    reopen: path => void nowOf($).then(at => setHandoffs($, records => reopen(records, path, at))),
     toggleClosed: () => void update($, handoffClosedShown, was => !was),
     setScope: async next => {
       await save($, STORE.handoffScope, await update($, handoffScope, () => next))
