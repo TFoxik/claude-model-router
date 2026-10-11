@@ -158,6 +158,11 @@ const LESSON_KINDS: Record<LessonKind, true> = {
   'cache-expiring': true,
   'plan-toggle': true,
   strategy: true,
+  handoff: true,
+  'plan-ready': true,
+  corrections: true,
+  exploration: true,
+  'auto-handoff': true,
 }
 export const isLessonKind = (kind: unknown): kind is LessonKind => typeof kind === 'string' && Object.hasOwn(LESSON_KINDS, kind)
 

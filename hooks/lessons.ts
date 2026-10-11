@@ -48,6 +48,26 @@ export const CONCEPTS: Record<LessonKind, { title: string; body: string }> = {
     title: 'Clear after committing',
     body: 'Every request re-sends the whole conversation, so what has piled up is paid for again on each turn. Once a task is committed, its back-and-forth rarely helps the next one: /clear starts small and costs nothing, and the commit and its message already record what was done. /compact instead if the next task builds on this one. The band shows "next /clear" or "next /compact" whenever carrying on is not the best move.',
   },
+  handoff: {
+    title: 'Hand off instead of compacting mid-plan',
+    body: 'A /compact summary is written by the model in one pass and keeps what it judges important; mid-plan that often loses the exact steps left, the files involved and why decisions were made. A handoff written on purpose (the goal, what is done, the open steps in order, files touched, decisions, the next step) keeps all of that on disk. /clear afterwards, then tell the new session to resume from the file: it starts small and reads only what the next step needs.',
+  },
+  'plan-ready': {
+    title: 'Start fresh once the plan is written',
+    body: 'Exploring and planning fill the context with files read, options weighed and questions asked. Once the plan is on disk, that history is dead weight: every request re-reads it and it competes for attention with the plan itself. /clear and ask Claude to implement the plan file: the new session reads the plan with clean context.',
+  },
+  corrections: {
+    title: 'Start over after two failed corrections',
+    body: 'Each failed attempt stays in the context and pulls the next try toward the same approach. After two corrections on the same issue, a fresh session with one better prompt (what you want, what did not work, what you learned) usually beats a third correction. Esc Esc rewinds to before the first attempt if you want to keep the earlier work.',
+  },
+  exploration: {
+    title: 'Exploration filled the main context',
+    body: 'Every file read and search result stays in the conversation and is re-read on each later turn. A subagent explores in its own context and hands back only a summary, so the main conversation stays small for the actual change. Ask for one ("use a subagent to find how X works"), and route it to a cheaper model with /route set sub:Explore haiku.',
+  },
+  'auto-handoff': {
+    title: 'Handoff saved before the cache went cold',
+    body: 'With auto-handoff on, when the prompt cache is about to expire while steps are still open, model-router asks Claude for a handoff while the cache is still warm. That send reads the context at the cache price, a fraction of the rewrite after expiry. The plugin saves the reply under ~/.claude/handoffs/ and never clears the session itself. /route handoff off turns it off.',
+  },
   subagents: {
     title: 'Subagents did most of the spending',
     body: 'A subagent runs in its own fresh context. It has no cache to lose, so routing it to a cheaper model costs nothing up front. Each subagent re-reads the files it needs, so many parallel agents add up. Searches and reads usually do fine on a cheaper model: /route set sub:Explore sonnet.',
@@ -190,10 +210,42 @@ export function lessonFromPlanToggle(plan: LoopRoute, main: LoopRoute, tokens: n
  * ends. The other advice is taught already: a growing context by
  * context-high, a cold cache by the expiry warning and the cold-send guard.
  */
-export function lessonFromAdvice(prevReason: Advice['reason'] | undefined, a: Advice): LessonDraft | undefined {
-  if (a.reason !== 'boundary' || prevReason === 'boundary') return undefined
-  return { kind: 'strategy', usd: a.perRequestUsd, fact: a.text }
+/** A lesson the first time advice turns into a handoff, a fresh start after a commit or a plan, or starting over after corrections. */
+export function lessonFromAdvice(prev: { verdict: string; reason: string } | undefined, a: Advice): LessonDraft | undefined {
+  const draft = (kind: LessonKind): LessonDraft => ({ kind, usd: a.perRequestUsd, fact: a.text })
+  if (a.verdict === 'handoff') return prev?.verdict === 'handoff' ? undefined : draft('handoff')
+  if (a.reason === prev?.reason) return undefined
+  if (a.reason === 'boundary') return draft('strategy')
+  if (a.reason === 'plan-ready') return draft('plan-ready')
+  if (a.reason === 'corrections') return draft('corrections')
+  return undefined
 }
+
+export function lessonFromExploration(explored: number, total: number): LessonDraft {
+  return {
+    kind: 'exploration',
+    fact: `File reads and searches put ${kTokens(explored)} tokens (${pct(explored / total)}) into the main context this session. A subagent reads in its own context and hands back a summary.`,
+  }
+}
+
+type AutoHandoffFacts = { spentUsd: number; avoidedUsd: number; tokens: number; path: string }
+
+export function lessonFromAutoHandoff({ spentUsd, avoidedUsd, tokens, path }: AutoHandoffFacts): LessonDraft {
+  const off = '/route handoff off turns this off.'
+  if (avoidedUsd <= 0) return { kind: 'auto-handoff', fact: `Saved a handoff to ${path} before the cache went cold. ${off}` }
+  return {
+    kind: 'auto-handoff',
+    usd: Math.round(Math.max(0, avoidedUsd - spentUsd) * 100) / 100,
+    fact: `Saved a handoff to ${path} for ${money(spentUsd)} before the cache went cold. Resending ${kTokens(tokens)} tokens cold would have cost ${money(avoidedUsd)}. ${off}`,
+  }
+}
+
+/** Good habits no hook can spot, shown in the Learn pane whether learn mode is on or off. */
+export const HABITS: ReadonlyArray<{ title: string; body: string }> = [
+  { title: '/clear between unrelated tasks', body: 'A new topic on top of an old one pays to re-read it on every turn, and the old one distracts Claude.' },
+  { title: '/btw for side questions', body: 'The answer never enters the conversation, so a quick check costs no context.' },
+  { title: 'Esc Esc to rewind', body: 'Restore to before a bad turn instead of correcting on top of it: the failed attempt leaves the context too.' },
+]
 
 export function lessonFromCompact(beforeTokens: number): LessonDraft {
   const from = beforeTokens > 0 ? ` from about ${kTokens(beforeTokens)} tokens` : ''

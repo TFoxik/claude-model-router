@@ -1,5 +1,5 @@
 import type { Lesson, LessonKind, Scope } from '../../types'
-import { CONCEPTS, SEEN_ENOUGH, byKind } from '../lessons'
+import { CONCEPTS, HABITS, SEEN_ENOUGH, byKind } from '../lessons'
 import { PRICES_AS_OF } from '../routes'
 import { DATE_W, day } from './kit'
 import type { Els } from './kit'
@@ -100,6 +100,15 @@ export function learnPaneView(
           ))}
         </Box>
       )}
+      <Box flexDirection="column">
+        <Text bold>Habits</Text>
+        {HABITS.map(one => (
+          <Text key={`h:${one.title}`} wrap="wrap">
+            <Text color="claude">{one.title}</Text>
+            <Text dimColor>{` · ${one.body}`}</Text>
+          </Text>
+        ))}
+      </Box>
       <Box flexDirection="row" gap={1}>
         <Text dimColor>{`${isLearning ? 'learn mode on' : '/route learn on'} · prices as of ${PRICES_AS_OF}, estimates`}</Text>
         {isLearning ? <Button key="learn-off" label="Turn off" plain dimColor onPress={() => setLearning(false)} /> : null}

@@ -2,13 +2,18 @@ import { expect, test } from 'claude-code/testing'
 
 import type { Lesson, PromptCost, PromptItem } from '../types'
 import {
+  CONCEPTS,
+  HABITS,
+  TOPICS,
   awayText,
   byKind,
   capLessons,
   lessonFromAdvice,
+  lessonFromAutoHandoff,
   lessonFromCompact,
   lessonFromContext,
   lessonFromExpiry,
+  lessonFromExploration,
   lessonFromPlanToggle,
   lessonFromRewrite,
   lessonsFromPrompt,
@@ -222,11 +227,42 @@ test('awayText prices the ways to step away for this session', () => {
   expect(awayText({ tokens: 200_000, model: 'gpt-x', ttlMinutes: 60, warmMinutes: 10 })).toMatch(/^No prices for gpt-x\./)
 })
 
-test('advice teaches only when a commit makes clearing the better move', () => {
+test('advice teaches when a commit makes clearing the better move, once', () => {
   const advice = adviseSession({ tokens: 200_000, window: 1_000_000, model: opus, ttlMinutes: 60, warmMinutes: 40, boundary: 'commit' })
-  expect(lessonFromAdvice('fine', advice)).toEqual({ kind: 'strategy', usd: advice.perRequestUsd, fact: advice.text })
-  expect(lessonFromAdvice('boundary', advice)).toBeUndefined()
+  expect(lessonFromAdvice({ verdict: 'continue', reason: 'fine' }, advice)).toEqual({ kind: 'strategy', usd: advice.perRequestUsd, fact: advice.text })
+  expect(lessonFromAdvice({ verdict: 'clear', reason: 'boundary' }, advice)).toBeUndefined()
   expect(lessonFromAdvice(undefined, adviseSession({ tokens: 200_000, window: 1_000_000, model: opus, ttlMinutes: 60, warmMinutes: 0 }))).toBeUndefined()
   expect(lessonFromAdvice(undefined, adviseSession({ tokens: 100_000, window: 1_000_000, model: opus, ttlMinutes: 60, warmMinutes: 40 }))).toBeUndefined()
   expect(lessonFromAdvice(undefined, adviseSession({ tokens: 900_000, window: 1_000_000, model: opus, ttlMinutes: 60, warmMinutes: 40 }))).toBeUndefined()
+})
+
+test('a handoff, a saved plan and repeated corrections each teach on first appearance', () => {
+  const base = { window: 1_000_000, model: opus, ttlMinutes: 60, warmMinutes: 40 }
+  const handoff = adviseSession({ ...base, tokens: 200_000, boundary: 'commit', openSteps: 3 })
+  expect(lessonFromAdvice(undefined, handoff)?.kind).toBe('handoff')
+  expect(lessonFromAdvice({ verdict: 'handoff', reason: 'near-compact' }, handoff)).toBeUndefined()
+  const plan = adviseSession({ ...base, tokens: 200_000, planPath: 'PLAN.md' })
+  expect(lessonFromAdvice(undefined, plan)).toEqual({ kind: 'plan-ready', usd: plan.perRequestUsd, fact: plan.text })
+  const fixes = adviseSession({ ...base, tokens: 200_000, corrections: 2 })
+  expect(lessonFromAdvice({ verdict: 'clear', reason: 'boundary' }, fixes)?.kind).toBe('corrections')
+  expect(lessonFromAdvice({ verdict: 'clear', reason: 'corrections' }, fixes)).toBeUndefined()
+})
+
+test('exploration and auto-handoff lessons carry their numbers', () => {
+  expect(lessonFromExploration(42_000, 120_000)).toEqual({
+    kind: 'exploration',
+    fact: 'File reads and searches put 42k tokens (35%) into the main context this session. A subagent reads in its own context and hands back a summary.',
+  })
+  expect(lessonFromAutoHandoff({ spentUsd: 0.04, avoidedUsd: 0.52, tokens: 140_000, path: '~/.claude/handoffs/r/x.md' })).toEqual({
+    kind: 'auto-handoff',
+    usd: 0.48,
+    fact: 'Saved a handoff to ~/.claude/handoffs/r/x.md for $0.04 before the cache went cold. Resending 140k tokens cold would have cost $0.52. /route handoff off turns this off.',
+  })
+  expect(lessonFromAutoHandoff({ spentUsd: 0, avoidedUsd: 0, tokens: 140_000, path: 'x.md' }).fact).toBe('Saved a handoff to x.md before the cache went cold. /route handoff off turns this off.')
+})
+
+test('every lesson kind has a concept, and the habits are the three agreed', () => {
+  for (const kind of TOPICS) expect(CONCEPTS[kind].title.length).toBeGreaterThan(0)
+  expect(TOPICS).toContain('auto-handoff')
+  expect(HABITS.map(one => one.title)).toEqual(['/clear between unrelated tasks', '/btw for side questions', 'Esc Esc to rewind'])
 })

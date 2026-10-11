@@ -75,6 +75,11 @@ export type LessonKind =
   | 'cache-expiring'
   | 'plan-toggle'
   | 'strategy'
+  | 'handoff'
+  | 'plan-ready'
+  | 'corrections'
+  | 'exploration'
+  | 'auto-handoff'
 /** Session facts a hot reload of the mod's code would otherwise drop: the prompt still running and the MCP and plugin use not yet saved. */
 export type Carried = {
   sessionId?: string

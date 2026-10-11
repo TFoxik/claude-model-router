@@ -317,7 +317,7 @@ async function refreshStatus($: $) {
   const prev = await read($, health)
   await update($, health, was => (JSON.stringify(was) === JSON.stringify(next) ? was : next))
   if (!cfg.isLearning) return
-  for (const draft of [lessonFromContext(prev?.ctxLevel, next.ctxLevel, tokens, model, ttl, mem.compactAt !== undefined), lessonFromAdvice(prev?.advice?.reason, advice)]) {
+  for (const draft of [lessonFromContext(prev?.ctxLevel, next.ctxLevel, tokens, model, ttl, mem.compactAt !== undefined), lessonFromAdvice(prev?.advice, advice)]) {
     if (draft !== undefined) mem.pendingLessons.push(draft)
   }
   // The one lesson that can't wait for a turn to end: by then the cache has gone cold.
