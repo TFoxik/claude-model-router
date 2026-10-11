@@ -593,6 +593,9 @@ test('stored config is kept only where this version understands it', () => {
   })
   expect(cfg).toEqual({ ...DEFAULT_CONFIG, isEnabled: false, routes: { main: { model: 'sonnet', effort: 'low' } } })
   expect(sanitizeConfig({ routes: { main: { model: 'constructor', effort: 'low' } } }).routes).toEqual(DEFAULT_CONFIG.routes)
+  expect(sanitizeConfig({ autoHandoff: true }).autoHandoff).toBe(true)
+  expect(sanitizeConfig({ autoHandoff: 'yes' }).autoHandoff).toBe(false)
+  expect(DEFAULT_CONFIG.autoHandoff).toBe(false)
   const good = { at: 1, repo: 'r', label: 'prompt', text: 't', usd: 1, requests: 1, agents: 0 }
   expect(sanitizeHistory([good, null, { ...good, text: 3 }, 'x'])).toEqual([good])
   expect(sanitizeHistory({})).toEqual([])

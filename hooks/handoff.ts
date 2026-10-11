@@ -1,0 +1,50 @@
+import { GUARD_MIN_TOKENS } from './routes'
+import { OPEN_MIN } from './signals'
+
+export const HANDOFF_LABEL = 'auto-handoff'
+
+export const HANDOFF_PROMPT =
+  'The prompt cache expires in a few minutes and work is still open. Reply with a handoff document in Markdown and nothing else: the goal, what is done, the open steps in order, files touched, decisions and their reasons, and the exact next step. Do not call any tools.'
+
+export type HandoffFacts = {
+  isOn: boolean
+  /** No auto-handoff since the person last prompted. */
+  isArmed: boolean
+  /** No turn and no subagent running. */
+  isIdle: boolean
+  isPromptEmpty: boolean
+  warmMinutes: number
+  ttlMinutes: number
+  tokens: number
+  openSteps: number
+  hasPlan: boolean
+}
+
+// The status tick runs once a minute, so a 5-minute cache needs a window it cannot step over.
+export const handoffWindow = (ttlMinutes: number) => (ttlMinutes >= 60 ? 3 : 2)
+
+/** Whether to ask for a handoff now: the cache's last minutes, work open, and nobody typing or running. */
+export function shouldAutoHandoff(f: HandoffFacts): boolean {
+  return (
+    f.isOn &&
+    f.isArmed &&
+    f.isIdle &&
+    f.isPromptEmpty &&
+    f.warmMinutes > 0 &&
+    f.warmMinutes <= handoffWindow(f.ttlMinutes) &&
+    f.tokens >= GUARD_MIN_TOKENS &&
+    (f.openSteps >= OPEN_MIN || f.hasPlan)
+  )
+}
+
+const pad = (n: number) => String(n).padStart(2, '0')
+const segment = (text: string) => text.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^\.+/, '-') || '-'
+
+/** `<home>/.claude/handoffs/<repo>/<YYYY-MM-DD-HHMM>-<session id, 8 chars>.md`, in local time. */
+export function handoffPath(home: string, repo: string, now: number, sessionId: string): string {
+  const d = new Date(now)
+  const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`
+  return `${home.replace(/\/+$/, '')}/.claude/handoffs/${segment(repo)}/${stamp}-${segment(sessionId).slice(0, 8)}.md`
+}
+
+export const tildePath = (path: string, home: string | undefined) => (home !== undefined && home !== '' && path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path)
