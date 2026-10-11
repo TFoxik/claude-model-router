@@ -312,7 +312,7 @@ async function refreshStatus($: $) {
     ...(warmMinutes === 0 && tokens >= GUARD_MIN_TOKENS ? { coldUsd: rewritePrice(model, tokens, ttl).write } : {}),
     ...(five ? { fiveHour: Math.round(five.percentUsed) } : {}),
     ...(seven ? { sevenDay: Math.round(seven.percentUsed) } : {}),
-    ...(advice.verdict === 'continue' ? {} : { advice: { verdict: advice.verdict, reason: advice.reason, text: advice.text } }),
+    ...(advice.verdict === 'continue' ? {} : { advice: { verdict: advice.verdict, reason: advice.reason, text: advice.text, command: advice.command } }),
   }
   const prev = await read($, health)
   await update($, health, was => (JSON.stringify(was) === JSON.stringify(next) ? was : next))

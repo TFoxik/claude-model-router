@@ -25,6 +25,7 @@ export type RouteSpend = {
   usd: number
 }
 export type LastUsage = { model: string; input: number; cacheRead: number; cacheWrite: number; usd: number; at: number }
+export type AdviceReason = 'boundary' | 'cold' | 'near-compact' | 'conversation' | 'plan-ready' | 'corrections' | 'handoff-saved'
 export type Health = {
   cache: number
   warmMinutes: number
@@ -34,8 +35,8 @@ export type Health = {
   coldUsd?: number
   fiveHour?: number
   sevenDay?: number
-  /** What to do next when carrying on is not the best move. */
-  advice?: { verdict: 'compact' | 'clear'; reason: 'boundary' | 'cold' | 'near-compact' | 'conversation'; text: string }
+  /** What to do next when carrying on is not the best move; `command` is what the band shows after "next". */
+  advice?: { verdict: 'compact' | 'clear' | 'handoff'; reason: AdviceReason; text: string; command: string }
 }
 export type PromptItem = RouteSpend & {
   id: string
