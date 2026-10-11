@@ -31,14 +31,9 @@ function row({ Box, Text, Button }: Els, one: HandoffRow, showsRepo: boolean, is
         <Box flexDirection="row" gap={2}>
           {isClosed ? <Text dimColor italic>{one.reason}</Text> : null}
           <Button key={`resume:${one.path}`} label="Resume" plain onPress={() => act.resume(one.path)} />
-          {!one.isOpen ? (
-            <Button key={`reopen:${one.path}`} label="Reopen" plain dimColor onPress={() => act.reopen(one.path)} />
-          ) : (
-            <>
-              <Button key={`done:${one.path}`} label="Done" plain dimColor onPress={() => act.setStatus(one.path, 'done')} />
-              <Button key={`drop:${one.path}`} label="Not relevant" plain dimColor onPress={() => act.setStatus(one.path, 'dropped')} />
-            </>
-          )}
+          {one.isOpen ? null : <Button key={`reopen:${one.path}`} label="Reopen" plain dimColor onPress={() => act.reopen(one.path)} />}
+          {one.isOpen ? <Button key={`done:${one.path}`} label="Done" plain dimColor onPress={() => act.setStatus(one.path, 'done')} /> : null}
+          {one.isOpen ? <Button key={`drop:${one.path}`} label="Not relevant" plain dimColor onPress={() => act.setStatus(one.path, 'dropped')} /> : null}
         </Box>
       </Box>
     </Box>
