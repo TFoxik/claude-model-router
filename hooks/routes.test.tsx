@@ -596,6 +596,9 @@ test('stored config is kept only where this version understands it', () => {
   expect(sanitizeConfig({ autoHandoff: true }).autoHandoff).toBe(true)
   expect(sanitizeConfig({ autoHandoff: 'yes' }).autoHandoff).toBe(false)
   expect(DEFAULT_CONFIG.autoHandoff).toBe(false)
+  expect(sanitizeConfig({ showNext: false }).showNext).toBe(false)
+  expect(sanitizeConfig({ showNext: 'no' }).showNext).toBe(true)
+  expect(DEFAULT_CONFIG.showNext).toBe(true)
   const good = { at: 1, repo: 'r', label: 'prompt', text: 't', usd: 1, requests: 1, agents: 0 }
   expect(sanitizeHistory([good, null, { ...good, text: 3 }, 'x'])).toEqual([good])
   expect(sanitizeHistory({})).toEqual([])

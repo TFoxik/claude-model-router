@@ -17,6 +17,7 @@ The **[field guide](https://tfoxik.github.io/claude-model-router/)** walks throu
   - **Hand off** instead of clearing after a commit or compacting when two or more todos or tasks are still open: a written handoff keeps the plan's detail, a summary does not. It names your `/handoff` skill when you have one.
   - **Compact** when auto-compact is close or the conversation fills most of the context.
   - The Context pane's tips give the reason in dollars, and suggest a subagent when reads and searches fill the main context.
+  - It shows with learn mode on or off. `/route next off`, or the Routes pane's **Next-step advice** row, hides it.
 - **Saves a handoff before the cache goes cold, if you want it to.** With `/route handoff on`, when the cache is in its last minutes and work is still open, it asks Claude for a handoff while reading the context is still cheap and saves it under `~/.claude/handoffs/<repo>/`. Once per prompt; it never clears the session itself.
 - **Spots MCP servers and plugins you don't use.** It notes, per repo, which MCP servers and plugins are loaded and which get used. Once one has been loaded for two weeks and ten sessions without use in 30 days, the Context pane and `/route unused` name it with the setting that turns it off. The mod can't switch anything off itself:
   - **MCP servers** go off per repo in `/mcp`. When none of your connected claude.ai connectors is used, it also offers `"disableClaudeAiConnectors": true`.
@@ -73,6 +74,7 @@ Then restart or run `/reload-plugins`. Saved settings carry over. See [CHANGELOG
 | `/route stats text on\|off` | Keep the first 120 characters of each prompt in Stats (default on) |
 | `/route learn` / `learn on\|off` | Open the Learn pane / turn learn mode on or off (default off) |
 | `/route learn mute\|unmute <topic>` | Silence a topic: `cold-rewrite`, `switch-rewrite`, `pricey-model`, `context-high`, `compacted`, `subagents`, `cache-expiring`, `plan-toggle`, `strategy`, `handoff`, `plan-ready`, `corrections`, `exploration`, `auto-handoff` |
+| `/route next on\|off` | Show or hide the band's `next /clear`, `/compact` or `/handoff` and the Context pane's advice tip (default on) |
 | `/route handoff on\|off` | Save a handoff while the cache is still warm, before it goes cold with work open (default off) |
 | `/route away` | Before a break: the ways to step away, priced for this session |
 | `/route unused` | MCP servers and plugins this repo has long left unused, and how to turn each off |

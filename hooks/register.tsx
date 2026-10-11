@@ -237,6 +237,10 @@ async function setAutoHandoff($: $, isOn: boolean) {
   await setConfig($, c => ({ ...c, autoHandoff: isOn }))
 }
 
+async function setShowNext($: $, isOn: boolean) {
+  await setConfig($, c => ({ ...c, showNext: isOn }))
+}
+
 async function setMuted($: $, kind: LessonKind, isMuted: boolean) {
   await setConfig($, c => ({ ...c, learnMuted: isMuted ? [...new Set([...c.learnMuted, kind])] : c.learnMuted.filter(one => one !== kind) }))
 }
@@ -344,13 +348,13 @@ async function refreshStatus($: $) {
     ...(warmMinutes === 0 && tokens >= GUARD_MIN_TOKENS ? { coldUsd: rewritePrice(model, tokens, ttl).write } : {}),
     ...(five ? { fiveHour: Math.round(five.percentUsed) } : {}),
     ...(seven ? { sevenDay: Math.round(seven.percentUsed) } : {}),
-    ...(advice.verdict === 'continue' ? {} : { advice: { verdict: advice.verdict, reason: advice.reason, text: advice.text, command: advice.command } }),
+    ...(advice.verdict === 'continue' || !cfg.showNext ? {} : { advice: { verdict: advice.verdict, reason: advice.reason, text: advice.text, command: advice.command } }),
   }
   const prev = await read($, health)
   await update($, health, was => (JSON.stringify(was) === JSON.stringify(next) ? was : next))
   void maybeAutoHandoff($, cfg, { warmMinutes, tokens, model }).catch(() => undefined)
   if (!cfg.isLearning) return
-  for (const draft of [lessonFromContext(prev?.ctxLevel, next.ctxLevel, tokens, model, ttl, mem.compactAt !== undefined), lessonFromAdvice(prev?.advice, advice)]) {
+  for (const draft of [lessonFromContext(prev?.ctxLevel, next.ctxLevel, tokens, model, ttl, mem.compactAt !== undefined), ...(cfg.showNext ? [lessonFromAdvice(prev?.advice, advice)] : [])]) {
     if (draft !== undefined) mem.pendingLessons.push(draft)
   }
   // The one lesson that can't wait for a turn to end: by then the cache has gone cold.
@@ -679,7 +683,7 @@ async function renderCtxPane($: $, e: Args<'ui.render'>) {
   const b = context.breakdown
   const servers = b?.mcpTools ?? []
   // Worked out from this breakdown, not the band's last refresh, so it holds before the first request and right after a /clear.
-  const advice = b && adviseSession({
+  const advice = b && cfg.showNext && adviseSession({
     tokens: b.totalTokens,
     window: b.rawMaxTokens,
     compactAt: b.isAutoCompactEnabled ? b.autoCompactThreshold : undefined,
@@ -690,7 +694,7 @@ async function renderCtxPane($: $, e: Args<'ui.render'>) {
     boundary: mem.boundary,
     ...signalFacts(),
   })
-  const data = { breakdown: b, isTerminal: e.surface === 'terminal', columns, advice, explored: mem.explored, idle: idleTips(idle, withServerNames(loaded.names, servers), tokensByServer(servers)) }
+  const data = { breakdown: b, isTerminal: e.surface === 'terminal', columns, advice: advice || undefined, explored: mem.explored, idle: idleTips(idle, withServerNames(loaded.names, servers), tokensByServer(servers)) }
   return contextPaneView($.ui.resolve(e), data)
 }
 
@@ -717,6 +721,7 @@ async function renderPane($: $, e: Args<'ui.render'>) {
     toggle: () => void setConfig($, c => ({ ...c, isEnabled: !c.isEnabled })),
     setLearning: isOn => void setLearning($, isOn),
     setAutoHandoff: isOn => void setAutoHandoff($, isOn),
+    setShowNext: isOn => void setShowNext($, isOn),
     openLearn: () => openPane($)('learn'),
     // Only the routes come from the draft, so on/off or a setting changed while it was open is kept.
     apply: async next => {
@@ -746,7 +751,7 @@ const handoffOnText = (repo: string) =>
 const asEffort = (effort: unknown): Effort | undefined =>
   typeof effort === 'string' ? (effort as Effort) : undefined
 
-const USAGE = '[stats [clear | text on|off] | context | last | learn [on|off | mute|unmute <topic>] | handoff on|off | away | unused | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
+const USAGE = '[stats [clear | text on|off] | context | last | learn [on|off | mute|unmute <topic>] | handoff on|off | next on|off | away | unused | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
 
 // Origins a person typed or drove: only these may change the routes, and only these are held by the cold guard.
 const USER_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
@@ -1190,6 +1195,12 @@ export const register: Register = on => {
       if (minutes !== 5 && minutes !== 60) return { text: 'Usage: /route ttl 5|60 (prompt-cache lifetime in minutes)' }
       await setConfig($, c => ({ ...c, cacheTtlMinutes: minutes }))
       return { text: `Cache lifetime set to ${minutes} minutes.` }
+    }
+    if (verb === 'next') {
+      if (rest[0] !== 'on' && rest[0] !== 'off') return { text: 'Usage: /route next on|off (show next /clear, /compact or /handoff when carrying on is not the best move)' }
+      const isOn = rest[0] === 'on'
+      await setShowNext($, isOn)
+      return { text: isOn ? 'Next-step advice on: the band shows next /clear, /compact or /handoff when carrying on is not the best move, with the reason in the Context pane.' : 'Next-step advice off: the band and the Context pane no longer suggest when to clear, compact or hand off.' }
     }
     if (verb === 'handoff') {
       if (rest[0] !== 'on' && rest[0] !== 'off') return { text: 'Usage: /route handoff on|off (save a handoff while the cache is still warm, before it goes cold with work open)' }

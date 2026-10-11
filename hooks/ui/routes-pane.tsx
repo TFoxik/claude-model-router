@@ -64,6 +64,7 @@ type PaneActions = {
   toggle: () => void
   setLearning: (isOn: boolean) => void
   setAutoHandoff: (isOn: boolean) => void
+  setShowNext: (isOn: boolean) => void
   openLearn: () => void
   apply: (next: RouterConfig) => void
   discard: () => void
@@ -85,7 +86,7 @@ type InputEls = Extract<Els, { Select: unknown }>
 
 export function routesPaneView(els: InputEls, data: PaneData, actions: PaneActions) {
   const { cfg, costs, now, isPlanning, pending, lastPrompt, contextTokens, sessionModel } = data
-  const { editDraft, toggle, setLearning, setAutoHandoff, openLearn, apply, discard } = actions
+  const { editDraft, toggle, setLearning, setAutoHandoff, setShowNext, openLearn, apply, discard } = actions
   const { Box, Text, Button, Select } = els
   const shown = pending ?? cfg
   const ttlMinutes = cfg.cacheTtlMinutes
@@ -135,6 +136,16 @@ export function routesPaneView(els: InputEls, data: PaneData, actions: PaneActio
           {cfg.autoHandoff ? null : <Text dimColor>saves a handoff while the cache is warm, before it goes cold with work open</Text>}
         </Box>
         <Button key="handoff-toggle" label={cfg.autoHandoff ? 'Turn off' : 'Turn on'} onPress={() => setAutoHandoff(!cfg.autoHandoff)} />
+      </Box>
+
+      <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
+        <Box flexDirection="column" flexShrink={1}>
+          <Text>
+            Next-step advice <Text color={cfg.showNext ? 'success' : 'subtle'}>{cfg.showNext ? '● on' : '○ off'}</Text>
+          </Text>
+          <Text dimColor>shows next /clear, /compact or /handoff in the band when carrying on is not the best move</Text>
+        </Box>
+        <Button key="next-toggle" label={cfg.showNext ? 'Turn off' : 'Turn on'} onPress={() => setShowNext(!cfg.showNext)} />
       </Box>
 
       <Box flexDirection="column" borderStyle="round" borderColor={nowColor} paddingX={1}>

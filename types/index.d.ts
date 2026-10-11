@@ -13,6 +13,8 @@ export type RouterConfig = {
   isLearning: boolean
   learnMuted: LessonKind[]
   autoHandoff: boolean
+  /** The band's next /clear, /compact or /handoff and the Context pane's advice tip. */
+  showNext: boolean
 }
 export type ColdGuard = 'refuse' | 'warn' | 'off'
 export type Scope = 'repo' | 'all'

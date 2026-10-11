@@ -118,6 +118,7 @@ export const DEFAULT_CONFIG: RouterConfig = {
   isLearning: false,
   learnMuted: [],
   autoHandoff: false,
+  showNext: true,
 }
 
 /**
@@ -191,6 +192,7 @@ export function sanitizeConfig(stored: unknown): RouterConfig {
     isLearning: typeof s.isLearning === 'boolean' ? s.isLearning : DEFAULT_CONFIG.isLearning,
     learnMuted: Array.isArray(s.learnMuted) ? [...new Set(s.learnMuted.filter(isLessonKind))] : DEFAULT_CONFIG.learnMuted,
     autoHandoff: typeof s.autoHandoff === 'boolean' ? s.autoHandoff : DEFAULT_CONFIG.autoHandoff,
+    showNext: typeof s.showNext === 'boolean' ? s.showNext : DEFAULT_CONFIG.showNext,
   }
 }
 

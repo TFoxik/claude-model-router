@@ -1,5 +1,11 @@
 # Release notes
 
+## 0.8.1 — 2026-10-11
+
+### Added
+
+- **Next-step advice switch.** `/route next on|off`, or the new **Next-step advice** row in the Routes pane, shows or hides the band's `next /clear`, `/compact` or `/handoff` and the advice tip at the top of the Context pane. On by default. Off also stops learn mode teaching from that advice. Auto-handoff keeps its own switch.
+
 ## 0.8.0 — 2026-10-11
 
 ### Added

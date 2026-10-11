@@ -1,6 +1,6 @@
 {
   "name": "model-router",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "author": { "name": "TFoxik" },
   "license": "MIT",
   "repository": "https://github.com/TFoxik/claude-model-router",
