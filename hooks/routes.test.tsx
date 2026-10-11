@@ -1169,6 +1169,7 @@ test('an earlier Learn row shows whole on press, and the earlier ones past two s
     expect((await pane.find(row))?.props).toMatchObject({ wrap: 'truncate-end', dimColor: true })
     await pane.press({ key: `row:cold-rewrite:${at(3)}` })
     expect((await pane.find(row))?.props).toMatchObject({ wrap: 'wrap', dimColor: false })
+    expect((await pane.find({ type: 'Button', key: `row:cold-rewrite:${at(3)}` }))?.text).toBe(stamp(at(3)))
     await pane.press({ key: `row:cold-rewrite:${at(3)}` })
     expect((await pane.find(row))?.props).toMatchObject({ wrap: 'truncate-end' })
     expect(await pane.find({ type: 'Button', text: 'show 2 more' })).toBeDefined()

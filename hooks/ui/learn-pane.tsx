@@ -28,7 +28,10 @@ const rowId = (one: Lesson) => `${one.kind}:${one.at}`
 
 /**
  * A stamped fact with a hanging indent; an older one is one dim line, since it mostly repeats the latest.
- * Pressing an older one shows it whole.
+ * Pressing an older one shows it whole; its stamp then folds it.
+ *
+ * An open fact stays out of the Button: a desktop draws a Button as a native one-line control,
+ * so a fact inside it never wraps.
  */
 function factRow({ Box, Text, Button }: Els, one: Lesson, isOlder: boolean, showsRepo: boolean, isOpen: boolean, toggleRow: (id: string) => void) {
   const id = rowId(one)
@@ -39,19 +42,19 @@ function factRow({ Box, Text, Button }: Els, one: Lesson, isOlder: boolean, show
       {one.fact}
     </Text>
   )
+  const press = (children: typeof text) => (
+    <Button key={`row:${id}`} plain hover={{ underline: true }} onPress={() => toggleRow(id)}>
+      {children}
+    </Button>
+  )
+  const when = <Text dimColor>{stamp(one.at)}</Text>
   return (
     <Box key={`f:${id}`} flexDirection="row">
       <Box width={STAMP_W} flexShrink={0}>
-        <Text dimColor>{stamp(one.at)}</Text>
+        {isOlder && isOpen ? press(when) : when}
       </Box>
       <Box flexGrow={1} flexShrink={1} minWidth={0}>
-        {isOlder ? (
-          <Button key={`row:${id}`} plain hover={{ underline: true }} onPress={() => toggleRow(id)}>
-            {text}
-          </Button>
-        ) : (
-          text
-        )}
+        {isDim ? press(text) : text}
       </Box>
     </Box>
   )
