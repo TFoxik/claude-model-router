@@ -42,7 +42,7 @@ const opus = MODELS.opus.id
 const sonnet = MODELS.sonnet.id
 const haiku = MODELS.haiku.id
 const MINE = withPreset(DEFAULT_CONFIG, 'mine')!
-const PANE_IDS = { route: 'model-router', last: 'model-router-last', context: 'model-router-ctx', stats: 'model-router-stats', learn: 'model-router-learn' } as const
+const PANE_IDS = { route: 'model-router', last: 'model-router-last', context: 'model-router-ctx', stats: 'model-router-stats', learn: 'model-router-learn', handoffs: 'model-router-handoffs' } as const
 const mountPane = ($: Engine, pane: keyof typeof PANE_IDS, surface: 'terminal' | 'desktop' = 'terminal') =>
   $.ui.mount({ plugin: 'model-router', surface, component: 'Pane', requestId: PANE_IDS[pane], props: {} as never })
 const useMine = ($: Engine) => $.command.run({ command: 'route', args: 'preset mine', origin: { kind: 'composer' } } as unknown as Args<'command.run'>)
@@ -1468,4 +1468,73 @@ test('a handoff saved by another session meanwhile is kept when this one records
   await $.turn.start({ text: 'write one', turnId: 'w' })
   await $.tool.call({ tool: 'Write', file_path: '/home/me/.claude/handoffs/unknown/mine.md', content: '# Mine\n', tool_use_id: 'tw' } as never)
   expect(Object.keys(data.handoffs as object).sort()).toEqual(['/home/me/.claude/handoffs/unknown/mine.md', '/home/me/.claude/handoffs/unknown/theirs.md'])
+})
+
+/** A session whose handoff folder lists the given files; their text comes from `texts`. */
+async function listedSession($: Engine, on: On, files: Record<string, string>, data: Record<string, unknown> = {}) {
+  data.config = { ...MINE, coldGuard: 'off' }
+  sharedStore(on, data)
+  mock.clock(on, { now: T0 })
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  mock.env(on, { HOME: '/home/me' })
+  on('session.id', () => ({ value: 'session-1' }) as never)
+  const listing = { current: files, isDenied: false }
+  on('fs.list', (_$, e) => {
+    if (listing.isDenied) throw Object.assign(new Error('denied'), { code: 'EACCES' })
+    if (e.path === '/home/me/.claude/handoffs/unknown') return { value: Object.keys(listing.current).map(name => ({ name, kind: 'file', size: 1, mtimeMs: T0 - 60_000, isLink: false })) } as never
+    if (e.path === '/home/me/.claude/handoffs') return { value: [{ name: 'unknown', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }] } as never
+    throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+  })
+  on('fs.read', (_$, e) => ({ value: listing.current[e.path.split('/').pop()!] ?? '' }) as never)
+  const filled: string[] = []
+  on('prompt.fill', (_$, e) => {
+    filled.push(e.text)
+    return { isFilled: true } as never
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  return { listing, filled, data }
+}
+
+test('the Handoffs pane lists open handoffs; Done and Not relevant fold them with a reason, Reopen brings one back', async ($, on) => {
+  await listedSession($, on, { 'a.md': '# Fix the band\n', 'b.md': 'no heading' })
+  const pane = await mountPane($, 'handoffs', 'desktop')
+  expect(await pane.find({ type: 'Text', text: 'Fix the band' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'b.md' })).toBeDefined()
+  await pane.press({ key: 'done:/home/me/.claude/handoffs/unknown/a.md' })
+  await pane.press({ key: 'drop:/home/me/.claude/handoffs/unknown/b.md' })
+  expect(await pane.find({ type: 'Text', text: 'Fix the band' })).toBeUndefined()
+  await pane.press({ key: 'closed-toggle' })
+  expect(await pane.find({ type: 'Text', text: /done$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /not relevant$/ })).toBeDefined()
+  await pane.press({ key: 'reopen:/home/me/.claude/handoffs/unknown/a.md' })
+  await pane.press({ key: 'closed-toggle' })
+  expect(await pane.find({ type: 'Text', text: 'Fix the band' })).toBeDefined()
+  await pane.unmount()
+})
+
+test('Resume fills the prompt box with the handoff path and sends nothing', async ($, on) => {
+  const { filled } = await listedSession($, on, { 'a.md': '# A\n' })
+  const pane = await mountPane($, 'handoffs', 'desktop')
+  await pane.press({ key: 'resume:/home/me/.claude/handoffs/unknown/a.md' })
+  expect(filled).toEqual(['resume from ~/.claude/handoffs/unknown/a.md'])
+  await pane.unmount()
+})
+
+test('a handoff deleted from disk is forgotten on the next listing; a failed listing forgets nothing', async ($, on) => {
+  const { listing, data } = await listedSession($, on, { 'a.md': '# A\n', 'b.md': '# B\n' })
+  await route($, 'handoffs')
+  expect(Object.keys(data.handoffs as object)).toHaveLength(2)
+  listing.current = { 'b.md': '# B\n' }
+  await route($, 'handoffs')
+  expect(Object.keys(data.handoffs as object)).toEqual(['/home/me/.claude/handoffs/unknown/b.md'])
+  listing.isDenied = true
+  await route($, 'handoffs')
+  expect(Object.keys(data.handoffs as object)).toEqual(['/home/me/.claude/handoffs/unknown/b.md'])
+})
+
+test('the pane says where handoffs go when there are none', async ($, on) => {
+  await listedSession($, on, {})
+  const pane = await mountPane($, 'handoffs')
+  expect(await pane.find({ type: 'Text', text: /^No handoffs in unknown\./ })).toBeDefined()
+  await pane.unmount()
 })
