@@ -1,5 +1,11 @@
 # Release notes
 
+## 0.8.5 — 2026-10-11
+
+### Fixed
+
+- **Learn pane.** Clicking an earlier lesson in the desktop app now shows its full text; it stayed cut off at one line. Click its time to fold it again.
+
 ## 0.8.4 — 2026-10-11
 
 ### Changed
