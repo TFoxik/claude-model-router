@@ -1,5 +1,11 @@
 # Release notes
 
+## 0.8.3 — 2026-10-11
+
+### Changed
+
+- **Learn pane.** Each lesson shows the time next to its date. Click a lesson to read it whole, with the full date and its repo; click again to fold it. **show N more** under Earlier lists every older lesson of a topic, not just two. Habits sit in a box of their own, each command on its own line above its reason.
+
 ## 0.8.2 — 2026-10-11
 
 ### Changed
