@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.0.1 — 2026-10-11
+
+### Changed
+
+- **A tidier band.** The cache and cost line is plain text now, evenly spaced, and every button sits right-aligned on the band's last line: Handoffs, Learn, the `next /clear` advice (shown once, highlighted), then **Context**, **Last** and **Routes**. A desktop draws buttons as native controls with their own padding, so mixing them into the text lines made the spacing and left edge uneven.
+
 ## 1.0.0 — 2026-10-11
 
 ### Added

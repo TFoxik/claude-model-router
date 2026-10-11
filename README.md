@@ -4,15 +4,15 @@ A Claude Code mod that picks the model and effort for each kind of work, and sho
 
 Plan mode, normal work and each subagent type can run on a different model: Opus for planning, Sonnet for edits, Haiku for searches. The mod tracks prompt-cache health and spend as you go, stops a send that would re-write a cold cache, and can explain where your money went with your own numbers.
 
-![Three-line band above the prompt, suggesting next /clear with Handoffs, Learn and Routes on its last line, and today's spend below it](docs/band-and-footer.svg)
+![Three-line band above the prompt: routes, then cache and cost, then a right-aligned row of buttons with next /clear highlighted, and today's spend below it](docs/band-and-footer.svg)
 
 The **[field guide](https://tfoxik.github.io/claude-model-router/)** walks through every part of the screen it adds, with annotated pictures.
 
 ## What it does
 
 - **Routes models per kind of work.** Set a model and effort for `main`, `plan`, each subagent type (`sub:Explore`, `sub:Plan`, …), workflows and teammates, or pick a preset. The `/route` pane shows what a change costs per turn, the one-off cache rewrite it causes, and when it pays back, before you apply it.
-- **Shows cost and cache health in a band above the prompt**: `cache 96% 42m · context 31% · last $0.05 · 5h 38% · 7d 12%`. That's the cache hit rate and minutes until it goes cold, context used, the cost of your last prompt, and your 5-hour and 7-day limits. Click any part for a breakdown with tips on what to trim or reroute.
-- **Says when to carry on, compact, clear or hand off.** When carrying on is not the best move, the band shows `next /clear`, `next /compact` or `next /handoff`:
+- **Shows cost and cache health in a band above the prompt**: `cache 96% 42m · context 31% · last $0.05 · 5h 38% · 7d 12%`. That's the cache hit rate and minutes until it goes cold, context used, the cost of your last prompt, and your 5-hour and 7-day limits. The band's last line has **Context** and **Last** for a breakdown with tips on what to trim or reroute.
+- **Says when to carry on, compact, clear or hand off.** When carrying on is not the best move, the band's last line shows a `next /clear`, `next /compact` or `next /handoff` button:
   - **Clear** after a commit or pull request over a sizeable context, once the cache has gone cold, once a plan is written to disk (implement it in a fresh context), or after two corrections in a row (start over with a better prompt).
   - **Hand off** instead of clearing after a commit or compacting when two or more todos or tasks are still open: a written handoff keeps the plan's detail, a summary does not. It names your `/handoff` skill when you have one.
   - **Compact** when auto-compact is close or the conversation fills most of the context.

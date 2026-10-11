@@ -130,8 +130,8 @@ h2 { font-family: var(--display); font-weight: 600; font-size: 28px; line-height
 .footer-mock .r { display: flex; gap: 14px; align-items: center; }
 .band { background: var(--p-box); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; }
 .band .lines { display: grid; gap: 6px; min-width: 0; }
-.band .btns { display: flex; justify-content: space-between; gap: 12px; }
-.band .btns > div { display: flex; gap: 16px; }
+.band .btns { display: flex; justify-content: flex-end; gap: 16px; }
+.band .btns .primary { background: rgba(255,255,255,.1); border-radius: 4px; padding: 0 6px; }
 .msg { border-left: 3px solid var(--p-warn); padding: 6px 10px; background: rgba(224,178,79,.08); border-radius: 0 6px 6px 0; }
 
 /* notes */
@@ -213,7 +213,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
     <div class="part-head">
       <div class="where">above the prompt box</div>
       <h2>The band</h2>
-      <p>Three lines that sit above where you type. The top line is about routing, the second about the health of the session; both update after every request. The third holds the buttons, so the band keeps its height.</p>
+      <p>Three lines that sit above where you type. The top line is about routing, the second about the health of the session; both update after every request. The third, right-aligned, holds every button, so the band keeps its height and the text lines share one left edge.</p>
     </div>
     <div class="grid wide">
       <div class="pane mono scroll">
@@ -229,22 +229,19 @@ td .ex { color: var(--muted); font-size: 13.5px; }
             </div>
             <div>
               <span class="zone inl" data-z="b5"><span class="pin">5</span><span class="dim">cache </span><span class="ok">96%</span><span class="dim"> 42m</span></span>
-              <span class="dim">&nbsp;·&nbsp;</span>
+              <span class="dim">·</span>
               <span class="zone inl" data-z="b6"><span class="pin">6</span><span class="dim">context </span><span class="ok">31%</span></span>
-              <span class="dim">&nbsp;·&nbsp;</span>
-              <span class="zone inl" data-z="b11"><span class="pin">11</span><span>next /clear</span></span>
-              <span class="dim">&nbsp;·&nbsp;</span>
+              <span class="dim">·</span>
               <span class="zone inl" data-z="b7"><span class="pin">7</span><span class="dim">last $0.05</span></span>
-              <span class="dim">&nbsp;·&nbsp;</span>
+              <span class="dim">·</span>
               <span class="zone inl" data-z="b8"><span class="pin">8</span><span class="dim">5h </span><span class="warn">74%</span><span class="dim"> · 7d 12%</span></span>
             </div>
           </div>
           <div class="btns">
-            <div>
-              <span class="zone inl" data-z="b12"><span class="pin">12</span><span class="main">Handoffs ●1</span></span>
-              <span class="zone inl" data-z="b10"><span class="pin">10</span><span class="main">Learn ●2</span></span>
-            </div>
-            <span class="zone inl" data-z="b9"><span class="pin">9</span><span>Routes</span></span>
+            <span class="zone inl" data-z="b12"><span class="pin">12</span><span class="main">Handoffs ●1</span></span>
+            <span class="zone inl" data-z="b10"><span class="pin">10</span><span class="main">Learn ●2</span></span>
+            <span class="zone inl" data-z="b11"><span class="pin">11</span><span class="primary">next /clear</span></span>
+            <span class="zone inl" data-z="b9"><span class="pin">9</span><span class="dim">Context</span> &nbsp;<span class="dim">Last</span> &nbsp;<span>Routes</span></span>
           </div>
         </div>
       </div>
@@ -254,11 +251,11 @@ td .ex { color: var(--muted); font-size: 13.5px; }
         <div class="note" data-z="b3"><span class="n">3</span><h3>Session total</h3><div class="body"><p>Estimated spend in this session so far, across all routes.</p></div></div>
         <div class="note" data-z="b4"><span class="n">4</span><h3>Draft marker</h3><div class="body"><p>Appears while you have unapplied changes in the Routes pane.</p></div></div>
         <div class="note" data-z="b5"><span class="n">5</span><h3>Cache</h3><div class="body"><p><b>96%</b> is how much of the last request was read from the prompt cache (green above 80%, yellow above 50%, red below). <b>42m</b> is how long the cache stays warm; it turns yellow in the last 5 minutes. Once it runs out it shows <span class="m">cold $1.60</span>: what your next send would cost to rebuild the cache.</p></div></div>
-        <div class="note" data-z="b6"><span class="n">6</span><h3>Context</h3><div class="body"><p>How full the context window is. Green until 60% of the way to auto-compaction, yellow to 85%, red after. Click the word <b>context</b> for the <a href="#context">Context pane</a>.</p></div></div>
-        <div class="note" data-z="b7"><span class="n">7</span><h3>Last prompt cost</h3><div class="body"><p>What your whole last prompt cost, including every subagent it started. It grows live while the prompt runs. Click it for the <a href="#last">Last prompt pane</a>.</p></div></div>
+        <div class="note" data-z="b6"><span class="n">6</span><h3>Context</h3><div class="body"><p>How full the context window is. Green until 60% of the way to auto-compaction, yellow to 85%, red after. <b>Context</b> on the last line opens the <a href="#context">Context pane</a>.</p></div></div>
+        <div class="note" data-z="b7"><span class="n">7</span><h3>Last prompt cost</h3><div class="body"><p>What your whole last prompt cost, including every subagent it started. It grows live while the prompt runs. <b>Last</b> on the last line opens the <a href="#last">Last prompt pane</a>.</p></div></div>
         <div class="note" data-z="b8"><span class="n">8</span><h3>Usage limits</h3><div class="body"><p>How much of your 5-hour and 7-day plan limits is used. Yellow from 70%, red from 90%.</p></div></div>
-        <div class="note" data-z="b9"><span class="n">9</span><h3>Routes</h3><div class="body"><p>Opens the <a href="#routes">Routes pane</a>. To hide the band, use its <b>Band</b> row or <code>/route band off</code>; it is kept off the band so a stray click can't hide it.</p></div></div>
-        <div class="note" data-z="b11"><span class="n">11</span><h3>Next step</h3><div class="body"><p>Only when carrying on is not the best move. <b>next /clear</b> after a <code>git commit</code> or a pull request over 50k tokens or more, until your next prompt; once a plan is written to disk (implement it in a fresh context); after two corrections in a row; once the cache has gone cold over a big context; or after an auto-handoff was saved. <b>next /handoff</b> (or <b>next handoff</b> without the skill) instead of clearing after a commit or compacting, when two or more todos or tasks are still open. <b>next /compact</b> within 15% of auto-compact, or when the conversation is most of a context that is 60% of the way there. Click it for the reason, priced, at the top of the <a href="#context">Context pane</a>'s tips. It shows with learn mode on or off; <code>/route next off</code> hides it and the Context pane's advice tip.</p></div></div>
+        <div class="note" data-z="b9"><span class="n">9</span><h3>Context / Last / Routes</h3><div class="body"><p>Open the <a href="#context">Context pane</a>, the <a href="#last">Last prompt pane</a> and the <a href="#routes">Routes pane</a>. To hide the band, use its <b>Band</b> row or <code>/route band off</code>; it is kept off the band so a stray click can't hide it.</p></div></div>
+        <div class="note" data-z="b11"><span class="n">11</span><h3>Next step</h3><div class="body"><p>Only when carrying on is not the best move. <b>next /clear</b> after a <code>git commit</code> or a pull request over 50k tokens or more, until your next prompt; once a plan is written to disk (implement it in a fresh context); after two corrections in a row; once the cache has gone cold over a big context; or after an auto-handoff was saved. <b>next /handoff</b> (or <b>next handoff</b> without the skill) instead of clearing after a commit or compacting, when two or more todos or tasks are still open. <b>next /compact</b> within 15% of auto-compact, or when the conversation is most of a context that is 60% of the way there. A highlighted button on the last line; click it for the reason, priced, at the top of the <a href="#context">Context pane</a>'s tips. It shows with learn mode on or off; <code>/route next off</code> hides it and the Context pane's advice tip.</p></div></div>
         <div class="note" data-z="b10"><span class="n">10</span><h3>Learn</h3><div class="body"><p>Only while <a href="#learn">learn mode</a> is on and there are lessons you haven't opened: the number is how many, counted in the Learn pane's scope (this repo, or all repos). Click it for the Learn pane.</p></div></div>
         <div class="note" data-z="b12"><span class="n">12</span><h3>Handoffs</h3><div class="body"><p>Only when other sessions left handoffs open in this repo, until you open the <a href="#handoffs">Handoffs pane</a>. Never shown while handoffs are off (<code>/route handoffs off</code>).</p></div></div>
       </div>

@@ -16,56 +16,42 @@ function bandHead(cfg: RouterConfig, now: ActiveRoute | null): string {
   return `▸ ${now.route} · ${routeText(now.model, now.effort)}${now.isHeld ? ' (held)' : ''}`
 }
 
-function healthRowView({ Box, Text, Button }: Els, health: Health | null, open: Open) {
-  if (health === null) return null
+/** Text only: a desktop draws every Button as a native control, which would break up the line's spacing. */
+function healthRowView({ Text }: Els, health: Health | null) {
+  if (health === null) return <Text> </Text>
   const cacheColor = health.cache < 50 ? 'error' : health.cache < 80 ? 'warning' : 'success'
   const limits = [['5h', health.fiveHour], ['7d', health.sevenDay]].filter((one): one is [string, number] => one[1] !== undefined)
   return (
-    <Box flexDirection="row">
-      <Text dimColor>
-        {'cache '}
-        {health.warmMinutes === 0 ? (
-          <Text color="error">{health.coldUsd === undefined ? 'cold' : `cold ${money(health.coldUsd)}`}</Text>
-        ) : (
-          <Text>
-            <Text color={cacheColor}>{health.cache}%</Text>{' '}
-            <Text color={health.warmMinutes <= 5 ? 'warning' : undefined}>{health.warmMinutes}m</Text>
-          </Text>
-        )}
-        {'  ·  '}
-      </Text>
-      <Button key="ctx" label="context" plain dimColor onPress={() => open('context')} />
-      <Text dimColor>
-        {' '}
-        <Text color={health.ctxLevel}>{health.ctx}%</Text>
-        {'  ·  '}
-      </Text>
-      {health.advice === undefined ? null : (
-        <Box flexDirection="row">
-          <Button key="advice" label={`next ${health.advice.command ?? `/${health.advice.verdict}`}`} plain onPress={() => open('context')} />
-          <Text dimColor>{'  ·  '}</Text>
-        </Box>
-      )}
-      <Button key="last-cost" label={`last ${money(health.last)}`} plain dimColor onPress={() => open('last')} />
-      {limits.length === 0 ? null : (
-        <Text dimColor>
-          {limits.map(([name, pct]) => (
-            <Text key={`l:${name}`}>
-              {`  ·  ${name} `}
-              <Text color={level(pct, 70, 90)}>{pct}%</Text>
-            </Text>
-          ))}
+    <Text dimColor wrap="truncate-end">
+      {'cache '}
+      {health.warmMinutes === 0 ? (
+        <Text color="error">{health.coldUsd === undefined ? 'cold' : `cold ${money(health.coldUsd)}`}</Text>
+      ) : (
+        <Text>
+          <Text color={cacheColor}>{health.cache}%</Text>{' '}
+          <Text color={health.warmMinutes <= 5 ? 'warning' : undefined}>{health.warmMinutes}m</Text>
         </Text>
       )}
-    </Box>
+      {' · context '}
+      <Text color={health.ctxLevel}>{health.ctx}%</Text>
+      {' · '}
+      {`last ${money(health.last)}`}
+      {limits.map(([name, pct]) => (
+        <Text key={`l:${name}`}>
+          {` · ${name} `}
+          <Text color={level(pct, 70, 90)}>{pct}%</Text>
+        </Text>
+      ))}
+    </Text>
   )
 }
 
 type BandData = { cfg: RouterConfig; now: ActiveRoute | null; pending: RouterConfig | null; total: number; health: Health | null; learnUnread: number; handoffsOpen: number }
 
 /**
- * Always three rows, so the band never changes height: the route line and the health row each get the full width,
- * and the buttons share the last row. Hiding lives in the Routes pane, away from the buttons pressed every day.
+ * Always three rows, so the band never changes height: the route line and the health row are text across the full
+ * width, and every button sits right-aligned on the last row, where a desktop's native button padding can't break the
+ * left edge. Hiding lives in the Routes pane, away from the buttons pressed every day.
  */
 export function bandView(els: Els, { cfg, now, pending, total, health, learnUnread, handoffsOpen }: BandData, { open }: { open: Open }) {
   const { Box, Text, Button } = els
@@ -82,13 +68,16 @@ export function bandView(els: Els, { cfg, now, pending, total, health, learnUnre
         {pending ? <Text color="warning">● draft</Text> : null}
       </Box>
       <Box key="band-health" flexDirection="row">
-        {healthRowView(els, health, open) ?? <Text> </Text>}
+        {healthRowView(els, health)}
       </Box>
-      <Box key="band-actions" flexDirection="row" justifyContent="space-between" gap={2}>
-        <Box flexDirection="row" gap={2}>
-          {handoffsOpen > 0 ? <Button key="band-handoffs" label={`Handoffs ●${handoffsOpen}`} plain onPress={() => open('handoffs')} /> : null}
-          {learnUnread > 0 ? <Button key="band-learn" label={`Learn ●${learnUnread}`} plain onPress={() => open('learn')} /> : null}
-        </Box>
+      <Box key="band-actions" flexDirection="row" justifyContent="flex-end" gap={1}>
+        {handoffsOpen > 0 ? <Button key="band-handoffs" label={`Handoffs ●${handoffsOpen}`} plain onPress={() => open('handoffs')} /> : null}
+        {learnUnread > 0 ? <Button key="band-learn" label={`Learn ●${learnUnread}`} plain onPress={() => open('learn')} /> : null}
+        {health?.advice === undefined ? null : (
+          <Button key="advice" label={`next ${health.advice.command ?? `/${health.advice.verdict}`}`} variant="primary" onPress={() => open('context')} />
+        )}
+        <Button key="ctx" label="Context" plain dimColor onPress={() => open('context')} />
+        <Button key="band-last" label="Last" plain dimColor onPress={() => open('last')} />
         <Button key="band-open" label="Routes" plain onPress={() => open('route')} />
       </Box>
     </Box>
