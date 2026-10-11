@@ -1,16 +1,15 @@
 import type { HandoffRecord, HandoffStatus, Handoffs } from '../types'
-import { HANDOFF_DIR, segment, tildePath } from './handoff'
+import { handoffDir, handoffsRoot, tildePath } from './handoff'
+import { printable } from './routes'
 
 export type { HandoffRecord, HandoffStatus, Handoffs }
+export { handoffDir, handoffsRoot }
 export type HandoffRow = { path: string; repo: string; at: number; title: string; isOpen: boolean; reason?: string }
 
 export const STALE_MS = 14 * 86_400_000
 const KEPT = 500
-const STATUSES: ReadonlySet<string> = new Set(['open', 'done', 'dropped', 'resumed', 'superseded'])
 const REASON: Record<Exclude<HandoffStatus, 'open'>, string> = { done: 'done', dropped: 'not relevant', resumed: 'resumed', superseded: 'superseded' }
-
-export const handoffsRoot = (home: string) => `${home.replace(/\/+$/, '')}/${HANDOFF_DIR}`
-export const handoffDir = (home: string, repo: string) => `${handoffsRoot(home)}/${segment(repo)}`
+const STATUSES: ReadonlySet<string> = new Set(['open', ...Object.keys(REASON)])
 
 export function repoOfHandoff(path: string, home: string | undefined): string | undefined {
   if (home === undefined || home === '') return undefined
@@ -34,10 +33,10 @@ function isRecord(value: unknown): value is HandoffRecord {
 }
 
 const clean = ({ repo, at, sessionId, title, status, reopenedAt }: HandoffRecord): HandoffRecord => ({
-  repo,
+  repo: printable(repo),
   at,
   ...(sessionId === undefined ? {} : { sessionId }),
-  ...(title === undefined ? {} : { title }),
+  ...(title === undefined ? {} : { title: printable(title) }),
   status,
   ...(reopenedAt === undefined ? {} : { reopenedAt }),
 })
@@ -64,6 +63,10 @@ export function recordWritten(records: Handoffs, path: string, rec: Omit<Handoff
 
 /** Each listed repo's files as they are on disk; repos not in the listing, and handoffs recorded after `listedAt`, are left as they were. */
 export function mergeListing(records: Handoffs, listing: Readonly<Record<string, readonly { path: string; mtimeMs: number }[]>>, listedAt: number): Handoffs {
+  const isUnchanged =
+    Object.entries(records).every(([path, r]) => listing[r.repo] === undefined || r.at > listedAt || listing[r.repo]!.some(one => one.path === path)) &&
+    Object.values(listing).every(files => files.every(one => records[one.path] !== undefined))
+  if (isUnchanged) return records
   const next: Handoffs = {}
   for (const [path, r] of Object.entries(records)) {
     const files = listing[r.repo]
@@ -84,6 +87,17 @@ export function setStatus(records: Handoffs, path: string, status: HandoffStatus
 export function reopen(records: Handoffs, path: string, now: number): Handoffs {
   const r = records[path]
   return r === undefined ? records : { ...records, [path]: { ...r, status: 'open', reopenedAt: now } }
+}
+
+/** The open handoffs `text` names, marked resumed; the same records when it names none. */
+export function resumeIn(records: Handoffs, text: string, home: string | undefined): Handoffs {
+  return resumedBy(text, records, home).reduce((acc, path) => setStatus(acc, path, 'resumed'), records)
+}
+
+/** Titles read from disk, applied to the records they belong to; the same records when none apply. */
+export function withTitles(records: Handoffs, titles: Readonly<Record<string, string>>): Handoffs {
+  const known = Object.entries(titles).filter(([path]) => records[path] !== undefined)
+  return known.length === 0 ? records : { ...records, ...Object.fromEntries(known.map(([path, title]) => [path, { ...records[path]!, title: printable(title) }])) }
 }
 
 export function resumedBy(text: string, records: Handoffs, home: string | undefined): string[] {

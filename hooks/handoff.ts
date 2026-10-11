@@ -55,11 +55,14 @@ export function pendingAfter(pending: PendingHandoff, event: PendingEvent): Pend
 const pad = (n: number) => String(n).padStart(2, '0')
 export const segment = (text: string) => text.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^\.+/, '-') || '-'
 
+export const handoffsRoot = (home: string) => `${home.replace(/\/+$/, '')}/${HANDOFF_DIR}`
+export const handoffDir = (home: string, repo: string) => `${handoffsRoot(home)}/${segment(repo)}`
+
 /** `<home>/.claude/handoffs/<repo>/<YYYY-MM-DD-HHMM>-<session id, 8 chars>.md`, in local time. */
 export function handoffPath(home: string, repo: string, now: number, sessionId: string): string {
   const d = new Date(now)
   const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`
-  return `${home.replace(/\/+$/, '')}/${HANDOFF_DIR}/${segment(repo)}/${stamp}-${segment(sessionId).slice(0, 8)}.md`
+  return `${handoffDir(home, repo)}/${stamp}-${segment(sessionId).slice(0, 8)}.md`
 }
 
 export function tildePath(path: string, home: string | undefined): string

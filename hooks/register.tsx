@@ -73,7 +73,7 @@ import {
 } from './routes'
 import { HANDOFF_DIR, HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, pendingAfter, segment, shouldAutoHandoff, tildePath } from './handoff'
 import type { PendingHandoff } from './handoff'
-import { bandCount, handoffDir, handoffRows, handoffsRoot, mergeListing, recordWritten, reopen, repoOfHandoff, resumedBy, sanitizeHandoffs, setStatus, titleOf } from './handoffs'
+import { bandCount, handoffDir, handoffRows, handoffsRoot, mergeListing, recordWritten, reopen, repoOfHandoff, resumeIn, sanitizeHandoffs, setStatus, titleOf, withTitles } from './handoffs'
 import type { HandoffStatus, Handoffs } from './handoffs'
 import { EXPLORE_MIN, NO_STEPS, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
 import type { Steps } from './signals'
@@ -196,11 +196,23 @@ function setHandoffs($: $, fn: (all: Handoffs) => Handoffs): Promise<Handoffs> {
   return run
 }
 
+/** An edit that returns the records it was given changes nothing, so nothing is saved. */
 async function applyHandoffs($: $, fn: (all: Handoffs) => Handoffs): Promise<Handoffs> {
   const stored = await load($, STORE.handoffs)
-  const next = await update($, handoffs, all => fn(stored === UNREADABLE || stored === undefined ? all : sanitizeHandoffs(stored)))
-  if (stored !== UNREADABLE) await save($, STORE.handoffs, next)
+  let isChanged = false
+  const next = await update($, handoffs, all => {
+    const base = stored === UNREADABLE || stored === undefined ? all : sanitizeHandoffs(stored)
+    const edited = fn(base)
+    isChanged = edited !== base
+    return edited
+  })
+  if (isChanged && stored !== UNREADABLE) await save($, STORE.handoffs, next)
   return next
+}
+
+async function recordHandoff($: $, path: string, repo: string, title: string | undefined) {
+  const [at, sessionId] = [await nowOf($), mem.kept.sessionId]
+  await setHandoffs($, all => recordWritten(all, path, { repo, at, ...(sessionId === undefined ? {} : { sessionId }), ...(title === undefined ? {} : { title }) })).catch(() => undefined)
 }
 
 type Listed = { path: string; mtimeMs: number }[]
@@ -216,34 +228,27 @@ async function listHandoffs($: $, dir: string): Promise<Listed | undefined> {
 }
 
 /** Brings the records in line with the folder on disk, and reads the titles of files seen there first. */
-async function refreshHandoffs($: $) {
+async function refreshHandoffs($: $, scope?: Scope) {
   const home = mem.home
   if (home === undefined) return
-  const scope = await read($, handoffScope)
-  const repos = scope === 'repo' ? [segment(mem.repo)] : ((await $.fs.list(handoffsRoot(home)).catch(() => undefined))?.filter(one => one.kind === 'dir').map(one => one.name) ?? [])
-  const listing: Record<string, Listed> = {}
+  const inScope = scope ?? (await read($, handoffScope))
+  const repos = inScope === 'repo' ? [segment(mem.repo)] : ((await $.fs.list(handoffsRoot(home)).catch(() => undefined))?.filter(one => one.kind === 'dir').map(one => one.name) ?? [])
   const listedAt = await nowOf($)
-  for (const repo of repos) {
-    const files = await listHandoffs($, handoffDir(home, repo))
-    if (files !== undefined) listing[repo] = files
-  }
-  const merged = await setHandoffs($, all => mergeListing(all, listing, listedAt))
-  const untitled = Object.entries(merged).filter(([, r]) => r.title === undefined).sort((a, b) => b[1].at - a[1].at).slice(0, 20)
-  const titles: Record<string, string> = {}
-  for (const [path] of untitled) {
-    // An empty title marks a file read and found without a heading, so it isn't read again.
-    titles[path] = titleOf(await $.fs.read(path).then(text => (typeof text === 'string' ? text : ''), () => '')) ?? ''
-  }
-  if (Object.keys(titles).length > 0) {
-    await setHandoffs($, all => Object.fromEntries(Object.entries(all).map(([path, r]) => [path, titles[path] === undefined ? r : { ...r, title: titles[path] }])))
-  }
+  const lists = await Promise.all(repos.map(repo => listHandoffs($, handoffDir(home, repo))))
+  const listing: Record<string, Listed> = Object.fromEntries(repos.flatMap((repo, i) => (lists[i] === undefined ? [] : [[repo, lists[i]!]])))
+  const preview = mergeListing(await read($, handoffs), listing, listedAt)
+  const untitled = Object.entries(preview).filter(([, r]) => r.title === undefined).sort((a, b) => b[1].at - a[1].at).slice(0, 20)
+  // An empty title marks a file read and found without a heading, so it isn't read again.
+  const found = await Promise.all(untitled.map(([path]) => $.fs.read(path).then(text => titleOf(typeof text === 'string' ? text : '') ?? '', () => '')))
+  const titles = Object.fromEntries(untitled.map(([path], i) => [path, found[i]!]))
+  await setHandoffs($, all => withTitles(mergeListing(all, listing, listedAt), titles))
 }
 
 async function renderHandoffsPane($: $, e: Args<'ui.render'>) {
   const [all, scope, isClosedShown, now] = await Promise.all([read($, handoffs), read($, handoffScope), read($, handoffClosedShown), nowOf($)])
   const repo = segment(mem.repo)
   const { open, closed } = handoffRows(all, scope === 'repo' ? repo : undefined, now)
-  const folder = mem.home === undefined ? '~/.claude/handoffs/' : tildePath(scope === 'repo' ? handoffDir(mem.home, repo) : handoffsRoot(mem.home), mem.home)
+  const folder = mem.home === undefined ? `~/${HANDOFF_DIR}/` : tildePath(scope === 'repo' ? handoffDir(mem.home, repo) : handoffsRoot(mem.home), mem.home)
   return handoffsPaneView($.ui.resolve(e), { open, closed, isClosedShown, scope, repo, folder }, {
     resume: path => void $.prompt.fill({ text: `resume from ${tildePath(path, mem.home)}`, mode: 'replace' }).catch(() => undefined),
     setStatus: (path, status: HandoffStatus) => void setHandoffs($, records => setStatus(records, path, status)),
@@ -280,8 +285,7 @@ async function finishHandoff($: $, e: Args<'turn.complete'>) {
     return
   }
   mem.handoffPath = path
-  const title = titleOf(e.answer)
-  await setHandoffs($, all => recordWritten(all, path, { repo: segment(mem.repo), at: now, ...(sessionId === undefined ? {} : { sessionId }), ...(title === undefined ? {} : { title }) })).catch(() => undefined)
+  await recordHandoff($, path, segment(mem.repo), titleOf(e.answer))
   if (cfg.isLearning) {
     const avoidedUsd = rewritePrice(asked.model, asked.tokens, cfg.cacheTtlMinutes).write
     mem.pendingLessons.push(lessonFromAutoHandoff({ spentUsd: cost?.usd ?? 0, avoidedUsd, tokens: asked.tokens, path: tildePath(path, mem.home) }))
@@ -542,14 +546,9 @@ async function noteToolCall($: $, e: Args<'tool.call'>, result: unknown) {
   if (e.agentId === undefined) {
     if (e.tool === 'Bash' && typeof input.command === 'string') mem.boundary = boundaryOf(input.command) ?? mem.boundary
     mem.steps = stepsAfter(mem.steps, e.tool, input, result)
-    const handoffRepo = e.tool === 'Write' && typeof input.file_path === 'string' ? repoOfHandoff(input.file_path, mem.home) : undefined
-    if (handoffRepo !== undefined) {
-      const path = input.file_path as string
-      const title = typeof input.content === 'string' ? titleOf(input.content) : undefined
-      const sessionId = mem.kept.sessionId
-      const at = await nowOf($)
-      await setHandoffs($, all => recordWritten(all, path, { repo: handoffRepo, at, ...(sessionId === undefined ? {} : { sessionId }), ...(title === undefined ? {} : { title }) })).catch(() => undefined)
-    }
+    const written = e.tool === 'Write' && typeof input.file_path === 'string' ? input.file_path : undefined
+    const handoffRepo = written === undefined ? undefined : repoOfHandoff(written, mem.home)
+    if (written !== undefined && handoffRepo !== undefined) await recordHandoff($, written, handoffRepo, typeof input.content === 'string' ? titleOf(input.content) : undefined)
     const plan = planEventOf(e.tool, input, result)
     if (plan?.kind === 'saved') mem.planPath = plan.path
     if (plan?.kind === 'work') mem.planPath = undefined
@@ -713,11 +712,20 @@ async function raisePane($: $, pane: keyof typeof PANES) {
   await $.ui.open(PANES[pane])
 }
 
-const openPane = ($: $): Open => pane => {
-  if (pane === 'learn') void markLessonsRead($).catch(() => undefined)
-  if (pane === 'handoffs') void update($, handoffBandSeen, () => true).then(() => refreshHandoffs($)).catch(() => undefined)
-  void raisePane($, pane).catch(() => undefined)
+/** What opening a pane does besides showing it. */
+async function onOpen($: $, pane: keyof typeof PANES) {
+  if (pane === 'learn') await markLessonsRead($)
+  if (pane === 'handoffs') {
+    await update($, handoffBandSeen, () => true)
+    await refreshHandoffs($)
+  }
 }
+
+async function showPane($: $, pane: keyof typeof PANES) {
+  await Promise.all([onOpen($, pane).catch(() => undefined), raisePane($, pane).catch(() => undefined)])
+}
+
+const openPane = ($: $): Open => pane => void showPane($, pane)
 
 async function renderLearnPane($: $, e: Args<'ui.render'>) {
   const [cfg, all, expanded, rows, scope] = await Promise.all([read($, config), read($, lessons), read($, learnOpen), read($, learnRows), read($, learnScope)])
@@ -755,7 +763,7 @@ async function renderStatsPane($: $, e: Args<'ui.render'>) {
 const setBand = async ($: $, isShown: boolean) => save($, STORE.bandShown, await update($, isBandShown, () => isShown))
 
 async function renderBand($: $, e: Args<'ui.render'>) {
-  const [cfg, now, pending, costs, hp, kept, readAt, scope, records, isBandSeen, at] = await Promise.all([
+  const [cfg, now, pending, costs, hp, kept, readAt, scope, records, isBandSeen] = await Promise.all([
     read($, config),
     read($, active),
     read($, draft),
@@ -766,9 +774,8 @@ async function renderBand($: $, e: Args<'ui.render'>) {
     read($, learnScope),
     read($, handoffs),
     read($, handoffBandSeen),
-    nowOf($),
   ])
-  const handoffsOpen = isBandSeen ? 0 : bandCount(records, segment(mem.repo), mem.kept.sessionId, at)
+  const handoffsOpen = isBandSeen ? 0 : bandCount(records, segment(mem.repo), mem.kept.sessionId, await nowOf($))
   const learnUnread = cfg.isLearning ? unreadCount(inScope(kept, scope), readAt, cfg.learnMuted) : 0
   const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp, learnUnread, handoffsOpen }
   return bandView($.ui.resolve(e), data, { open: openPane($), hide: () => void setBand($, false) })
@@ -1051,13 +1058,16 @@ export const register: Register = on => {
       listCommands($),
     ])
     mem.home = home
-    void refreshHandoffs($).catch(() => undefined)
+    // The band only needs this repo's; the pane lists every repo when it opens under All.
+    void refreshHandoffs($, 'repo').catch(() => undefined)
     mem.hasHandoffSkill = hasHandoffCommand(commands.map(one => one.name))
     const isSame = sessionId !== undefined && before?.sessionId === sessionId
     // A copy: noteUse writes into `used`, and the atom's own value is not ours to change in place.
     mem.kept = isSame ? { ...before, used: { ...before.used } } : { sessionId, used: {}, isUncounted: true }
-    if (!isSame) await carry($)
-    if (!isSame) await update($, handoffBandSeen, () => false)
+    if (!isSame) {
+      await carry($)
+      await update($, handoffBandSeen, () => false)
+    }
     mem.loaded = undefined
     mem.savedUsage = undefined
     mem.patience = idleDev === '1' ? DEV_PATIENCE : PATIENCE
@@ -1146,9 +1156,9 @@ export const register: Register = on => {
     if (USER_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) mem.corrections = isCorrection(e.text) ? mem.corrections + 1 : 0
     const out = await next(e)
     // Marked once the prompt is through: a hook further down may still drop it.
-    if (resumeText !== undefined && out.drop === undefined && resumedBy(resumeText, await read($, handoffs), mem.home).length > 0) {
+    if (resumeText !== undefined && out.drop === undefined) {
       const text = resumeText
-      await setHandoffs($, all => resumedBy(text, all, mem.home).reduce((acc, path) => setStatus(acc, path, 'resumed'), all)).catch(() => undefined)
+      await setHandoffs($, all => resumeIn(all, text, mem.home)).catch(() => undefined)
     }
     return out
   }).catch(($, e, next) => next(e))
@@ -1271,11 +1281,7 @@ export const register: Register = on => {
     const [verb = 'route', ...rest] = e.args.trim().split(/\s+/).filter(Boolean)
     if (Object.hasOwn(PANES, verb) && rest.length === 0) {
       const pane = verb as keyof typeof PANES
-      if (pane === 'handoffs') {
-        await update($, handoffBandSeen, () => true)
-        await refreshHandoffs($).catch(() => undefined)
-        await raisePane($, pane).catch(() => undefined)
-      } else openPane($)(pane)
+      await showPane($, pane)
       return { text: `${PANES[pane].title} pane opened.` }
     }
     if (verb === 'away') return { text: await awayReport($) }
