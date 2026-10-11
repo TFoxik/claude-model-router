@@ -2,6 +2,7 @@ import type { Args, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { Lesson } from '../types'
+import { longStamp, stamp } from './ui/kit'
 
 import {
   DEFAULT_CONFIG,
@@ -1150,6 +1151,31 @@ test('the Learn pane shows this repo first, and All tags each fact with its repo
   expect(await pane.find({ type: 'Text', text: 'unknown · ' })).toBeDefined()
   expect(saved.learnScope).toBe('all')
   await pane.unmount()
+})
+
+test('a Learn row opens on press, and the earlier ones past two show on demand', async ($, on) => {
+  const at = (i: number) => T0 + i * 60_000
+  const lessons: Lesson[] = [0, 1, 2, 3, 4].map(i => ({ kind: 'cold-rewrite', at: at(i), repo: 'unknown', fact: `fact ${i}` }))
+  mock.store(on, { config: { ...MINE, isLearning: true }, lessons })
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  on('ui.open', () => ({ value: undefined }) as never)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const pane = await mountPane($, 'learn', surface)
+    expect(await pane.find({ type: 'Text', text: stamp(at(4)) })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /fact 0$/ })).toBeUndefined()
+    expect(await pane.find({ type: 'Text', text: / · in unknown$/ })).toBeUndefined()
+    await pane.press({ key: `row:cold-rewrite:${at(3)}` })
+    expect(await pane.find({ type: 'Text', text: `${longStamp(at(3))} · in unknown` })).toBeDefined()
+    await pane.press({ key: `row:cold-rewrite:${at(3)}` })
+    expect(await pane.find({ type: 'Text', text: / · in unknown$/ })).toBeUndefined()
+    expect(await pane.find({ type: 'Button', text: 'show 2 more' })).toBeDefined()
+    await pane.press({ key: 'all:cold-rewrite' })
+    expect(await pane.find({ type: 'Text', text: /fact 0$/ })).toBeDefined()
+    await pane.press({ key: 'all:cold-rewrite' })
+    expect(await pane.find({ type: 'Text', text: 'Habits' })).toBeDefined()
+    await pane.unmount()
+  }
 })
 
 test('the Learn pane points to other repos when this one has no lessons', async ($, on) => {

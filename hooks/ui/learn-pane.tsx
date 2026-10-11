@@ -1,40 +1,80 @@
 import type { Lesson, LessonKind, Scope } from '../../types'
 import { CONCEPTS, HABITS, SEEN_ENOUGH, byKind } from '../lessons'
 import { PRICES_AS_OF } from '../routes'
-import { DATE_W, day } from './kit'
+import { STAMP_W, longStamp, stamp } from './kit'
 import type { Els } from './kit'
 
-type LearnData = { lessons: readonly Lesson[]; isLearning: boolean; muted: readonly LessonKind[]; expanded: readonly LessonKind[]; scope: Scope; repo: string }
+type LearnData = {
+  lessons: readonly Lesson[]
+  isLearning: boolean
+  muted: readonly LessonKind[]
+  expanded: readonly LessonKind[]
+  /** Rows pressed open: `rowId()` of a fact, or `all:<kind>` for every earlier one. */
+  rows: readonly string[]
+  scope: Scope
+  repo: string
+}
 type LearnActions = {
   setLearning: (isOn: boolean) => void
   setMuted: (kind: LessonKind, isMuted: boolean) => void
   toggle: (kind: LessonKind) => void
+  toggleRow: (id: string) => void
   setScope: (scope: Scope) => void
 }
 
 const OLDER_SHOWN = 2
 
-/** A dated fact with a hanging indent; an older one is one dim line, since it mostly repeats the latest. */
-function factRow({ Box, Text }: Els, key: string, one: Lesson, isOlder: boolean, showsRepo: boolean) {
+const rowId = (one: Lesson) => `${one.kind}:${one.at}`
+
+/**
+ * A stamped fact with a hanging indent; an older one is one dim line, since it mostly repeats the latest.
+ * Pressing it opens the whole fact with when and where it happened.
+ */
+function factRow({ Box, Text, Button }: Els, one: Lesson, isOlder: boolean, showsRepo: boolean, isOpen: boolean, toggleRow: (id: string) => void) {
+  const id = rowId(one)
+  const isDim = isOlder && !isOpen
   return (
-    <Box key={key} flexDirection="row">
-      <Box width={DATE_W} flexShrink={0}>
-        <Text dimColor>{day(one.at)}</Text>
+    <Box key={`f:${id}`} flexDirection="row">
+      <Box width={STAMP_W} flexShrink={0}>
+        <Text dimColor>{stamp(one.at)}</Text>
       </Box>
-      <Box flexGrow={1} flexShrink={1} minWidth={0}>
-        <Text dimColor={isOlder} wrap={isOlder ? 'truncate-end' : 'wrap'}>
-          {showsRepo ? <Text dimColor>{`${one.repo} · `}</Text> : null}
-          {one.fact}
-        </Text>
+      <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+        <Button key={`row:${id}`} plain hover={{ underline: true }} onPress={() => toggleRow(id)}>
+          <Text dimColor={isDim} wrap={isDim ? 'truncate-end' : 'wrap'}>
+            {showsRepo ? <Text dimColor>{`${one.repo} · `}</Text> : null}
+            {one.fact}
+          </Text>
+        </Button>
+        {isOpen ? <Text dimColor italic>{`${longStamp(one.at)} · in ${one.repo}`}</Text> : null}
       </Box>
+    </Box>
+  )
+}
+
+/** The habits worth keeping whatever the lessons say, boxed apart from them. */
+function habitsSection({ Box, Text }: Els) {
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="claude" borderDimColor paddingX={1} gap={1}>
+      <Text bold color="claude">Habits</Text>
+      {HABITS.map(one => (
+        <Box key={`h:${one.title}`} flexDirection="row" gap={1}>
+          <Box width={2} flexShrink={0}>
+            <Text color="claude">›</Text>
+          </Box>
+          <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+            <Text bold>{one.title}</Text>
+            <Text dimColor wrap="wrap">{one.body}</Text>
+          </Box>
+        </Box>
+      ))}
     </Box>
   )
 }
 
 export function learnPaneView(
   els: Els,
-  { lessons, isLearning, muted, expanded, scope, repo }: LearnData,
-  { setLearning, setMuted, toggle, setScope }: LearnActions,
+  { lessons, isLearning, muted, expanded, rows, scope, repo }: LearnData,
+  { setLearning, setMuted, toggle, toggleRow, setScope }: LearnActions,
 ) {
   const { Box, Text, Button } = els
   const unmuted = lessons.filter(one => !muted.includes(one.kind))
@@ -66,6 +106,8 @@ export function learnPaneView(
       {groups.map(([kind, list]) => {
         const isOpen = list.length < SEEN_ENOUGH !== expanded.includes(kind)
         const [latest, ...older] = list
+        const isAllShown = rows.includes(`all:${kind}`)
+        const hidden = older.length - OLDER_SHOWN
         return (
           <Box key={`k:${kind}`} flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
             <Box flexDirection="row" justifyContent="space-between" gap={2}>
@@ -77,11 +119,16 @@ export function learnPaneView(
                 <Button key={`mute:${kind}`} label="mute" plain dimColor onPress={() => setMuted(kind, true)} />
               </Box>
             </Box>
-            {factRow(els, `l:${kind}`, latest!, false, showsRepo)}
+            {factRow(els, latest!, false, showsRepo, rows.includes(rowId(latest!)), toggleRow)}
             {older.length === 0 ? null : (
               <Box flexDirection="column" marginTop={1}>
-                <Text dimColor>{older.length > OLDER_SHOWN ? `Earlier, ${older.length - OLDER_SHOWN} more not shown` : 'Earlier'}</Text>
-                {older.slice(0, OLDER_SHOWN).map((one, i) => factRow(els, `o:${kind}:${i}`, one, true, showsRepo))}
+                <Box flexDirection="row" gap={1}>
+                  <Text dimColor>Earlier</Text>
+                  {hidden > 0 ? (
+                    <Button key={`all:${kind}`} label={isAllShown ? 'show fewer' : `show ${hidden} more`} plain dimColor onPress={() => toggleRow(`all:${kind}`)} />
+                  ) : null}
+                </Box>
+                {(isAllShown ? older : older.slice(0, OLDER_SHOWN)).map(one => factRow(els, one, true, showsRepo, rows.includes(rowId(one)), toggleRow))}
               </Box>
             )}
             {isOpen ? (
@@ -100,15 +147,7 @@ export function learnPaneView(
           ))}
         </Box>
       )}
-      <Box flexDirection="column">
-        <Text bold>Habits</Text>
-        {HABITS.map(one => (
-          <Text key={`h:${one.title}`} wrap="wrap">
-            <Text color="claude">{one.title}</Text>
-            <Text dimColor>{` · ${one.body}`}</Text>
-          </Text>
-        ))}
-      </Box>
+      {habitsSection(els)}
       <Box flexDirection="row" gap={1}>
         <Text dimColor>{`${isLearning ? 'learn mode on' : '/route learn on'} · prices as of ${PRICES_AS_OF}, estimates`}</Text>
         {isLearning ? <Button key="learn-off" label="Turn off" plain dimColor onPress={() => setLearning(false)} /> : null}

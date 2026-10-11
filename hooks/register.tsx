@@ -106,6 +106,7 @@ const isBandShown = atom({ plugin: 'model-router', key: 'isBandShown' } as const
 const lessons = atom({ plugin: 'model-router', key: 'lessons' } as const, [] as Lesson[])
 const lessonsReadAt = atom({ plugin: 'model-router', key: 'lessonsReadAt' } as const, 0)
 const learnOpen = atom({ plugin: 'model-router', key: 'learnOpen' } as const, [] as LessonKind[])
+const learnRows = atom({ plugin: 'model-router', key: 'learnRows' } as const, [] as string[])
 const learnScope = atom({ plugin: 'model-router', key: 'learnScope' } as const, 'repo' as Scope)
 // Atoms outlive a hot reload of this code and `mem` does not: this keeps what the session would lose with it.
 const carried = atom({ plugin: 'model-router', key: 'carried' } as const, null as Carried | null)
@@ -627,11 +628,12 @@ const openPane = ($: $): Open => pane => {
 }
 
 async function renderLearnPane($: $, e: Args<'ui.render'>) {
-  const [cfg, all, expanded, scope] = await Promise.all([read($, config), read($, lessons), read($, learnOpen), read($, learnScope)])
-  return learnPaneView($.ui.resolve(e), { lessons: all, isLearning: cfg.isLearning, muted: cfg.learnMuted, expanded, scope, repo: mem.repo }, {
+  const [cfg, all, expanded, rows, scope] = await Promise.all([read($, config), read($, lessons), read($, learnOpen), read($, learnRows), read($, learnScope)])
+  return learnPaneView($.ui.resolve(e), { lessons: all, isLearning: cfg.isLearning, muted: cfg.learnMuted, expanded, rows, scope, repo: mem.repo }, {
     setLearning: isOn => void setLearning($, isOn),
     setMuted: (kind, isMuted) => void setMuted($, kind, isMuted),
     toggle: kind => void update($, learnOpen, open => (open.includes(kind) ? open.filter(one => one !== kind) : [...open, kind])),
+    toggleRow: id => void update($, learnRows, open => (open.includes(id) ? open.filter(one => one !== id) : [...open, id])),
     setScope: async next => {
       await save($, STORE.learnScope, await update($, learnScope, () => next))
       await markLessonsRead($)

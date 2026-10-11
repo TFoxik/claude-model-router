@@ -10,8 +10,8 @@
   <text x="792" y="134" text-anchor="end"><tspan fill="#e9e7e2" text-decoration="underline">This repo</tspan><tspan fill="#8b8a86" text-decoration="underline" dx="8">All</tspan></text>
   <text x="28" y="164" fill="#e9e7e2" font-weight="700">Cache went cold</text>
   <text x="792" y="164" text-anchor="end"><tspan fill="#8b8a86" text-decoration="underline">hide why</tspan><tspan fill="#8b8a86" text-decoration="underline" dx="16">mute</tspan></text>
-  <text x="28" y="188"><tspan fill="#8b8a86">9.10.  </tspan><tspan fill="#e9e7e2">The cache had expired after 1h12m idle, so this send re-wrote 200k tokens on Opus 5.5</tspan></text>
-  <text x="28" y="204" fill="#e9e7e2"><tspan fill="#8b8a86">       </tspan>for $1.60; read warm they would have cost $0.04.</text>
+  <text x="28" y="188"><tspan fill="#8b8a86">9.10. 14:32</tspan><tspan x="122" fill="#e9e7e2">The cache had expired after 1h12m idle, so this send re-wrote 200k tokens</tspan></text>
+  <text x="122" y="204" fill="#e9e7e2">on Opus 5.5 for $1.60; read warm they would have cost $0.04.</text>
   <text x="28" y="230" fill="#8b8a86" font-style="italic">Each request re-sends the whole conversation. A warm prompt cache lets the API read it back cheaply,</text>
   <text x="28" y="246" fill="#8b8a86" font-style="italic">at a tenth of the input price or less. The cache expires after the TTL; the first send after that</text>
   <text x="28" y="262" fill="#8b8a86" font-style="italic">writes everything again, at 1.25-2× input. /clear and start from a short note, or come back in time.</text>

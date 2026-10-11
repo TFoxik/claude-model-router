@@ -109,6 +109,7 @@ declare module 'claude-code' {
       lessons: Lesson[]
       lessonsReadAt: number
       learnOpen: LessonKind[]
+      learnRows: string[]
       learnScope: Scope
       carried: Carried | null
     }
