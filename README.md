@@ -89,7 +89,7 @@ Routes: `main`, `plan`, `sub:*`, `sub:<agent-type>` (such as `sub:Explore`), `wo
 - **Switching the main loop's model or effort rewrites the cache once**, at 1.25-2× input over the whole context. The pane shows that cost before you apply. With plan and main routed differently, entering and leaving plan mode each pay it.
 - **Rerouting subagents is free**: they start with a fresh context. Forks always inherit the parent's model.
 - **Prices are estimates**, hard-coded in `hooks/routes.ts` (as of 2026-10-06). Model IDs are the Anthropic API's; on a provider that names models differently, turn routing off or set routes to `inherit`.
-- **The guard works from the band's clock**, not a server check, and doesn't keep the cache warm while you're away. [cache-tax](https://github.com/karanb192/cache-tax) does that with idle pings; with both installed, run `/route guard off` so only one guard fires.
+- **The guard works from the band's clock**, not a server check, and doesn't keep the cache warm while you're away.
 
 ## Overhead and privacy
 
