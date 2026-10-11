@@ -63,6 +63,7 @@ type PaneActions = {
   editDraft: (fn: (c: RouterConfig) => RouterConfig) => void
   toggle: () => void
   setLearning: (isOn: boolean) => void
+  setAutoHandoff: (isOn: boolean) => void
   openLearn: () => void
   apply: (next: RouterConfig) => void
   discard: () => void
@@ -84,7 +85,7 @@ type InputEls = Extract<Els, { Select: unknown }>
 
 export function routesPaneView(els: InputEls, data: PaneData, actions: PaneActions) {
   const { cfg, costs, now, isPlanning, pending, lastPrompt, contextTokens, sessionModel } = data
-  const { editDraft, toggle, setLearning, openLearn, apply, discard } = actions
+  const { editDraft, toggle, setLearning, setAutoHandoff, openLearn, apply, discard } = actions
   const { Box, Text, Button, Select } = els
   const shown = pending ?? cfg
   const ttlMinutes = cfg.cacheTtlMinutes
@@ -124,6 +125,16 @@ export function routesPaneView(els: InputEls, data: PaneData, actions: PaneActio
           <Button key="learn-toggle" label={cfg.isLearning ? 'Turn off' : 'Turn on'} onPress={() => setLearning(!cfg.isLearning)} />
           <Button key="learn-open" label="Open" onPress={openLearn} />
         </Box>
+      </Box>
+
+      <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
+        <Box flexDirection="column" flexShrink={1}>
+          <Text>
+            Auto-handoff <Text color={cfg.autoHandoff ? 'success' : 'subtle'}>{cfg.autoHandoff ? '● on' : '○ off'}</Text>
+          </Text>
+          {cfg.autoHandoff ? null : <Text dimColor>saves a handoff while the cache is warm, before it goes cold with work open</Text>}
+        </Box>
+        <Button key="handoff-toggle" label={cfg.autoHandoff ? 'Turn off' : 'Turn on'} onPress={() => setAutoHandoff(!cfg.autoHandoff)} />
       </Box>
 
       <Box flexDirection="column" borderStyle="round" borderColor={nowColor} paddingX={1}>

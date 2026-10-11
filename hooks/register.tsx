@@ -9,6 +9,7 @@ import {
   awayText,
   capLessons,
   lessonFromAdvice,
+  lessonFromAutoHandoff,
   lessonFromCompact,
   lessonFromContext,
   lessonFromExpiry,
@@ -70,7 +71,7 @@ import {
   withPreset,
   withRoute,
 } from './routes'
-import { tildePath } from './handoff'
+import { HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, shouldAutoHandoff, tildePath } from './handoff'
 import { NO_STEPS, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
 import type { Steps } from './signals'
 import { adviseSession, boundaryOf } from './strategy'
@@ -186,6 +187,23 @@ async function flushLessons($: $) {
   const [cfg, p] = await Promise.all([read($, config), read($, promptCost)])
   if (!cfg.isLearning) return
   await teach($, [...drafts, ...(p === null ? [] : lessonsFromPrompt(p, cfg.cacheTtlMinutes))], await nowOf($))
+}
+
+/** Writes the auto-handoff turn's reply to its file; an interrupted, failed or empty turn saves nothing. */
+async function finishHandoff($: $, e: Args<'turn.complete'>) {
+  const asked = mem.handoff
+  if (asked?.turnId === undefined || asked.turnId !== e.turnId) return
+  mem.handoff = undefined
+  if (e.reason !== 'answer' || e.answer.trim() === '' || mem.home === undefined) return
+  const [now, sessionId, cost, cfg] = await Promise.all([nowOf($), $.session.id().catch(() => mem.kept.sessionId), read($, promptCost), read($, config)])
+  const path = handoffPath(mem.home, mem.repo, now, sessionId ?? 'session')
+  await $.fs.write(path, `${e.answer.trim()}\n`)
+  mem.handoffPath = path
+  if (cfg.isLearning) {
+    const avoidedUsd = rewritePrice(asked.model, asked.tokens, cfg.cacheTtlMinutes).write
+    mem.pendingLessons.push(lessonFromAutoHandoff({ spentUsd: cost?.usd ?? 0, avoidedUsd, tokens: asked.tokens, path: tildePath(path, mem.home) }))
+  }
+  await refreshStatus($).catch(() => undefined)
 }
 
 /** Keeps the lessons of topics not muted and toasts the one most worth it, if any is due. */
@@ -320,6 +338,7 @@ async function refreshStatus($: $) {
   }
   const prev = await read($, health)
   await update($, health, was => (JSON.stringify(was) === JSON.stringify(next) ? was : next))
+  await maybeAutoHandoff($, cfg, { warmMinutes, tokens, model }).catch(() => undefined)
   if (!cfg.isLearning) return
   for (const draft of [lessonFromContext(prev?.ctxLevel, next.ctxLevel, tokens, model, ttl, mem.compactAt !== undefined), lessonFromAdvice(prev?.advice, advice)]) {
     if (draft !== undefined) mem.pendingLessons.push(draft)
@@ -327,6 +346,30 @@ async function refreshStatus($: $) {
   // The one lesson that can't wait for a turn to end: by then the cache has gone cold.
   const expiring = lessonFromExpiry(prev?.warmMinutes, warmMinutes, ttl, tokens, model)
   if (expiring !== undefined) await teach($, [expiring], now).catch(() => undefined)
+}
+
+/** In the cache's last minutes with work open, asks Claude for a handoff while reading the context is still cheap. */
+async function maybeAutoHandoff($: $, cfg: RouterConfig, warm: { warmMinutes: number; tokens: number; model: string }) {
+  const facts = {
+    isOn: cfg.autoHandoff,
+    isArmed: mem.handoffArmed && mem.handoff === undefined,
+    isIdle: !mem.isTurnRunning,
+    isPromptEmpty: true,
+    warmMinutes: warm.warmMinutes,
+    ttlMinutes: cfg.cacheTtlMinutes,
+    tokens: warm.tokens,
+    openSteps: openSteps(mem.steps),
+    hasPlan: mem.planPath !== undefined,
+  }
+  if (!shouldAutoHandoff(facts)) return
+  const [agents, box] = await Promise.all([$.agent.list().catch(() => []), $.prompt.read()])
+  const isIdle = !agents.some(one => one.status === 'running' || one.status === 'pending')
+  if (!shouldAutoHandoff({ ...facts, isIdle, isPromptEmpty: box.text.trim() === '' })) return
+  mem.handoffArmed = false
+  mem.handoff = { tokens: warm.tokens, model: warm.model }
+  await $.prompt.submit({ text: HANDOFF_PROMPT }).catch(() => {
+    mem.handoff = undefined
+  })
 }
 
 /** Every slash command, or none when the engine can't say. */
@@ -658,6 +701,7 @@ async function renderPane($: $, e: Args<'ui.render'>) {
       }),
     toggle: () => void setConfig($, c => ({ ...c, isEnabled: !c.isEnabled })),
     setLearning: isOn => void setLearning($, isOn),
+    setAutoHandoff: isOn => void setConfig($, c => ({ ...c, autoHandoff: isOn })),
     openLearn: () => openPane($)('learn'),
     // Only the routes come from the draft, so on/off or a setting changed while it was open is kept.
     apply: async next => {
@@ -681,10 +725,13 @@ const guardText = (cfg: RouterConfig, cold: { text: string }, tail: string) =>
 const LEARN_ON_TEXT =
   'Learn mode on: when a cache rewrite, a pricey model, a growing context or busy subagents cost you, a toast explains it with the numbers. /route learn lists them.'
 
+const handoffOnText = (repo: string) =>
+  `Auto-handoff on: when the cache is about to go cold with steps open or a plan not yet started, model-router asks Claude for a handoff while the cache is still warm and saves it under ~/.claude/handoffs/${repo}/. It runs once per prompt and never clears the session itself.`
+
 const asEffort = (effort: unknown): Effort | undefined =>
   typeof effort === 'string' ? (effort as Effort) : undefined
 
-const USAGE = '[stats [clear | text on|off] | context | last | learn [on|off | mute|unmute <topic>] | away | unused | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
+const USAGE = '[stats [clear | text on|off] | context | last | learn [on|off | mute|unmute <topic>] | handoff on|off | away | unused | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
 
 // Origins a person typed or drove: only these may change the routes, and only these are held by the cold guard.
 const USER_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
@@ -727,6 +774,8 @@ const mem = {
   handoffPath: undefined as string | undefined,
   handoffArmed: false,
   isTurnRunning: false,
+  // The auto-handoff asked for and not yet answered: its turn once it starts, and the context it would have rewritten cold.
+  handoff: undefined as { turnId?: string; tokens: number; model: string } | undefined,
   // MCP servers and plugins used since the last save, whether this session has been counted yet, and what is loaded.
   kept: { used: {}, isUncounted: true } as Carried,
   loaded: undefined as { at: number; value: Promise<Loaded> } | undefined,
@@ -968,7 +1017,7 @@ export const register: Register = on => {
         mem.handoffPath = undefined
         if (!e.text.trimStart().startsWith('/')) mem.corrections = isCorrection(e.text) ? mem.corrections + 1 : 0
       }
-      mem.pendingPrompt = commandLabel(e.text)
+      mem.pendingPrompt = e.origin.kind === 'plugin' && mem.handoff !== undefined && mem.handoff.turnId === undefined ? HANDOFF_LABEL : commandLabel(e.text)
       if (!e.text.trimStart().startsWith('/')) mem.lastCommand = undefined
     }
     return next(e)
@@ -1015,6 +1064,7 @@ export const register: Register = on => {
     const [cfg, route] = await Promise.all([read($, config), mainRoute($)])
     if (mem.pendingPrompt !== undefined) {
       const label = mem.pendingPrompt
+      if (label === HANDOFF_LABEL && mem.handoff !== undefined) mem.handoff = { ...mem.handoff, turnId: e.turnId }
       mem.pendingPrompt = undefined
       mem.boundary = undefined
       await recordPrompt($).catch(() => undefined)
@@ -1074,6 +1124,7 @@ export const register: Register = on => {
     const done = await next(e)
     if (e.agentId === undefined) {
       mem.isTurnRunning = false
+      await finishHandoff($, e).catch(() => undefined)
       await flushLessons($).catch(() => undefined)
       await flushUsage($, true).catch(() => undefined)
     }
@@ -1121,6 +1172,12 @@ export const register: Register = on => {
       if (minutes !== 5 && minutes !== 60) return { text: 'Usage: /route ttl 5|60 (prompt-cache lifetime in minutes)' }
       await setConfig($, c => ({ ...c, cacheTtlMinutes: minutes }))
       return { text: `Cache lifetime set to ${minutes} minutes.` }
+    }
+    if (verb === 'handoff') {
+      if (rest[0] !== 'on' && rest[0] !== 'off') return { text: 'Usage: /route handoff on|off (save a handoff while the cache is still warm, before it goes cold with work open)' }
+      const isOn = rest[0] === 'on'
+      await setConfig($, c => ({ ...c, autoHandoff: isOn }))
+      return { text: isOn ? handoffOnText(mem.repo) : 'Auto-handoff off.' }
     }
     if (verb === 'guard') {
       const mode = rest[0] as ColdGuard
