@@ -12,6 +12,7 @@ import {
   lessonFromCompact,
   lessonFromContext,
   lessonFromExpiry,
+  lessonFromExploration,
   lessonFromPlanToggle,
   lessonFromRewrite,
   lessonsFromPrompt,
@@ -69,6 +70,9 @@ import {
   withPreset,
   withRoute,
 } from './routes'
+import { tildePath } from './handoff'
+import { NO_STEPS, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
+import type { Steps } from './signals'
 import { adviseSession, boundaryOf } from './strategy'
 import type { Boundary } from './strategy'
 import { messagesOf, tokensByServer } from './tips'
@@ -302,7 +306,7 @@ async function refreshStatus($: $) {
     mem.compactCheckedAt = now
   }
   const model = await routedMainModel($, cfg, last.model)
-  const advice = adviseSession({ tokens, window: context.window, compactAt: mem.compactAt, model, ttlMinutes: ttl, warmMinutes, messagesShare: mem.messagesShare, boundary: mem.boundary })
+  const advice = adviseSession({ tokens, window: context.window, compactAt: mem.compactAt, model, ttlMinutes: ttl, warmMinutes, messagesShare: mem.messagesShare, boundary: mem.boundary, ...signalFacts() })
   const next: Health = {
     cache: prompt > 0 ? Math.round((last.cacheRead / prompt) * 100) : 0,
     warmMinutes,
@@ -394,10 +398,21 @@ async function itemsOfToolUse($: $, tool: string, input: Record<string, unknown>
   return owner === undefined ? [direct] : [direct, owner]
 }
 
-/** Counts a finished tool call toward the MCP server or plugin behind it, and notes work being wrapped up. */
-async function noteToolCall($: $, e: Args<'tool.call'>) {
+/** Counts a finished tool call toward the MCP server or plugin behind it, and notes work being wrapped up, planned, tracked or explored. */
+async function noteToolCall($: $, e: Args<'tool.call'>, result: unknown) {
   const input = e as unknown as Record<string, unknown>
-  if (e.agentId === undefined && e.tool === 'Bash' && typeof input.command === 'string') mem.boundary = boundaryOf(input.command) ?? mem.boundary
+  if (e.agentId === undefined) {
+    if (e.tool === 'Bash' && typeof input.command === 'string') mem.boundary = boundaryOf(input.command) ?? mem.boundary
+    mem.steps = stepsAfter(mem.steps, e.tool, input, result)
+    const plan = planEventOf(e.tool, input, result)
+    if (plan?.kind === 'saved') mem.planPath = plan.path
+    if (plan?.kind === 'work') mem.planPath = undefined
+    const explored = exploredTokens(e.tool, result)
+    if (explored > 0) {
+      mem.explored += explored
+      await noteExploration($).catch(() => undefined)
+    }
+  }
   const items = await itemsOfToolUse($, e.tool, input)
   if (items.length === 0) return
   const at = await nowOf($)
@@ -405,6 +420,35 @@ async function noteToolCall($: $, e: Args<'tool.call'>) {
   // Kept for a reload without holding up the tool's result.
   void carry($).catch(() => undefined)
 }
+
+/** The first time reads and searches fill the main context this session, learn mode explains subagents. */
+async function noteExploration($: $) {
+  if (mem.isExploreTaught || !(await read($, config)).isLearning) return
+  const total = (await $.session.usage()).context.tokens ?? 0
+  if (!isExplorationHeavy(mem.explored, total)) return
+  mem.isExploreTaught = true
+  mem.pendingLessons.push(lessonFromExploration(mem.explored, total))
+}
+
+/** What a fresh context forgets; open steps and a saved handoff outlive a compaction, as Claude Code's own todo list does. */
+function resetSignals(isClear: boolean) {
+  if (isClear) {
+    mem.steps = NO_STEPS
+    mem.handoffPath = undefined
+  }
+  mem.planPath = undefined
+  mem.corrections = 0
+  mem.explored = 0
+  mem.isExploreTaught = false
+}
+
+const signalFacts = () => ({
+  openSteps: openSteps(mem.steps),
+  planPath: mem.planPath === undefined ? undefined : tildePath(mem.planPath, mem.home),
+  corrections: mem.corrections,
+  hasHandoffSkill: mem.hasHandoffSkill,
+  handoffPath: mem.handoffPath === undefined ? undefined : tildePath(mem.handoffPath, mem.home),
+})
 
 async function noteCommand($: $, name: string) {
   const key = (await cachedLoaded($)).commands[name]
@@ -586,8 +630,9 @@ async function renderCtxPane($: $, e: Args<'ui.render'>) {
     warmMinutes: hp?.warmMinutes ?? cfg.cacheTtlMinutes,
     messagesShare: b.totalTokens > 0 ? messagesOf(b) / b.totalTokens : undefined,
     boundary: mem.boundary,
+    ...signalFacts(),
   })
-  const data = { breakdown: b, isTerminal: e.surface === 'terminal', columns, advice, idle: idleTips(idle, withServerNames(loaded.names, servers), tokensByServer(servers)) }
+  const data = { breakdown: b, isTerminal: e.surface === 'terminal', columns, advice, explored: mem.explored, idle: idleTips(idle, withServerNames(loaded.names, servers), tokensByServer(servers)) }
   return contextPaneView($.ui.resolve(e), data)
 }
 
@@ -670,6 +715,18 @@ const mem = {
   messagesShare: undefined as number | undefined,
   // Work wrapped up (a commit, a PR) since the person last prompted.
   boundary: undefined as Boundary | undefined,
+  // Todos and tasks open, a plan on disk with no other edit since, correcting prompts in a row, and read/search tokens since the last fresh context.
+  steps: NO_STEPS as Steps,
+  planPath: undefined as string | undefined,
+  corrections: 0,
+  explored: 0,
+  isExploreTaught: false,
+  hasHandoffSkill: false,
+  home: undefined as string | undefined,
+  // An auto-handoff saved since the person last prompted, and whether one may still run before they prompt again.
+  handoffPath: undefined as string | undefined,
+  handoffArmed: false,
+  isTurnRunning: false,
   // MCP servers and plugins used since the last save, whether this session has been counted yet, and what is loaded.
   kept: { used: {}, isUncounted: true } as Carried,
   loaded: undefined as { at: number; value: Promise<Loaded> } | undefined,
@@ -814,7 +871,13 @@ export const register: Register = on => {
     const root = repo?.root ?? (await $.session.root().catch(() => ''))
     mem.repo = printable(repo?.name ?? (root.split('/').pop() || 'unknown'))
     // The same session starting again, after a hot reload of this code or a /login, keeps its running prompt, count and unsaved calls.
-    const [sessionId, before, idleDev] = await Promise.all([$.session.id().catch(() => undefined), read($, carried), $.env.get('MODEL_ROUTER_IDLE_DEV').catch(() => undefined)])
+    const [sessionId, before, idleDev, home] = await Promise.all([
+      $.session.id().catch(() => undefined),
+      read($, carried),
+      $.env.get('MODEL_ROUTER_IDLE_DEV').catch(() => undefined),
+      $.env.get('HOME').catch(() => undefined),
+    ])
+    mem.home = home
     const isSame = sessionId !== undefined && before?.sessionId === sessionId
     // A copy: noteUse writes into `used`, and the atom's own value is not ours to change in place.
     mem.kept = isSame ? { ...before, used: { ...before.used } } : { sessionId, used: {}, isUncounted: true }
@@ -828,7 +891,9 @@ export const register: Register = on => {
     mem.tick?.cancel()
     mem.tick = $.clock.every(60_000, () => void refreshStatus($).catch(() => undefined))
     await $.command.register({ name: 'route', description: 'Model router: open the pane, or one of the verbs', argumentHint: USAGE })
-    const hasCacheTax = (await read($, config)).coldGuard !== 'off' && (await listCommands($)).some(one => one.name === 'cache-tax')
+    const commands = await listCommands($)
+    mem.hasHandoffSkill = hasHandoffCommand(commands.map(one => one.name))
+    const hasCacheTax = (await read($, config)).coldGuard !== 'off' && commands.some(one => one.name === 'cache-tax')
     if (hasCacheTax) {
       $.ui.log('model-router: cache-tax is installed too, so a cold send is guarded twice. Run /route guard off to leave it to cache-tax.')
     }
@@ -858,7 +923,7 @@ export const register: Register = on => {
 
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
-    if (ran.deny === undefined && !ran.isError) await noteToolCall($, e).catch(() => undefined)
+    if (ran.deny === undefined && !ran.isError) await noteToolCall($, e, ran.result).catch(() => undefined)
     return ran
   }).catch(($, e, next) => next(e))
 
@@ -868,6 +933,7 @@ export const register: Register = on => {
     if (e.agentId === undefined) {
       mem.isAfterCompact = true
       mem.boundary = undefined
+      resetSignals(false)
       if (before !== undefined) mem.pendingLessons.push(lessonFromCompact(before === null ? 0 : promptTokens(before)))
     }
     return done
@@ -897,6 +963,11 @@ export const register: Register = on => {
           return { drop: guardText(cfg, cold, 'Send it again to pay it, or /clear and start from a note.') }
         }
       }
+      if (USER_ORIGINS.has(e.origin.kind)) {
+        mem.handoffArmed = true
+        mem.handoffPath = undefined
+        if (!e.text.trimStart().startsWith('/')) mem.corrections = isCorrection(e.text) ? mem.corrections + 1 : 0
+      }
       mem.pendingPrompt = commandLabel(e.text)
       if (!e.text.trimStart().startsWith('/')) mem.lastCommand = undefined
     }
@@ -922,6 +993,7 @@ export const register: Register = on => {
     const done = await next(e)
     if (e.command === 'clear') {
       mem.boundary = undefined
+      resetSignals(true)
       await refreshStatus($).catch(() => undefined)
     }
     return done
@@ -934,6 +1006,7 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
+    mem.isTurnRunning = true
     if (mem.lastCommand !== undefined) {
       const name = mem.lastCommand
       mem.lastCommand = undefined
@@ -1000,6 +1073,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     if (e.agentId === undefined) {
+      mem.isTurnRunning = false
       await flushLessons($).catch(() => undefined)
       await flushUsage($, true).catch(() => undefined)
     }
