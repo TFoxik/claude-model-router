@@ -160,3 +160,12 @@ test('extra tips join the ranking, and drop the tips they replace', () => {
   const idle = { key: 'idle:mcp:claude_ai_Jira', weight: 6000, text: 'unused', replaces: 'mcp:claude.ai Jira' }
   expect(contextTips(b, { more: [idle] }).map(one => one.key)).toEqual(['idle:mcp:claude_ai_Jira'])
 })
+
+test('heavy exploration in the main context suggests a subagent next time', () => {
+  const big = breakdown({ totalTokens: 100_000 })
+  const tips = contextTips(big, { explored: 40_000 })
+  expect(tips.map(one => one.key)).toEqual(['exploration'])
+  expect(tips[0]!.text).toBe("File reads and searches put 40k tokens (40%) into the main context: next time ask for a subagent ('use a subagent to find…'). It reads in its own context, and /route set sub:Explore haiku makes it cheap.")
+  expect(contextTips(big, { explored: 20_000 })).toEqual([])
+  expect(contextTips(breakdown({ totalTokens: 300_000 }), { explored: 40_000 })).toEqual([])
+})

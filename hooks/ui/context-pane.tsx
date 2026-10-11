@@ -53,9 +53,9 @@ export function contextMobileView({ Text }: Els) {
   return <Text dimColor>Open the context breakdown from a terminal or desktop.</Text>
 }
 
-type ContextData = { breakdown: Breakdown | undefined; isTerminal: boolean; columns: number; advice?: Pick<Advice, 'verdict' | 'text'>; idle?: readonly Tip[] }
+type ContextData = { breakdown: Breakdown | undefined; isTerminal: boolean; columns: number; advice?: Pick<Advice, 'verdict' | 'text'>; idle?: readonly Tip[]; explored?: number }
 
-export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, advice, idle }: ContextData) {
+export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, advice, idle, explored }: ContextData) {
   const { Box, Text } = els
   const Svg = 'Svg' in els ? els.Svg : undefined
   if (b === undefined) return <Text dimColor>No context breakdown available yet.</Text>
@@ -131,7 +131,7 @@ export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, a
           {topMemory.map(one => line(`f:${one.path}`, printable(`${one.type} · ${shortPath(one.path)}`), one.tokens, 'planMode'))}
         </Box>
       ) : null}
-      {tipsSection(els, contextTips(b, { advice, more: idle }))}
+      {tipsSection(els, contextTips(b, { advice, more: idle, explored }))}
       <Text dimColor>
         {b.skills ? `skills listing ${kTokens(b.skills.tokens)} (${b.skills.includedSkills}/${b.skills.totalSkills}) · ` : ''}
         {b.model} · estimated locally, as /context does

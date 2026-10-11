@@ -3,6 +3,7 @@ import type { SessionContextBreakdown } from 'claude-code'
 import type { PromptCost, PromptRecord, Rewrite } from '../types'
 import { MIN_REWRITE_USD, isPricey, lessonsFromPrompt, pct } from './lessons'
 import { commandStats, kTokens, money, printable, shortPath, sumUsd } from './routes'
+import { isExplorationHeavy } from './signals'
 import type { Advice } from './strategy'
 
 export type Breakdown = SessionContextBreakdown
@@ -47,10 +48,10 @@ function byCause(rewrites: readonly Rewrite[]): Array<[Rewrite['cause'], number]
 // The engine names no kind for the conversation row, so this matches /context's label; a rename only silences the advice that uses it.
 export const messagesOf = (b: Breakdown) => b.categories.find(one => one.kind === 'used' && one.name === 'Messages')?.tokens ?? 0
 
-type ContextExtras = { advice?: Pick<Advice, 'verdict' | 'text'>; more?: readonly Tip[] }
+type ContextExtras = { advice?: Pick<Advice, 'verdict' | 'text'>; more?: readonly Tip[]; explored?: number }
 
 /** What to trim in the context window, biggest first, from the /context breakdown; advice to compact or clear comes first, and `more` joins the ranking. */
-export function contextTips(b: Breakdown, { advice, more = [] }: ContextExtras = {}): Tip[] {
+export function contextTips(b: Breakdown, { advice, more = [], explored = 0 }: ContextExtras = {}): Tip[] {
   const tips: Tip[] = [...more]
   if (advice !== undefined && advice.verdict !== 'continue') tips.push({ key: `advice:${advice.verdict}`, weight: Infinity, text: advice.text })
 
@@ -74,7 +75,13 @@ export function contextTips(b: Breakdown, { advice, more = [] }: ContextExtras =
     tips.push({ key: 'agents', weight: agentTokens, text: `${b.agents.length} custom agents describe themselves in ${kTokens(agentTokens)}: remove the ones you do not use` })
   }
 
-
+  if (isExplorationHeavy(explored, b.totalTokens)) {
+    tips.push({
+      key: 'exploration',
+      weight: explored,
+      text: `File reads and searches put ${kTokens(explored)} tokens (${pct(explored / b.totalTokens)}) into the main context: next time ask for a subagent ('use a subagent to find…'). It reads in its own context, and /route set sub:Explore haiku makes it cheap.`,
+    })
+  }
   return top(tips)
 }
 
