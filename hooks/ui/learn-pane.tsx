@@ -1,7 +1,7 @@
 import type { Lesson, LessonKind, Scope } from '../../types'
 import { CONCEPTS, HABITS, SEEN_ENOUGH, byKind } from '../lessons'
 import { PRICES_AS_OF } from '../routes'
-import { STAMP_W, longStamp, stamp } from './kit'
+import { STAMP_W, stamp } from './kit'
 import type { Els } from './kit'
 
 type LearnData = {
@@ -9,7 +9,7 @@ type LearnData = {
   isLearning: boolean
   muted: readonly LessonKind[]
   expanded: readonly LessonKind[]
-  /** Rows pressed open: `rowId()` of a fact, or `all:<kind>` for every earlier one. */
+  /** Rows pressed open: `rowId()` of an earlier fact, or `all:<kind>` for every earlier one. */
   rows: readonly string[]
   scope: Scope
   repo: string
@@ -28,24 +28,30 @@ const rowId = (one: Lesson) => `${one.kind}:${one.at}`
 
 /**
  * A stamped fact with a hanging indent; an older one is one dim line, since it mostly repeats the latest.
- * Pressing it opens the whole fact with when and where it happened.
+ * Pressing an older one shows it whole.
  */
 function factRow({ Box, Text, Button }: Els, one: Lesson, isOlder: boolean, showsRepo: boolean, isOpen: boolean, toggleRow: (id: string) => void) {
   const id = rowId(one)
   const isDim = isOlder && !isOpen
+  const text = (
+    <Text dimColor={isDim} wrap={isDim ? 'truncate-end' : 'wrap'}>
+      {showsRepo ? <Text dimColor>{`${one.repo} · `}</Text> : null}
+      {one.fact}
+    </Text>
+  )
   return (
     <Box key={`f:${id}`} flexDirection="row">
       <Box width={STAMP_W} flexShrink={0}>
         <Text dimColor>{stamp(one.at)}</Text>
       </Box>
-      <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-        <Button key={`row:${id}`} plain hover={{ underline: true }} onPress={() => toggleRow(id)}>
-          <Text dimColor={isDim} wrap={isDim ? 'truncate-end' : 'wrap'}>
-            {showsRepo ? <Text dimColor>{`${one.repo} · `}</Text> : null}
-            {one.fact}
-          </Text>
-        </Button>
-        {isOpen ? <Text dimColor italic>{`${longStamp(one.at)} · in ${one.repo}`}</Text> : null}
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
+        {isOlder ? (
+          <Button key={`row:${id}`} plain hover={{ underline: true }} onPress={() => toggleRow(id)}>
+            {text}
+          </Button>
+        ) : (
+          text
+        )}
       </Box>
     </Box>
   )
@@ -119,7 +125,7 @@ export function learnPaneView(
                 <Button key={`mute:${kind}`} label="mute" plain dimColor onPress={() => setMuted(kind, true)} />
               </Box>
             </Box>
-            {factRow(els, latest!, false, showsRepo, rows.includes(rowId(latest!)), toggleRow)}
+            {factRow(els, latest!, false, showsRepo, true, toggleRow)}
             {older.length === 0 ? null : (
               <Box flexDirection="column" marginTop={1}>
                 <Box flexDirection="row" gap={1}>

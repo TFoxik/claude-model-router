@@ -35,14 +35,6 @@ export const stamp = (at: number) => {
 /** Columns for a `stamp()` gutter: the widest stamp and a space. */
 export const STAMP_W = 13
 
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-
-/** `Fri 9.10.2026 14:05`: a stamp that stands alone. */
-export const longStamp = (at: number) => {
-  const d = new Date(at)
-  return `${WEEKDAYS[d.getDay()]} ${day(at)}${d.getFullYear()} ${stamp(at).split(' ')[1]}`
-}
-
 const ROUTE_COLOR: Record<string, string> = { plan: 'planMode', main: 'claude' }
 export const colorOf = (route: string) => ROUTE_COLOR[route] ?? 'suggestion'
 
