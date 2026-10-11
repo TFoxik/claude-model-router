@@ -1538,3 +1538,41 @@ test('the pane says where handoffs go when there are none', async ($, on) => {
   expect(await pane.find({ type: 'Text', text: /^No handoffs in unknown\./ })).toBeDefined()
   await pane.unmount()
 })
+
+test('sending a prompt with an open handoff\'s path marks it resumed; a prompt the cold guard holds does not', async ($, on) => {
+  const { data } = await listedSession($, on, { 'a.md': '# A\n', 'b.md': '# B\n' })
+  await submit($, 'resume from ~/.claude/handoffs/unknown/a.md')
+  const all = data.handoffs as Record<string, { status: string }>
+  expect(all['/home/me/.claude/handoffs/unknown/a.md']!.status).toBe('resumed')
+  expect(all['/home/me/.claude/handoffs/unknown/b.md']!.status).toBe('open')
+})
+
+test('a held cold send resumes nothing', async ($, on) => {
+  const data: Record<string, unknown> = { config: { ...MINE, coldGuard: 'refuse' } }
+  sharedStore(on, data)
+  const clock = mock.clock(on, { now: T0 })
+  guardSession(on, { context: 200_000, usage: usageOf(200_000) })
+  mock.env(on, { HOME: '/home/me' })
+  on('fs.list', (_$, e) => ({ value: e.path.endsWith('/unknown') ? [{ name: 'a.md', kind: 'file', size: 1, mtimeMs: T0, isLink: false }] : [] }) as never)
+  on('fs.read', () => ({ value: '# A\n' }) as never)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await submit($, 'go')
+  await $.turn.start({ text: 'go', turnId: 'go' })
+  await step($, 'go')
+  await complete($, 'go')
+  await clock.advance(61 * 60_000)
+  const held = await submit($, 'resume from ~/.claude/handoffs/unknown/a.md')
+  expect(held.drop).toBeDefined()
+  expect((data.handoffs as Record<string, { status: string }>)['/home/me/.claude/handoffs/unknown/a.md']!.status).toBe('open')
+})
+
+test('the band shows handoffs ●N for other sessions\' open handoffs until the first prompt', async ($, on) => {
+  await listedSession($, on, { 'a.md': '# A\n', 'b.md': '# B\n' })
+  const band = await bandOf($)
+  expect((await band.find({ key: 'band-handoffs' }))?.text).toBe('handoffs ●2')
+  await band.unmount()
+  await submit($, 'hello')
+  const after = await bandOf($)
+  expect(await after.find({ key: 'band-handoffs' })).toBeUndefined()
+  await after.unmount()
+})

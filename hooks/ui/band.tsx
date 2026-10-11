@@ -61,9 +61,9 @@ function healthRowView({ Box, Text, Button }: Els, health: Health | null, open: 
   )
 }
 
-type BandData = { cfg: RouterConfig; now: ActiveRoute | null; pending: RouterConfig | null; total: number; health: Health | null; learnUnread: number }
+type BandData = { cfg: RouterConfig; now: ActiveRoute | null; pending: RouterConfig | null; total: number; health: Health | null; learnUnread: number; handoffsOpen: number }
 
-export function bandView(els: Els, { cfg, now, pending, total, health, learnUnread }: BandData, { open, hide }: { open: Open; hide: () => void }) {
+export function bandView(els: Els, { cfg, now, pending, total, health, learnUnread, handoffsOpen }: BandData, { open, hide }: { open: Open; hide: () => void }) {
   const { Box, Text, Button } = els
   return (
     <Box flexDirection="row" justifyContent="space-between" gap={1}>
@@ -81,6 +81,7 @@ export function bandView(els: Els, { cfg, now, pending, total, health, learnUnre
         {healthRowView(els, health, open)}
       </Box>
       <Box flexDirection="column" alignItems="flex-end" flexShrink={0}>
+        {handoffsOpen > 0 ? <Button key="band-handoffs" label={`handoffs ●${handoffsOpen}`} plain onPress={() => open('handoffs')} /> : null}
         {learnUnread > 0 ? <Button key="band-learn" label={`Learn ●${learnUnread}`} plain onPress={() => open('learn')} /> : null}
         <Button key="band-open" label="Routes" plain onPress={() => open('route')} />
         <Button key="band-hide" label="Hide" plain onPress={hide} />

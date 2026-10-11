@@ -73,7 +73,7 @@ import {
 } from './routes'
 import { HANDOFF_DIR, HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, pendingAfter, segment, shouldAutoHandoff, tildePath } from './handoff'
 import type { PendingHandoff } from './handoff'
-import { handoffDir, handoffRows, handoffsRoot, mergeListing, recordWritten, repoOfHandoff, sanitizeHandoffs, setStatus, titleOf } from './handoffs'
+import { bandCount, handoffDir, handoffRows, handoffsRoot, mergeListing, recordWritten, repoOfHandoff, resumedBy, sanitizeHandoffs, setStatus, titleOf } from './handoffs'
 import type { HandoffStatus, Handoffs } from './handoffs'
 import { EXPLORE_MIN, NO_STEPS, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
 import type { Steps } from './signals'
@@ -745,7 +745,7 @@ async function renderStatsPane($: $, e: Args<'ui.render'>) {
 const setBand = async ($: $, isShown: boolean) => save($, STORE.bandShown, await update($, isBandShown, () => isShown))
 
 async function renderBand($: $, e: Args<'ui.render'>) {
-  const [cfg, now, pending, costs, hp, kept, readAt, scope] = await Promise.all([
+  const [cfg, now, pending, costs, hp, kept, readAt, scope, records, isBandSeen, at] = await Promise.all([
     read($, config),
     read($, active),
     read($, draft),
@@ -754,9 +754,13 @@ async function renderBand($: $, e: Args<'ui.render'>) {
     read($, lessons),
     read($, lessonsReadAt),
     read($, learnScope),
+    read($, handoffs),
+    read($, handoffBandSeen),
+    nowOf($),
   ])
+  const handoffsOpen = isBandSeen ? 0 : bandCount(records, segment(mem.repo), mem.kept.sessionId, at)
   const learnUnread = cfg.isLearning ? unreadCount(inScope(kept, scope), readAt, cfg.learnMuted) : 0
-  const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp, learnUnread }
+  const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp, learnUnread, handoffsOpen }
   return bandView($.ui.resolve(e), data, { open: openPane($), hide: () => void setBand($, false) })
 }
 
@@ -1122,6 +1126,9 @@ export const register: Register = on => {
         mem.handoff = pendingAfter(mem.handoff, { kind: 'user-prompt' })
         mem.handoffArmed = true
         mem.handoffPath = undefined
+        await update($, handoffBandSeen, () => true)
+        const resumed = resumedBy(e.text, await read($, handoffs), mem.home)
+        if (resumed.length > 0) await setHandoffs($, all => resumed.reduce((acc, path) => setStatus(acc, path, 'resumed'), all)).catch(() => undefined)
       }
       mem.pendingPrompt = commandLabel(e.text)
       if (!e.text.trimStart().startsWith('/')) mem.lastCommand = undefined
