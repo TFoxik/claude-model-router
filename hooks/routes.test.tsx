@@ -1340,8 +1340,9 @@ test('the Context pane advises compacting from its own breakdown, before any req
 })
 
 /** An auto-handoff session: 200k tokens on a 60m cache, two steps open, the writes and plugin prompts collected. */
-async function handoffSession($: Engine, on: On) {
-  mock.store(on, { config: { ...MINE, coldGuard: 'off', autoHandoff: true, cacheTtlMinutes: 60 } })
+async function handoffSession($: Engine, on: On, data: Record<string, unknown> = {}) {
+  data.config = { ...MINE, coldGuard: 'off', autoHandoff: true, cacheTtlMinutes: 60 }
+  sharedStore(on, data)
   const clock = mock.clock(on, { now: T0 })
   const usage = usageOf(200_000)
   on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 200_000, window: 1_000_000, percent: 20 }, rateLimits: [] } }))
@@ -1440,4 +1441,31 @@ test('pressing a pane that is open behind another brings it to the front', async
   await ui.press({ key: 'stats' })
   expect(calls).toEqual(['close model-router-stats', 'open model-router-stats', 'open model-router-stats'])
   await ui.unmount()
+})
+
+test('an auto-handoff and a Write into the folder are recorded with their titles; the newer supersedes the older', async ($, on) => {
+  const data: Record<string, unknown> = {}
+  const { clock, answer } = await handoffSession($, on, data)
+  await clock.advance(58 * 60_000)
+  await $.turn.start({ text: HANDOFF_PROMPT, turnId: 'h' })
+  await answer($, 'h', '# Auto: review routes\nbody')
+  const auto = Object.entries(data.handoffs as Record<string, { title?: string; status: string; repo: string }>)
+  expect(auto).toHaveLength(1)
+  expect(auto[0]![1]).toMatchObject({ title: 'Auto: review routes', status: 'open', repo: 'unknown' })
+  await submit($, 'write one by hand')
+  await $.turn.start({ text: 'write one by hand', turnId: 'w' })
+  await $.tool.call({ tool: 'Write', file_path: '/home/me/.claude/handoffs/unknown/manual.md', content: '# Manual handoff\n', tool_use_id: 'tw' } as never)
+  const all = data.handoffs as Record<string, { title?: string; status: string }>
+  expect(all['/home/me/.claude/handoffs/unknown/manual.md']).toMatchObject({ title: 'Manual handoff', status: 'open' })
+  expect(all[auto[0]![0]]!.status).toBe('superseded')
+})
+
+test('a handoff saved by another session meanwhile is kept when this one records its own', async ($, on) => {
+  const data: Record<string, unknown> = {}
+  await handoffSession($, on, data)
+  data.handoffs = { '/home/me/.claude/handoffs/unknown/theirs.md': { repo: 'unknown', at: T0, sessionId: 'other', status: 'open' } }
+  await submit($, 'write one')
+  await $.turn.start({ text: 'write one', turnId: 'w' })
+  await $.tool.call({ tool: 'Write', file_path: '/home/me/.claude/handoffs/unknown/mine.md', content: '# Mine\n', tool_use_id: 'tw' } as never)
+  expect(Object.keys(data.handoffs as object).sort()).toEqual(['/home/me/.claude/handoffs/unknown/mine.md', '/home/me/.claude/handoffs/unknown/theirs.md'])
 })

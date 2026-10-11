@@ -1,9 +1,7 @@
+import type { HandoffRecord, HandoffStatus, Handoffs } from '../types'
 import { HANDOFF_DIR, segment, tildePath } from './handoff'
 
-export type HandoffStatus = 'open' | 'done' | 'dropped' | 'resumed' | 'superseded'
-export type HandoffRecord = { repo: string; at: number; sessionId?: string; title?: string; status: HandoffStatus }
-/** Keyed by the file's absolute path. */
-export type Handoffs = Record<string, HandoffRecord>
+export type { HandoffRecord, HandoffStatus, Handoffs }
 export type HandoffRow = { path: string; repo: string; at: number; title: string; reason?: string }
 
 export const STALE_MS = 14 * 86_400_000

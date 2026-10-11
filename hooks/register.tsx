@@ -73,6 +73,8 @@ import {
 } from './routes'
 import { HANDOFF_DIR, HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, pendingAfter, segment, shouldAutoHandoff, tildePath } from './handoff'
 import type { PendingHandoff } from './handoff'
+import { recordWritten, repoOfHandoff, sanitizeHandoffs, titleOf } from './handoffs'
+import type { Handoffs } from './handoffs'
 import { EXPLORE_MIN, NO_STEPS, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
 import type { Steps } from './signals'
 import { adviseSession, boundaryOf } from './strategy'
@@ -108,6 +110,10 @@ const lessonsReadAt = atom({ plugin: 'model-router', key: 'lessonsReadAt' } as c
 const learnOpen = atom({ plugin: 'model-router', key: 'learnOpen' } as const, [] as LessonKind[])
 const learnRows = atom({ plugin: 'model-router', key: 'learnRows' } as const, [] as string[])
 const learnScope = atom({ plugin: 'model-router', key: 'learnScope' } as const, 'repo' as Scope)
+const handoffs = atom({ plugin: 'model-router', key: 'handoffs' } as const, {} as Handoffs)
+const handoffScope = atom({ plugin: 'model-router', key: 'handoffScope' } as const, 'repo' as Scope)
+const handoffClosedShown = atom({ plugin: 'model-router', key: 'handoffClosedShown' } as const, false)
+const handoffBandSeen = atom({ plugin: 'model-router', key: 'handoffBandSeen' } as const, false)
 // Atoms outlive a hot reload of this code and `mem` does not: this keeps what the session would lose with it.
 const carried = atom({ plugin: 'model-router', key: 'carried' } as const, null as Carried | null)
 
@@ -115,7 +121,7 @@ type $ = EngineInterface
 
 // The store keys the atoms kept across sessions are saved under. The engine's
 // scan needs each update() to name its atom, so callers update, then save().
-const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown', modelCommands: 'modelCommands', lessons: 'lessons', lessonsReadAt: 'lessonsReadAt', learnScope: 'learnScope', toolUse: 'toolUse' } as const
+const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown', modelCommands: 'modelCommands', lessons: 'lessons', lessonsReadAt: 'lessonsReadAt', learnScope: 'learnScope', toolUse: 'toolUse', handoffs: 'handoffs', handoffScope: 'handoffScope' } as const
 
 /** Saves a value kept across sessions; a failed save keeps the session going. */
 async function save<T>($: $, key: string, value: T): Promise<T> {
@@ -182,6 +188,13 @@ async function setLessons($: $, fn: (all: Lesson[]) => Lesson[]): Promise<Lesson
   return next
 }
 
+async function setHandoffs($: $, fn: (all: Handoffs) => Handoffs): Promise<Handoffs> {
+  const stored = await load($, STORE.handoffs)
+  const next = await update($, handoffs, all => fn(stored === UNREADABLE || stored === undefined ? all : sanitizeHandoffs(stored)))
+  if (stored !== UNREADABLE) await save($, STORE.handoffs, next)
+  return next
+}
+
 /** Keeps what the finished main-loop turn taught, and toasts the one most worth it. */
 async function flushLessons($: $) {
   const drafts = mem.pendingLessons
@@ -206,6 +219,8 @@ async function finishHandoff($: $, e: Args<'turn.complete'>) {
     return
   }
   mem.handoffPath = path
+  const title = titleOf(e.answer)
+  await setHandoffs($, all => recordWritten(all, path, { repo: segment(mem.repo), at: now, ...(sessionId === undefined ? {} : { sessionId }), ...(title === undefined ? {} : { title }) })).catch(() => undefined)
   if (cfg.isLearning) {
     const avoidedUsd = rewritePrice(asked.model, asked.tokens, cfg.cacheTtlMinutes).write
     mem.pendingLessons.push(lessonFromAutoHandoff({ spentUsd: cost?.usd ?? 0, avoidedUsd, tokens: asked.tokens, path: tildePath(path, mem.home) }))
@@ -466,6 +481,14 @@ async function noteToolCall($: $, e: Args<'tool.call'>, result: unknown) {
   if (e.agentId === undefined) {
     if (e.tool === 'Bash' && typeof input.command === 'string') mem.boundary = boundaryOf(input.command) ?? mem.boundary
     mem.steps = stepsAfter(mem.steps, e.tool, input, result)
+    const handoffRepo = e.tool === 'Write' && typeof input.file_path === 'string' ? repoOfHandoff(input.file_path, mem.home) : undefined
+    if (handoffRepo !== undefined) {
+      const path = input.file_path as string
+      const title = typeof input.content === 'string' ? titleOf(input.content) : undefined
+      const sessionId = mem.kept.sessionId
+      const at = await nowOf($)
+      await setHandoffs($, all => recordWritten(all, path, { repo: handoffRepo, at, ...(sessionId === undefined ? {} : { sessionId }), ...(title === undefined ? {} : { title }) }))
+    }
     const plan = planEventOf(e.tool, input, result)
     if (plan?.kind === 'saved') mem.planPath = plan.path
     if (plan?.kind === 'work') mem.planPath = undefined
@@ -919,7 +942,7 @@ async function recordStep($: $, agentId: string | undefined, key: string, s: Ste
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const [stored, saved, scope, band, learned, repo, storedLessons, readAt, lessonScope] = await Promise.all([
+    const [stored, saved, scope, band, learned, repo, storedLessons, readAt, lessonScope, storedHandoffs, handoffScopeSaved] = await Promise.all([
       load($, STORE.config),
       load($, STORE.history),
       load($, STORE.statsScope),
@@ -929,6 +952,8 @@ export const register: Register = on => {
       load($, STORE.lessons),
       load($, STORE.lessonsReadAt),
       load($, STORE.learnScope),
+      load($, STORE.handoffs),
+      load($, STORE.handoffScope),
     ])
     if (Array.isArray(learned)) for (const one of learned) if (typeof one === 'string') mem.modelCommands.add(one)
     const kept = saved === UNREADABLE ? [] : sanitizeHistory(saved)
@@ -942,6 +967,8 @@ export const register: Register = on => {
     }
     await update($, history, () => kept)
     if (storedLessons !== UNREADABLE) await update($, lessons, () => sanitizeLessons(storedLessons))
+    if (storedHandoffs !== UNREADABLE) await update($, handoffs, () => sanitizeHandoffs(storedHandoffs))
+    if (handoffScopeSaved === 'repo' || handoffScopeSaved === 'all') await update($, handoffScope, () => handoffScopeSaved)
     if (typeof readAt === 'number') await update($, lessonsReadAt, () => readAt)
     if (scope === 'repo' || scope === 'all') await update($, statsScope, () => scope)
     if (lessonScope === 'repo' || lessonScope === 'all') await update($, learnScope, () => lessonScope)
@@ -962,6 +989,7 @@ export const register: Register = on => {
     // A copy: noteUse writes into `used`, and the atom's own value is not ours to change in place.
     mem.kept = isSame ? { ...before, used: { ...before.used } } : { sessionId, used: {}, isUncounted: true }
     if (!isSame) await carry($)
+    if (!isSame) await update($, handoffBandSeen, () => false)
     mem.loaded = undefined
     mem.savedUsage = undefined
     mem.patience = idleDev === '1' ? DEV_PATIENCE : PATIENCE
