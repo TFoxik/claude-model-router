@@ -4,7 +4,7 @@ A Claude Code mod that picks the model and effort for each kind of work, and sho
 
 Plan mode, normal work and each subagent type can run on a different model: Opus for planning, Sonnet for edits, Haiku for searches. The mod tracks prompt-cache health and spend as you go, stops a send that would re-write a cold cache, and can explain where your money went with your own numbers.
 
-![Two-row band above the prompt, suggesting next /clear, and today's spend below it](docs/band-and-footer.svg)
+![Three-line band above the prompt, suggesting next /clear with Handoffs, Learn and Routes on its last line, and today's spend below it](docs/band-and-footer.svg)
 
 The **[field guide](https://tfoxik.github.io/claude-model-router/)** walks through every part of the screen it adds, with annotated pictures.
 
@@ -19,7 +19,7 @@ The **[field guide](https://tfoxik.github.io/claude-model-router/)** walks throu
   - The Context pane's tips give the reason in dollars, and suggest a subagent when reads and searches fill the main context.
   - It shows with learn mode on or off. `/route next off`, or the Routes pane's **Next-step advice** row, hides it.
 - **Saves a handoff before the cache goes cold, if you want it to.** With `/route handoff on`, when the cache is in its last minutes and work is still open, it asks Claude for a handoff while reading the context is still cheap and saves it under `~/.claude/handoffs/<repo>/`. Once per prompt; it never clears the session itself.
-- **Keeps a list of handoffs.** `/route handoffs` lists the handoffs in `~/.claude/handoffs/<repo>/`, saved by auto-handoff or your own `/handoff`. Each open one has **Resume** (fills the prompt with `resume from <path>`), **Done** and **Not relevant**. A handoff closes on its own when a newer one is saved in the same session, or when you send a prompt naming it; one left open for 14 days folds away as stale. The band shows `handoffs ●N` when other sessions left handoffs open, until you open the pane. Files are never edited or deleted; to prune old ones: `find ~/.claude/handoffs -name '*.md' -mtime +30 -delete`.
+- **Keeps a list of handoffs.** `/route handoffs` lists the handoffs in `~/.claude/handoffs/<repo>/`, saved by auto-handoff or your own `/handoff`. Each open one has **Resume** (fills the prompt with `resume from <path>`), **Done** and **Not relevant**. A handoff closes on its own when a newer one is saved in the same session, or when you send a prompt naming it; one left open for 14 days folds away as stale. The band shows `Handoffs ●N` when other sessions left handoffs open, until you open the pane. `/route handoffs off`, or the Routes pane's **Handoffs** row, turns the whole feature off: no count in the band and no auto-handoff. Files are never edited or deleted; to prune old ones: `find ~/.claude/handoffs -name '*.md' -mtime +30 -delete`.
 - **Spots MCP servers and plugins you don't use.** It notes, per repo, which MCP servers and plugins are loaded and which get used. Once one has been loaded for two weeks and ten sessions without use in 30 days, the Context pane and `/route unused` name it with the setting that turns it off. The mod can't switch anything off itself:
   - **MCP servers** go off per repo in `/mcp`. When none of your connected claude.ai connectors is used, it also offers `"disableClaudeAiConnectors": true`.
   - **Plugins** get a ready-to-paste `enabledPlugins` block for the repo's `.claude/settings.local.json`, or `/plugin` when no repo uses them. A plugin listed covers its own MCP server.
@@ -77,12 +77,12 @@ Then restart or run `/reload-plugins`. Saved settings carry over. See [CHANGELOG
 | `/route learn mute\|unmute <topic>` | Silence a topic: `cold-rewrite`, `switch-rewrite`, `pricey-model`, `context-high`, `compacted`, `subagents`, `cache-expiring`, `plan-toggle`, `strategy`, `handoff`, `plan-ready`, `corrections`, `exploration`, `auto-handoff` |
 | `/route next on\|off` | Show or hide the band's `next /clear`, `/compact` or `/handoff` and the Context pane's advice tip (default on) |
 | `/route handoff on\|off` | Save a handoff while the cache is still warm, before it goes cold with work open (default off) |
-| `/route handoffs` | Open the Handoffs pane: open handoffs to resume, mark done or not relevant |
+| `/route handoffs` / `handoffs on\|off` | Open the Handoffs pane: open handoffs to resume, mark done or not relevant / turn handoffs on or off: the band's count and auto-handoff (default on) |
 | `/route away` | Before a break: the ways to step away, priced for this session |
 | `/route unused` | MCP servers and plugins this repo has long left unused, and how to turn each off |
 | `/route guard refuse\|warn\|off` | What a send onto a cold cache does (default `refuse`: held once with its price) |
 | `/route ttl 5\|60` | Prompt-cache lifetime for the warm/cold timer (default 60) |
-| `/route band on\|off` | Show or hide the band |
+| `/route band on\|off` | Show or hide the band; also the Routes pane's **Band** row. Routing works either way |
 
 Routes: `main`, `plan`, `sub:*`, `sub:<agent-type>` (such as `sub:Explore`), `workflow`, `teammate`. Models: `opus`, `sonnet`, `haiku`, `fable`, `inherit`. Efforts: `low` through `max`, `auto` (main and plan only), `inherit`.
 

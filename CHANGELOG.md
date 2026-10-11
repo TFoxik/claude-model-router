@@ -1,5 +1,16 @@
 # Release notes
 
+## Unreleased
+
+### Added
+
+- **Handoffs on/off.** `/route handoffs on|off`, a **Turn on** line in the Handoffs pane and a **Handoffs** row in the Routes pane switch the whole feature: off hides the band's count and keeps auto-handoff from asking. Handoffs you save with `/handoff` are still listed. Auto-handoff now sits under it in the Routes pane.
+
+### Changed
+
+- **The band is always three lines.** The route line and the health row each get the full width, and Handoffs, Learn and Routes share the third line, so the band no longer grows to four lines when both counts show. `handoffs ●N` is now `Handoffs ●N`.
+- **Hide moved off the band**, away from the buttons you click every day: hide or show the band from the Routes pane's **Band** row, or with `/route band off|on`.
+
 ## 0.9.1 — 2026-10-11
 
 ### Changed

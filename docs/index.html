@@ -128,9 +128,10 @@ h2 { font-family: var(--display); font-weight: 600; font-size: 28px; line-height
 .prompt-mock { border: 1px solid var(--p-line); background: #262624; border-radius: 10px; padding: 10px 12px; color: var(--p-dim); }
 .footer-mock { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--p-dim); font-size: 13px; flex-wrap: wrap; }
 .footer-mock .r { display: flex; gap: 14px; align-items: center; }
-.band { background: var(--p-box); border-radius: 8px; padding: 10px 12px; display: flex; justify-content: space-between; gap: 12px; }
+.band { background: var(--p-box); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; }
 .band .lines { display: grid; gap: 6px; min-width: 0; }
-.band .btns { display: grid; gap: 6px; justify-items: end; align-content: start; }
+.band .btns { display: flex; justify-content: space-between; gap: 12px; }
+.band .btns > div { display: flex; gap: 16px; }
 .msg { border-left: 3px solid var(--p-warn); padding: 6px 10px; background: rgba(224,178,79,.08); border-radius: 0 6px 6px 0; }
 
 /* notes */
@@ -212,7 +213,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
     <div class="part-head">
       <div class="where">above the prompt box</div>
       <h2>The band</h2>
-      <p>Two rows that sit above where you type. The top row is about routing, the bottom row about the health of the session. Both update after every request.</p>
+      <p>Three lines that sit above where you type. The top line is about routing, the second about the health of the session; both update after every request. The third holds the buttons, so the band keeps its height.</p>
     </div>
     <div class="grid wide">
       <div class="pane mono scroll">
@@ -239,8 +240,11 @@ td .ex { color: var(--muted); font-size: 13.5px; }
             </div>
           </div>
           <div class="btns">
-            <span class="zone inl" data-z="b10"><span class="pin">10</span><span class="main">Learn ●2</span></span>
-            <span class="zone inl" data-z="b9" style="display:grid; justify-items:end"><span class="pin">9</span><span>Routes</span><span>Hide</span></span>
+            <div>
+              <span class="zone inl" data-z="b12"><span class="pin">12</span><span class="main">Handoffs ●1</span></span>
+              <span class="zone inl" data-z="b10"><span class="pin">10</span><span class="main">Learn ●2</span></span>
+            </div>
+            <span class="zone inl" data-z="b9"><span class="pin">9</span><span>Routes</span></span>
           </div>
         </div>
       </div>
@@ -253,9 +257,10 @@ td .ex { color: var(--muted); font-size: 13.5px; }
         <div class="note" data-z="b6"><span class="n">6</span><h3>Context</h3><div class="body"><p>How full the context window is. Green until 60% of the way to auto-compaction, yellow to 85%, red after. Click the word <b>context</b> for the <a href="#context">Context pane</a>.</p></div></div>
         <div class="note" data-z="b7"><span class="n">7</span><h3>Last prompt cost</h3><div class="body"><p>What your whole last prompt cost, including every subagent it started. It grows live while the prompt runs. Click it for the <a href="#last">Last prompt pane</a>.</p></div></div>
         <div class="note" data-z="b8"><span class="n">8</span><h3>Usage limits</h3><div class="body"><p>How much of your 5-hour and 7-day plan limits is used. Yellow from 70%, red from 90%.</p></div></div>
-        <div class="note" data-z="b9"><span class="n">9</span><h3>Routes / Hide</h3><div class="body"><p><b>Routes</b> opens the <a href="#routes">Routes pane</a>. <b>Hide</b> hides the band; bring it back with <code>/route band on</code>.</p></div></div>
+        <div class="note" data-z="b9"><span class="n">9</span><h3>Routes</h3><div class="body"><p>Opens the <a href="#routes">Routes pane</a>. To hide the band, use its <b>Band</b> row or <code>/route band off</code>; it is kept off the band so a stray click can't hide it.</p></div></div>
         <div class="note" data-z="b11"><span class="n">11</span><h3>Next step</h3><div class="body"><p>Only when carrying on is not the best move. <b>next /clear</b> after a <code>git commit</code> or a pull request over 50k tokens or more, until your next prompt; once a plan is written to disk (implement it in a fresh context); after two corrections in a row; once the cache has gone cold over a big context; or after an auto-handoff was saved. <b>next /handoff</b> (or <b>next handoff</b> without the skill) instead of clearing after a commit or compacting, when two or more todos or tasks are still open. <b>next /compact</b> within 15% of auto-compact, or when the conversation is most of a context that is 60% of the way there. Click it for the reason, priced, at the top of the <a href="#context">Context pane</a>'s tips. It shows with learn mode on or off; <code>/route next off</code> hides it and the Context pane's advice tip.</p></div></div>
         <div class="note" data-z="b10"><span class="n">10</span><h3>Learn</h3><div class="body"><p>Only while <a href="#learn">learn mode</a> is on and there are lessons you haven't opened: the number is how many, counted in the Learn pane's scope (this repo, or all repos). Click it for the Learn pane.</p></div></div>
+        <div class="note" data-z="b12"><span class="n">12</span><h3>Handoffs</h3><div class="body"><p>Only when other sessions left handoffs open in this repo, until you open the <a href="#handoffs">Handoffs pane</a>. Never shown while handoffs are off (<code>/route handoffs off</code>).</p></div></div>
       </div>
     </div>
   </section>
@@ -344,8 +349,10 @@ td .ex { color: var(--muted); font-size: 13.5px; }
       <div class="notes">
         <div class="note" data-z="r1"><span class="n">1</span><h3>On / off</h3><div class="body"><p><b>● on</b> means the router picks the model and effort for every request. <b>Turn off</b> stops that, and everything uses the session's own model. Cost tracking, the band and the cold-send guard keep working either way. Same as <code>/route on</code> / <code>/route off</code>.</p></div></div>
         <div class="note" data-z="r2"><span class="n">2</span><h3>Learn mode</h3><div class="body"><p>Off by default. <b>Turn on</b> starts the lessons described in <a href="#learn">Learn mode</a>; the line under it disappears and the button becomes <b>Turn off</b>. <b>Open</b> shows the Learn pane. Same as <code>/route learn on</code> / <code>off</code>.</p></div></div>
-        <div class="note"><h3>Auto-handoff</h3><div class="body"><p>Off by default. When on, and the cache is in its last minutes with two or more steps open or a plan not yet started, model-router asks Claude for a handoff while the cache is still warm and saves the reply under <code>~/.claude/handoffs/&lt;repo&gt;/</code>. It waits while you type or anything runs, goes once per prompt, and never clears the session. Same as <code>/route handoff on</code> / <code>off</code>.</p></div></div>
+        <div class="note"><h3>Handoffs</h3><div class="body"><p>On by default. <b>Turn off</b> switches the whole feature off: no <b>Handoffs ●N</b> in the band and no auto-handoff, while handoffs you save with <code>/handoff</code> stay listed. <b>Open</b> shows the <a href="#handoffs">Handoffs pane</a>. Same as <code>/route handoffs on</code> / <code>off</code>.</p></div></div>
+        <div class="note"><h3>Auto-handoff</h3><div class="body"><p>Shown under Handoffs while it is on. Off by default. When on, and the cache is in its last minutes with two or more steps open or a plan not yet started, model-router asks Claude for a handoff while the cache is still warm and saves the reply under <code>~/.claude/handoffs/&lt;repo&gt;/</code>. It waits while you type or anything runs, goes once per prompt, and never clears the session. Same as <code>/route handoff on</code> / <code>off</code>.</p></div></div>
         <div class="note"><h3>Next-step advice</h3><div class="body"><p>On by default. Shows <b>next /clear</b>, <b>next /compact</b> or <b>next /handoff</b> in the band when carrying on is not the best move, with the reason at the top of the Context pane's tips. <b>Turn off</b> hides both, and learn mode stops teaching from that advice. Same as <code>/route next on</code> / <code>off</code>.</p></div></div>
+        <div class="note"><h3>Band</h3><div class="body"><p>Shown by default. <b>Hide</b> takes the <a href="#band">band</a> away from above the prompt; routing, the guard and cost tracking keep working. Same as <code>/route band off</code> / <code>on</code>.</p></div></div>
         <div class="note" data-z="r3"><span class="n">3</span><h3>What is running now</h3><div class="body"><dl>
           <dt>▸ main Opus 5.5 medium</dt><dd>The route of the most recent request, with its model and effort.</dd>
           <dt>$3.68</dt><dd>Estimated session total.</dd>
@@ -707,7 +714,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
   <!-- HANDOFFS -->
   <section class="part" id="handoffs">
     <div class="part-head">
-      <div class="where">/route handoffs · the band's <b>handoffs ●N</b></div>
+      <div class="where">/route handoffs · the band's <b>Handoffs ●N</b></div>
       <h2>Handoffs</h2>
       <p>Handoffs saved by auto-handoff or your own <code>/handoff</code> live in <code>~/.claude/handoffs/&lt;repo&gt;/</code>. The Handoffs pane keeps track of which ones are still open, so you can pick one up in a fresh session, and gets the rest out of the way. The files themselves are never edited or deleted.</p>
     </div>
@@ -723,7 +730,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
       <div class="notes">
         <div class="note" data-z="h1"><span class="n">1</span><h3>This repo or all</h3><div class="body"><p><b>This repo</b> lists the folder for the session's repo; <b>All</b> lists every repo's, each title starting with its repo.</p></div></div>
         <div class="note" data-z="h2"><span class="n">2</span><h3>An open handoff</h3><div class="body"><p>Its date and its title, the file's first <code>#</code> heading. <b>Resume</b> puts <code>resume from &lt;path&gt;</code> in the prompt box without sending it. <b>Done</b> and <b>Not relevant</b> close it.</p></div></div>
-        <div class="note" data-z="h3"><span class="n">3</span><h3>Closed on their own</h3><div class="body"><p>A handoff closes when a newer one is saved in the same session (superseded), or when you send a prompt naming its path (resumed). One left open for 14 days folds away as stale but keeps its buttons. Each closed one says why, and <b>Reopen</b> brings it back. The band shows <b>handoffs ●N</b> for open handoffs other sessions left in this repo, until you open the pane in that session.</p></div></div>
+        <div class="note" data-z="h3"><span class="n">3</span><h3>Closed on their own</h3><div class="body"><p>A handoff closes when a newer one is saved in the same session (superseded), or when you send a prompt naming its path (resumed). One left open for 14 days folds away as stale but keeps its buttons. Each closed one says why, and <b>Reopen</b> brings it back. The band shows <b>Handoffs ●N</b> for open handoffs other sessions left in this repo, until you open the pane in that session.</p></div></div>
       </div>
     </div>
   </section>

@@ -245,11 +245,12 @@ async function refreshHandoffs($: $, scope?: Scope) {
 }
 
 async function renderHandoffsPane($: $, e: Args<'ui.render'>) {
-  const [all, scope, isClosedShown, now] = await Promise.all([read($, handoffs), read($, handoffScope), read($, handoffClosedShown), nowOf($)])
+  const [all, scope, isClosedShown, now, cfg] = await Promise.all([read($, handoffs), read($, handoffScope), read($, handoffClosedShown), nowOf($), read($, config)])
   const repo = segment(mem.repo)
   const { open, closed } = handoffRows(all, scope === 'repo' ? repo : undefined, now)
   const folder = mem.home === undefined ? `~/${HANDOFF_DIR}/` : tildePath(scope === 'repo' ? handoffDir(mem.home, repo) : handoffsRoot(mem.home), mem.home)
-  return handoffsPaneView($.ui.resolve(e), { open, closed, isClosedShown, scope, repo, folder }, {
+  return handoffsPaneView($.ui.resolve(e), { open, closed, isClosedShown, scope, repo, folder, isOn: cfg.isHandoffs }, {
+    setOn: isOn => void setHandoffsOn($, isOn),
     resume: path => void $.prompt.fill({ text: `resume from ${tildePath(path, mem.home)}`, mode: 'replace' }).catch(() => undefined),
     setStatus: (path, status: HandoffStatus) => void setHandoffs($, records => setStatus(records, path, status)),
     reopen: path => void nowOf($).then(at => setHandoffs($, records => reopen(records, path, at))),
@@ -312,6 +313,10 @@ async function teach($: $, drafts: readonly LessonDraft[], now: number) {
 async function setLearning($: $, isOn: boolean) {
   if (!isOn) mem.pendingLessons = []
   await setConfig($, c => ({ ...c, isLearning: isOn }))
+}
+
+async function setHandoffsOn($: $, isOn: boolean) {
+  await setConfig($, c => ({ ...c, isHandoffs: isOn }))
 }
 
 async function setAutoHandoff($: $, isOn: boolean) {
@@ -446,7 +451,7 @@ async function refreshStatus($: $) {
 /** In the cache's last minutes with work open, asks Claude for a handoff while reading the context is still cheap. */
 async function maybeAutoHandoff($: $, cfg: RouterConfig, warm: { warmMinutes: number; tokens: number; model: string }) {
   const facts = {
-    isOn: cfg.autoHandoff,
+    isOn: cfg.isHandoffs && cfg.autoHandoff,
     isArmed: mem.handoffArmed && mem.handoff === undefined,
     isIdle: !mem.isTurnRunning,
     isPromptEmpty: true,
@@ -775,10 +780,10 @@ async function renderBand($: $, e: Args<'ui.render'>) {
     read($, handoffs),
     read($, handoffBandSeen),
   ])
-  const handoffsOpen = isBandSeen ? 0 : bandCount(records, segment(mem.repo), mem.kept.sessionId, await nowOf($))
+  const handoffsOpen = isBandSeen || !cfg.isHandoffs ? 0 : bandCount(records, segment(mem.repo), mem.kept.sessionId, await nowOf($))
   const learnUnread = cfg.isLearning ? unreadCount(inScope(kept, scope), readAt, cfg.learnMuted) : 0
   const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp, learnUnread, handoffsOpen }
-  return bandView($.ui.resolve(e), data, { open: openPane($), hide: () => void setBand($, false) })
+  return bandView($.ui.resolve(e), data, { open: openPane($) })
 }
 
 async function renderCtxPane($: $, e: Args<'ui.render'>) {
@@ -807,16 +812,17 @@ async function renderPane($: $, e: Args<'ui.render'>) {
   const now = await read($, active)
   if (e.surface === 'mobile') return routesMobileView($.ui.resolve(e), now)
   const els = $.ui.resolve(e)
-  const [cfg, costs, isPlanning, pending, lastPrompt, usage] = await Promise.all([
+  const [cfg, costs, isPlanning, pending, lastPrompt, usage, isBand] = await Promise.all([
     read($, config),
     read($, spend),
     read($, isPlan),
     read($, draft),
     read($, promptCost),
     $.session.usage(),
+    read($, isBandShown),
   ])
   const sessionModel = now?.model ?? (await $.session.model())
-  const data = { cfg, costs, now, isPlanning, pending, lastPrompt, contextTokens: usage.context.tokens ?? 0, sessionModel }
+  const data = { cfg, costs, now, isPlanning, pending, lastPrompt, contextTokens: usage.context.tokens ?? 0, sessionModel, isBand }
   return routesPaneView(els, data, {
     editDraft: fn =>
       void update($, draft, d => {
@@ -825,7 +831,10 @@ async function renderPane($: $, e: Args<'ui.render'>) {
       }),
     toggle: () => void setConfig($, c => ({ ...c, isEnabled: !c.isEnabled })),
     setLearning: isOn => void setLearning($, isOn),
+    setHandoffs: isOn => void setHandoffsOn($, isOn),
     setAutoHandoff: isOn => void setAutoHandoff($, isOn),
+    setBand: isShown => void setBand($, isShown),
+    openHandoffs: () => openPane($)('handoffs'),
     setShowNext: isOn => void setShowNext($, isOn),
     openLearn: () => openPane($)('learn'),
     // Only the routes come from the draft, so on/off or a setting changed while it was open is kept.
@@ -850,13 +859,16 @@ const guardText = (cfg: RouterConfig, cold: { text: string }, tail: string) =>
 const LEARN_ON_TEXT =
   'Learn mode on: when a cache rewrite, a pricey model, a growing context or busy subagents cost you, a toast explains it with the numbers. /route learn lists them.'
 
+const HANDOFFS_ON_TEXT = 'Handoffs on: the band counts handoffs other sessions left open, and auto-handoff runs when it is on (/route handoff on|off).'
+const HANDOFFS_OFF_TEXT = 'Handoffs off: no count in the band and no auto-handoff. Handoffs you save with /handoff are still listed in /route handoffs.'
+
 const handoffOnText = (repo: string) =>
   `Auto-handoff on: when the cache is about to go cold with steps open or a plan not yet started, model-router asks Claude for a handoff while the cache is still warm and saves it under ~/${HANDOFF_DIR}/${segment(repo)}/. It runs once per prompt and never clears the session itself.`
 
 const asEffort = (effort: unknown): Effort | undefined =>
   typeof effort === 'string' ? (effort as Effort) : undefined
 
-const USAGE = '[stats [clear | text on|off] | context | last | learn [on|off | mute|unmute <topic>] | handoffs | handoff on|off | next on|off | away | unused | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
+const USAGE = '[stats [clear | text on|off] | context | last | learn [on|off | mute|unmute <topic>] | handoffs [on|off] | handoff on|off | next on|off | away | unused | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
 
 // Origins a person typed or drove: only these may change the routes, and only these are held by the cold guard.
 const USER_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
@@ -1324,6 +1336,12 @@ export const register: Register = on => {
       const isOn = rest[0] === 'on'
       await setShowNext($, isOn)
       return { text: isOn ? 'Next-step advice on: the band shows next /clear, /compact or /handoff when carrying on is not the best move, with the reason in the Context pane.' : 'Next-step advice off: the band and the Context pane no longer suggest when to clear, compact or hand off.' }
+    }
+    if (verb === 'handoffs') {
+      if (rest[0] !== 'on' && rest[0] !== 'off') return { text: 'Usage: /route handoffs on|off (the Handoffs pane, the band\'s count and auto-handoff), or /route handoffs to open the pane' }
+      const isOn = rest[0] === 'on'
+      await setHandoffsOn($, isOn)
+      return { text: isOn ? HANDOFFS_ON_TEXT : HANDOFFS_OFF_TEXT }
     }
     if (verb === 'handoff') {
       if (rest[0] !== 'on' && rest[0] !== 'off') return { text: 'Usage: /route handoff on|off (save a handoff while the cache is still warm, before it goes cold with work open)' }

@@ -229,24 +229,49 @@ test('the pane draws on terminal and desktop', async ($, on) => {
   }
 })
 
-test('the band above the prompt draws and hides', async ($, on) => {
+test('the band is three rows with the route line alone on top, and has no Hide to misclick', async ($, on) => {
   mock.store(on, { bandShown: true, config: MINE })
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('command.run', () => ({ text: 'engine' }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('ui.render', { component: 'AbovePrompt' }, ($, e) => { const { Text } = $.ui.resolve(e); return <Text key="engine-band">engine</Text> })
   on('ui.status', () => ({ value: undefined }))
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'model-router', surface, component: 'AbovePrompt', props: {} as never })
+    const tree = await ui.drawn()
+    expect(tree).toMatchObject({ type: 'Box', props: { flexDirection: 'column' } })
+    expect(((tree as { children?: unknown[] }).children ?? []).map(one => (one as { props?: { key?: string } }).props?.key)).toEqual(['band-route', 'band-health', 'band-actions'])
     expect(await ui.find({ type: 'Text', text: /Opus medium/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Sonnet high/ })).toBeDefined()
     expect(await ui.find({ key: 'band-open' })).toBeDefined()
+    expect(await ui.find({ key: 'band-hide' })).toBeUndefined()
     await ui.unmount()
   }
+  await route($, 'band off')
   const ui = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'AbovePrompt', props: {} as never })
-  await ui.press({ key: 'band-hide' })
   expect(await ui.find({ key: 'band-open' })).toBeUndefined()
   await ui.unmount()
+})
+
+test('the Routes pane shows and hides the band', async ($, on) => {
+  sharedStore(on, { bandShown: true, config: MINE })
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  on('session.model', () => ({ value: opus }))
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => { const { Text } = $.ui.resolve(e); return <Text key="engine-band">engine</Text> })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const pane = await mountPane($, 'route')
+  expect((await pane.find({ key: 'band-toggle' }))?.text).toBe('Hide')
+  await pane.press({ key: 'band-toggle' })
+  expect((await pane.find({ key: 'band-toggle' }))?.text).toBe('Show')
+  const band = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'AbovePrompt', props: {} as never })
+  expect(await band.find({ key: 'band-open' })).toBeUndefined()
+  await band.unmount()
+  await pane.press({ key: 'band-toggle' })
+  const back = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'AbovePrompt', props: {} as never })
+  expect(await back.find({ key: 'band-open' })).toBeDefined()
+  await back.unmount()
+  await pane.unmount()
 })
 
 test('estimates: only the live main-loop route pays a cache rewrite up front', () => {
@@ -597,6 +622,9 @@ test('stored config is kept only where this version understands it', () => {
   expect(sanitizeConfig({ routes: { main: { model: 'constructor', effort: 'low' } } }).routes).toEqual(DEFAULT_CONFIG.routes)
   expect(sanitizeConfig({ autoHandoff: true }).autoHandoff).toBe(true)
   expect(sanitizeConfig({ autoHandoff: 'yes' }).autoHandoff).toBe(false)
+  expect(sanitizeConfig({}).isHandoffs).toBe(true)
+  expect(sanitizeConfig({ isHandoffs: false }).isHandoffs).toBe(false)
+  expect(sanitizeConfig({ isHandoffs: 'no' }).isHandoffs).toBe(true)
   expect(DEFAULT_CONFIG.autoHandoff).toBe(false)
   expect(sanitizeConfig({ showNext: false }).showNext).toBe(false)
   expect(sanitizeConfig({ showNext: 'no' }).showNext).toBe(true)
@@ -1590,16 +1618,52 @@ test('a held cold send resumes nothing', async ($, on) => {
 test('the band shows handoffs ●N for other sessions\' open handoffs, through prompts, until the pane is opened', async ($, on) => {
   await listedSession($, on, { 'a.md': '# A\n', 'b.md': '# B\n' })
   const band = await bandOf($)
-  expect((await band.find({ key: 'band-handoffs' }))?.text).toBe('handoffs ●2')
+  expect((await band.find({ key: 'band-handoffs' }))?.text).toBe('Handoffs ●2')
   await band.unmount()
   await submit($, 'hello')
   const still = await bandOf($)
-  expect((await still.find({ key: 'band-handoffs' }))?.text).toBe('handoffs ●2')
+  expect((await still.find({ key: 'band-handoffs' }))?.text).toBe('Handoffs ●2')
   await still.press({ key: 'band-handoffs' })
   await still.unmount()
   const after = await bandOf($)
   expect(await after.find({ key: 'band-handoffs' })).toBeUndefined()
   await after.unmount()
+})
+
+test('with Handoffs off, auto-handoff never asks even when its own switch is on', async ($, on) => {
+  const data: Record<string, unknown> = {}
+  const { clock, asked } = await handoffSession($, on, data)
+  await route($, 'handoffs off')
+  await clock.advance(58 * 60_000)
+  expect(asked).toEqual([])
+  expect((data.config as { autoHandoff: boolean }).autoHandoff).toBe(true)
+})
+
+test('/route handoffs off hides the band badge and the pane offers Turn on; on brings both back', async ($, on) => {
+  await listedSession($, on, { 'a.md': '# A\n' })
+  expect((await route($, 'handoffs off'))?.text).toMatch(/^Handoffs off/)
+  const band = await bandOf($)
+  expect(await band.find({ key: 'band-handoffs' })).toBeUndefined()
+  await band.unmount()
+  const pane = await mountPane($, 'handoffs', 'desktop')
+  expect(await pane.find({ type: 'Text', text: /^Handoffs are off/ })).toBeDefined()
+  await pane.press({ key: 'handoffs-on' })
+  expect(await pane.find({ type: 'Text', text: /^Handoffs are off/ })).toBeUndefined()
+  await pane.unmount()
+  expect((await route($, 'handoffs on'))?.text).toMatch(/^Handoffs on/)
+  expect((await route($, 'handoffs maybe'))?.text).toMatch(/^Usage: \/route handoffs on\|off/)
+})
+
+test('the Routes pane switches Handoffs, and shows Auto-handoff only while Handoffs is on', async ($, on) => {
+  on('session.model', () => ({ value: opus }))
+  await listedSession($, on, {})
+  const pane = await mountPane($, 'route')
+  expect((await pane.find({ key: 'handoffs-toggle' }))?.text).toBe('Turn off')
+  expect(await pane.find({ key: 'handoff-toggle' })).toBeDefined()
+  await pane.press({ key: 'handoffs-toggle' })
+  expect((await pane.find({ key: 'handoffs-toggle' }))?.text).toBe('Turn on')
+  expect(await pane.find({ key: 'handoff-toggle' })).toBeUndefined()
+  await pane.unmount()
 })
 
 test('a stale handoff keeps Done and Not relevant, and Reopen on an old closed one brings it back to the open list', async ($, on) => {

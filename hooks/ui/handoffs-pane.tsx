@@ -3,8 +3,9 @@ import type { HandoffRow, HandoffStatus } from '../handoffs'
 import { STAMP_W, stamp } from './kit'
 import type { Els } from './kit'
 
-type HandoffsData = { open: readonly HandoffRow[]; closed: readonly HandoffRow[]; isClosedShown: boolean; scope: Scope; repo: string; folder: string }
+type HandoffsData = { open: readonly HandoffRow[]; closed: readonly HandoffRow[]; isClosedShown: boolean; scope: Scope; repo: string; folder: string; isOn: boolean }
 type HandoffsActions = {
+  setOn: (isOn: boolean) => void
   resume: (path: string) => void
   setStatus: (path: string, status: HandoffStatus) => void
   reopen: (path: string) => void
@@ -40,7 +41,7 @@ function row({ Box, Text, Button }: Els, one: HandoffRow, showsRepo: boolean, is
   )
 }
 
-export function handoffsPaneView(els: Els, { open, closed, isClosedShown, scope, repo, folder }: HandoffsData, act: HandoffsActions) {
+export function handoffsPaneView(els: Els, { open, closed, isClosedShown, scope, repo, folder, isOn }: HandoffsData, act: HandoffsActions) {
   const { Box, Text, Button } = els
   const showsRepo = scope === 'all'
   return (
@@ -52,6 +53,12 @@ export function handoffsPaneView(els: Els, { open, closed, isClosedShown, scope,
           <Button key="scope-all" label="All" plain dimColor={scope !== 'all'} onPress={() => act.setScope('all')} />
         </Box>
       </Box>
+      {isOn ? null : (
+        <Box flexDirection="row" gap={1}>
+          <Text dimColor>Handoffs are off: the band shows no count and auto-handoff does not run.</Text>
+          <Button key="handoffs-on" label="Turn on" plain onPress={() => act.setOn(true)} />
+        </Box>
+      )}
       {open.length === 0 && closed.length === 0 ? (
         <Text dimColor wrap="wrap">{`No handoffs in ${scope === 'repo' ? repo : 'any repo'}. Auto-handoff saves them here when it's on; so does /handoff.`}</Text>
       ) : null}

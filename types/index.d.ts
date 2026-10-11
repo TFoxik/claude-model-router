@@ -12,6 +12,8 @@ export type RouterConfig = {
   keepPromptText: boolean
   isLearning: boolean
   learnMuted: LessonKind[]
+  /** Handoffs as a whole: off hides the band's count and keeps auto-handoff from asking, whatever autoHandoff says. */
+  isHandoffs: boolean
   autoHandoff: boolean
   /** The band's next /clear, /compact or /handoff and the Context pane's advice tip. */
   showNext: boolean

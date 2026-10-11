@@ -56,6 +56,7 @@ type PaneData = {
   lastPrompt: PromptCost | null
   contextTokens: number
   sessionModel: string
+  isBand: boolean
 }
 
 type PaneActions = {
@@ -63,7 +64,10 @@ type PaneActions = {
   editDraft: (fn: (c: RouterConfig) => RouterConfig) => void
   toggle: () => void
   setLearning: (isOn: boolean) => void
+  setHandoffs: (isOn: boolean) => void
   setAutoHandoff: (isOn: boolean) => void
+  setBand: (isShown: boolean) => void
+  openHandoffs: () => void
   setShowNext: (isOn: boolean) => void
   openLearn: () => void
   apply: (next: RouterConfig) => void
@@ -85,8 +89,8 @@ export function routesMobileView({ Box, Text }: Els, now: ActiveRoute | null) {
 type InputEls = Extract<Els, { Select: unknown }>
 
 export function routesPaneView(els: InputEls, data: PaneData, actions: PaneActions) {
-  const { cfg, costs, now, isPlanning, pending, lastPrompt, contextTokens, sessionModel } = data
-  const { editDraft, toggle, setLearning, setAutoHandoff, setShowNext, openLearn, apply, discard } = actions
+  const { cfg, costs, now, isPlanning, pending, lastPrompt, contextTokens, sessionModel, isBand } = data
+  const { editDraft, toggle, setLearning, setHandoffs, setAutoHandoff, setBand, setShowNext, openLearn, openHandoffs, apply, discard } = actions
   const { Box, Text, Button, Select } = els
   const shown = pending ?? cfg
   const ttlMinutes = cfg.cacheTtlMinutes
@@ -131,12 +135,27 @@ export function routesPaneView(els: InputEls, data: PaneData, actions: PaneActio
       <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
         <Box flexDirection="column" flexShrink={1}>
           <Text>
-            Auto-handoff <Text color={cfg.autoHandoff ? 'success' : 'subtle'}>{cfg.autoHandoff ? '● on' : '○ off'}</Text>
+            Handoffs <Text color={cfg.isHandoffs ? 'success' : 'subtle'}>{cfg.isHandoffs ? '● on' : '○ off'}</Text>
           </Text>
-          {cfg.autoHandoff ? null : <Text dimColor>saves a handoff while the cache is warm, before it goes cold with work open</Text>}
+          {cfg.isHandoffs ? null : <Text dimColor>counts open handoffs in the band and lets auto-handoff run</Text>}
         </Box>
-        <Button key="handoff-toggle" label={cfg.autoHandoff ? 'Turn off' : 'Turn on'} onPress={() => setAutoHandoff(!cfg.autoHandoff)} />
+        <Box flexDirection="row" gap={1} flexShrink={0}>
+          <Button key="handoffs-toggle" label={cfg.isHandoffs ? 'Turn off' : 'Turn on'} onPress={() => setHandoffs(!cfg.isHandoffs)} />
+          <Button key="handoffs-open" label="Open" onPress={openHandoffs} />
+        </Box>
       </Box>
+
+      {cfg.isHandoffs ? (
+        <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1} paddingLeft={2}>
+          <Box flexDirection="column" flexShrink={1}>
+            <Text>
+              Auto-handoff <Text color={cfg.autoHandoff ? 'success' : 'subtle'}>{cfg.autoHandoff ? '● on' : '○ off'}</Text>
+            </Text>
+            {cfg.autoHandoff ? null : <Text dimColor>saves a handoff while the cache is warm, before it goes cold with work open</Text>}
+          </Box>
+          <Button key="handoff-toggle" label={cfg.autoHandoff ? 'Turn off' : 'Turn on'} onPress={() => setAutoHandoff(!cfg.autoHandoff)} />
+        </Box>
+      ) : null}
 
       <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
         <Box flexDirection="column" flexShrink={1}>
@@ -146,6 +165,16 @@ export function routesPaneView(els: InputEls, data: PaneData, actions: PaneActio
           <Text dimColor>shows next /clear, /compact or /handoff in the band when carrying on is not the best move</Text>
         </Box>
         <Button key="next-toggle" label={cfg.showNext ? 'Turn off' : 'Turn on'} onPress={() => setShowNext(!cfg.showNext)} />
+      </Box>
+
+      <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
+        <Box flexDirection="column" flexShrink={1}>
+          <Text>
+            Band <Text color={isBand ? 'success' : 'subtle'}>{isBand ? '● shown' : '○ hidden'}</Text>
+          </Text>
+          <Text dimColor>the route, cache and cost lines above the prompt; routing works either way</Text>
+        </Box>
+        <Button key="band-toggle" label={isBand ? 'Hide' : 'Show'} onPress={() => setBand(!isBand)} />
       </Box>
 
       <Box flexDirection="column" borderStyle="round" borderColor={nowColor} paddingX={1}>

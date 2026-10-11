@@ -63,28 +63,33 @@ function healthRowView({ Box, Text, Button }: Els, health: Health | null, open: 
 
 type BandData = { cfg: RouterConfig; now: ActiveRoute | null; pending: RouterConfig | null; total: number; health: Health | null; learnUnread: number; handoffsOpen: number }
 
-export function bandView(els: Els, { cfg, now, pending, total, health, learnUnread, handoffsOpen }: BandData, { open, hide }: { open: Open; hide: () => void }) {
+/**
+ * Always three rows, so the band never changes height: the route line and the health row each get the full width,
+ * and the buttons share the last row. Hiding lives in the Routes pane, away from the buttons pressed every day.
+ */
+export function bandView(els: Els, { cfg, now, pending, total, health, learnUnread, handoffsOpen }: BandData, { open }: { open: Open }) {
   const { Box, Text, Button } = els
   return (
-    <Box flexDirection="row" justifyContent="space-between" gap={1}>
-      <Box flexDirection="column" flexShrink={1}>
-        <Box flexDirection="row" gap={1}>
-          <Text bold={cfg.isEnabled} dimColor={!cfg.isEnabled} color={cfg.isEnabled && now ? colorOf(now.route) : undefined}>
-            {bandHead(cfg, now)}
-          </Text>
-          <Text dimColor wrap="truncate-end">
-            │ <Text color="planMode">plan</Text> {shortRoute(cfg, 'plan')} · <Text color="claude">main</Text> {shortRoute(cfg, 'main')} ·{' '}
-            <Text color="suggestion">sub</Text> {shortRoute(cfg, 'sub:*')} · {money(total)}
-          </Text>
-          {pending ? <Text color="warning">● draft</Text> : null}
-        </Box>
-        {healthRowView(els, health, open)}
+    <Box flexDirection="column">
+      <Box key="band-route" flexDirection="row" gap={1}>
+        <Text bold={cfg.isEnabled} dimColor={!cfg.isEnabled} color={cfg.isEnabled && now ? colorOf(now.route) : undefined}>
+          {bandHead(cfg, now)}
+        </Text>
+        <Text dimColor wrap="truncate-end">
+          │ <Text color="planMode">plan</Text> {shortRoute(cfg, 'plan')} · <Text color="claude">main</Text> {shortRoute(cfg, 'main')} ·{' '}
+          <Text color="suggestion">sub</Text> {shortRoute(cfg, 'sub:*')} · {money(total)}
+        </Text>
+        {pending ? <Text color="warning">● draft</Text> : null}
       </Box>
-      <Box flexDirection="column" alignItems="flex-end" flexShrink={0}>
-        {handoffsOpen > 0 ? <Button key="band-handoffs" label={`handoffs ●${handoffsOpen}`} plain onPress={() => open('handoffs')} /> : null}
-        {learnUnread > 0 ? <Button key="band-learn" label={`Learn ●${learnUnread}`} plain onPress={() => open('learn')} /> : null}
+      <Box key="band-health" flexDirection="row">
+        {healthRowView(els, health, open) ?? <Text> </Text>}
+      </Box>
+      <Box key="band-actions" flexDirection="row" justifyContent="space-between" gap={2}>
+        <Box flexDirection="row" gap={2}>
+          {handoffsOpen > 0 ? <Button key="band-handoffs" label={`Handoffs ●${handoffsOpen}`} plain onPress={() => open('handoffs')} /> : null}
+          {learnUnread > 0 ? <Button key="band-learn" label={`Learn ●${learnUnread}`} plain onPress={() => open('learn')} /> : null}
+        </Box>
         <Button key="band-open" label="Routes" plain onPress={() => open('route')} />
-        <Button key="band-hide" label="Hide" plain onPress={hide} />
       </Box>
     </Box>
   )

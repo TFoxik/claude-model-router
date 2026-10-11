@@ -117,6 +117,7 @@ export const DEFAULT_CONFIG: RouterConfig = {
   keepPromptText: true,
   isLearning: false,
   learnMuted: [],
+  isHandoffs: true,
   autoHandoff: false,
   showNext: true,
 }
@@ -191,6 +192,7 @@ export function sanitizeConfig(stored: unknown): RouterConfig {
     keepPromptText: typeof s.keepPromptText === 'boolean' ? s.keepPromptText : DEFAULT_CONFIG.keepPromptText,
     isLearning: typeof s.isLearning === 'boolean' ? s.isLearning : DEFAULT_CONFIG.isLearning,
     learnMuted: Array.isArray(s.learnMuted) ? [...new Set(s.learnMuted.filter(isLessonKind))] : DEFAULT_CONFIG.learnMuted,
+    isHandoffs: typeof s.isHandoffs === 'boolean' ? s.isHandoffs : DEFAULT_CONFIG.isHandoffs,
     autoHandoff: typeof s.autoHandoff === 'boolean' ? s.autoHandoff : DEFAULT_CONFIG.autoHandoff,
     showNext: typeof s.showNext === 'boolean' ? s.showNext : DEFAULT_CONFIG.showNext,
   }
