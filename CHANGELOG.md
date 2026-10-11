@@ -1,5 +1,22 @@
 # Release notes
 
+## 0.8.0 — 2026-10-11
+
+### Added
+
+- **Hand off, start fresh, start over.** The band's advice learns four situations from Claude Code's best practices:
+  - **Steps still open**: after a commit, near auto-compact or when the conversation fills the context, it says `next /handoff` instead of clear or compact while two or more todos or tasks are open. A written handoff keeps the plan's detail; a summary does not. It names your `/handoff` skill if you have one, and otherwise says how to ask for one.
+  - **Plan written**: once `ExitPlanMode` saves a plan, or a `specs/` or `plans/` Markdown file, `SPEC.md` or `PLAN.md` is written, it says `next /clear` and to implement the plan in a fresh context, until another file is edited.
+  - **Two corrections in a row**: it says `next /clear` and to start over with one better prompt, or Esc Esc to rewind.
+  - **Exploration**: when reads and searches put 30k tokens or more, and 30% of the context, into the main conversation, the Context pane suggests a subagent next time.
+- **Auto-handoff (opt-in).** `/route handoff on`, or the new row in the Routes pane: in the cache's last minutes, with work open and nothing typed or running, model-router asks Claude for a handoff while the cache is still warm and saves it under `~/.claude/handoffs/<repo>/`. Once per prompt; it never clears the session. The band then says `next /clear` with the file to resume from.
+- **Habits.** The Learn pane lists three habits no hook can spot: `/clear` between unrelated tasks, `/btw` for side questions, and Esc Esc to rewind.
+- New learn topics: `handoff`, `plan-ready`, `corrections`, `exploration`, `auto-handoff`.
+
+### Changed
+
+- The compact advice for a conversation-heavy context also offers Esc Esc → *Summarize up to here*.
+
 ## 0.7.0 — 2026-10-11
 
 ### Added

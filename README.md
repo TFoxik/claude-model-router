@@ -12,14 +12,19 @@ The **[field guide](https://tfoxik.github.io/claude-model-router/)** walks throu
 
 - **Routes models per kind of work.** Set a model and effort for `main`, `plan`, each subagent type (`sub:Explore`, `sub:Plan`, …), workflows and teammates, or pick a preset. The `/route` pane shows what a change costs per turn, the one-off cache rewrite it causes, and when it pays back, before you apply it.
 - **Shows cost and cache health in a band above the prompt**: `cache 96% 42m · context 31% · last $0.05 · 5h 38% · 7d 12%`. That's the cache hit rate and minutes until it goes cold, context used, the cost of your last prompt, and your 5-hour and 7-day limits. Click any part for a breakdown with tips on what to trim or reroute.
-- **Says when to carry on, compact or clear.** When carrying on is not the best move, the band shows `next /clear` or `next /compact`. It says clear after a commit or a pull request over a sizeable context, or once the cache has gone cold, and compact when auto-compact is close or the conversation fills most of the context. The Context pane's tips give the reason in dollars.
+- **Says when to carry on, compact, clear or hand off.** When carrying on is not the best move, the band shows `next /clear`, `next /compact` or `next /handoff`:
+  - **Clear** after a commit or pull request over a sizeable context, once the cache has gone cold, once a plan is written to disk (implement it in a fresh context), or after two corrections in a row (start over with a better prompt).
+  - **Hand off** instead of clearing after a commit or compacting when two or more todos or tasks are still open: a written handoff keeps the plan's detail, a summary does not. It names your `/handoff` skill when you have one.
+  - **Compact** when auto-compact is close or the conversation fills most of the context.
+  - The Context pane's tips give the reason in dollars, and suggest a subagent when reads and searches fill the main context.
+- **Saves a handoff before the cache goes cold, if you want it to.** With `/route handoff on`, when the cache is in its last minutes and work is still open, it asks Claude for a handoff while reading the context is still cheap and saves it under `~/.claude/handoffs/<repo>/`. Once per prompt; it never clears the session itself.
 - **Spots MCP servers and plugins you don't use.** It notes, per repo, which MCP servers and plugins are loaded and which get used. Once one has been loaded for two weeks and ten sessions without use in 30 days, the Context pane and `/route unused` name it with the setting that turns it off. The mod can't switch anything off itself:
   - **MCP servers** go off per repo in `/mcp`. When none of your connected claude.ai connectors is used, it also offers `"disableClaudeAiConnectors": true`.
   - **Plugins** get a ready-to-paste `enabledPlugins` block for the repo's `.claude/settings.local.json`, or `/plugin` when no repo uses them. A plugin listed covers its own MCP server.
   - Connectors you never signed in to aren't counted. A plugin's hooks can't be seen, so plugins with only hooks are never listed.
 - **Keeps stats across sessions.** The footer shows `▤ today $12.30`; click it to see which commands cost most on average and your most expensive prompts, with the models each one used. Filter by this repo or all repos.
 - **Guards cold sends.** When the cache has expired over a big context, your next message is held once with its price: `This send re-writes ~200k tokens on Opus 5.5 = $1.60 (warm would be $0.04)`. Send it again to pay, or `/clear`.
-- **Teaches, if you want it to.** Learn mode (off by default) explains each cache miss, model switch, growing context and expensive prompt with the real numbers, warns before the cache goes cold, and says why a commit is a good moment to `/clear`. `/route away` compares the cheapest ways to step away from a session.
+- **Teaches, if you want it to.** Learn mode (off by default) explains each cache miss, model switch, growing context and expensive prompt with the real numbers, warns before the cache goes cold, and says why a commit is a good moment to `/clear`. The Learn pane also lists three habits no hook can spot: `/clear` between unrelated tasks, `/btw` for side questions, and Esc Esc to rewind. `/route away` compares the cheapest ways to step away from a session.
 
 ![The /route pane: routing on, the learn mode switch, the live route and the preset](docs/routes-pane.svg)
 
@@ -67,7 +72,8 @@ Then restart or run `/reload-plugins`. Saved settings carry over. See [CHANGELOG
 | `/route stats clear` | Delete the saved prompt history |
 | `/route stats text on\|off` | Keep the first 120 characters of each prompt in Stats (default on) |
 | `/route learn` / `learn on\|off` | Open the Learn pane / turn learn mode on or off (default off) |
-| `/route learn mute\|unmute <topic>` | Silence a topic: `cold-rewrite`, `switch-rewrite`, `pricey-model`, `context-high`, `compacted`, `subagents`, `cache-expiring`, `plan-toggle`, `strategy` |
+| `/route learn mute\|unmute <topic>` | Silence a topic: `cold-rewrite`, `switch-rewrite`, `pricey-model`, `context-high`, `compacted`, `subagents`, `cache-expiring`, `plan-toggle`, `strategy`, `handoff`, `plan-ready`, `corrections`, `exploration`, `auto-handoff` |
+| `/route handoff on\|off` | Save a handoff while the cache is still warm, before it goes cold with work open (default off) |
 | `/route away` | Before a break: the ways to step away, priced for this session |
 | `/route unused` | MCP servers and plugins this repo has long left unused, and how to turn each off |
 | `/route guard refuse\|warn\|off` | What a send onto a cold cache does (default `refuse`: held once with its price) |
