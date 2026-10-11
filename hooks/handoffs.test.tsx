@@ -45,7 +45,7 @@ test('a listing adds unseen files as open, forgets missing ones of that repo, an
     [`${dir}/kept.md`]: { repo: 'app', at: T0, status: 'dropped' },
     [other]: { repo: 'other', at: T0, status: 'open' },
   }
-  const next = mergeListing(start, { app: [{ path: `${dir}/kept.md`, mtimeMs: T0 + 9 }, { path: `${dir}/new.md`, mtimeMs: T0 + 7 }] })
+  const next = mergeListing(start, { app: [{ path: `${dir}/kept.md`, mtimeMs: T0 + 9 }, { path: `${dir}/new.md`, mtimeMs: T0 + 7 }] }, T0 + 100)
   expect(Object.keys(next).sort()).toEqual([`${dir}/kept.md`, `${dir}/new.md`, other].sort())
   expect(next[`${dir}/kept.md`]).toEqual({ repo: 'app', at: T0, status: 'dropped' })
   expect(next[`${dir}/new.md`]).toEqual({ repo: 'app', at: T0 + 7, status: 'open' })
@@ -118,4 +118,20 @@ test('stored handoffs keep only well-formed records, the newest 500', () => {
   expect(kept[`${dir}/0.md`]).toBeUndefined()
   expect(sanitizeHandoffs(null)).toEqual({})
   expect(sanitizeHandoffs([1, 2])).toEqual({})
+})
+
+test('a listing keeps a handoff recorded after the folder was read', () => {
+  const start: Handoffs = { [`${dir}/fresh.md`]: { repo: 'app', at: T0 + 10, sessionId: 's1', status: 'open' } }
+  expect(mergeListing(start, { app: [] }, T0)).toEqual(start)
+  expect(mergeListing(start, { app: [] }, T0 + 20)).toEqual({})
+})
+
+test('without a session id, handoffs on disk still count toward the band', () => {
+  const records: Handoffs = { [`${dir}/disk.md`]: { repo: 'app', at: T0, status: 'open' } }
+  expect(bandCount(records, 'app', undefined, T0)).toBe(1)
+})
+
+test('a file with no heading keeps an empty title, shown as its file name', () => {
+  const records: Handoffs = { [`${dir}/plain.md`]: { repo: 'app', at: T0, title: '', status: 'open' } }
+  expect(handoffRows(records, 'app', T0).open.map(r => r.title)).toEqual(['plain.md'])
 })

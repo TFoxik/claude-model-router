@@ -62,12 +62,12 @@ export function recordWritten(records: Handoffs, path: string, rec: Omit<Handoff
   return newest(next)
 }
 
-/** Each listed repo's files as they are on disk; repos not in the listing are left as they were. */
-export function mergeListing(records: Handoffs, listing: Readonly<Record<string, readonly { path: string; mtimeMs: number }[]>>): Handoffs {
+/** Each listed repo's files as they are on disk; repos not in the listing, and handoffs recorded after `listedAt`, are left as they were. */
+export function mergeListing(records: Handoffs, listing: Readonly<Record<string, readonly { path: string; mtimeMs: number }[]>>, listedAt: number): Handoffs {
   const next: Handoffs = {}
   for (const [path, r] of Object.entries(records)) {
     const files = listing[r.repo]
-    if (files === undefined || files.some(one => one.path === path)) next[path] = r
+    if (files === undefined || r.at > listedAt || files.some(one => one.path === path)) next[path] = r
   }
   for (const [repo, files] of Object.entries(listing)) {
     for (const one of files) if (next[one.path] === undefined) next[one.path] = { repo, at: one.mtimeMs, status: 'open' }
@@ -96,7 +96,7 @@ export const isStale = (rec: HandoffRecord, now: number) => rec.status === 'open
 
 /** A handoff on disk with no session is another session's: this one would have recorded its own. */
 export function bandCount(records: Handoffs, repo: string, sessionId: string | undefined, now: number): number {
-  return Object.values(records).filter(r => r.repo === repo && r.status === 'open' && !isStale(r, now) && r.sessionId !== sessionId).length
+  return Object.values(records).filter(r => r.repo === repo && r.status === 'open' && !isStale(r, now) && (sessionId === undefined || r.sessionId !== sessionId)).length
 }
 
 export function handoffRows(records: Handoffs, repo: string | undefined, now: number): { open: HandoffRow[]; closed: HandoffRow[] } {
@@ -105,7 +105,7 @@ export function handoffRows(records: Handoffs, repo: string | undefined, now: nu
     .sort((a, b) => b[1].at - a[1].at)
     .map(([path, r]) => {
       const reason = r.status !== 'open' ? REASON[r.status] : isStale(r, now) ? 'stale, 14+ days' : undefined
-      return { path, repo: r.repo, at: r.at, title: r.title ?? path.split('/').pop()!, isOpen: r.status === 'open', ...(reason === undefined ? {} : { reason }) }
+      return { path, repo: r.repo, at: r.at, title: r.title || path.split('/').pop()!, isOpen: r.status === 'open', ...(reason === undefined ? {} : { reason }) }
     })
   return { open: rows.filter(one => one.reason === undefined), closed: rows.filter(one => one.reason !== undefined) }
 }

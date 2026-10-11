@@ -1470,29 +1470,48 @@ test('a handoff saved by another session meanwhile is kept when this one records
   expect(Object.keys(data.handoffs as object).sort()).toEqual(['/home/me/.claude/handoffs/unknown/mine.md', '/home/me/.claude/handoffs/unknown/theirs.md'])
 })
 
-/** A session whose handoff folder lists the given files; their text comes from `texts`. */
+/** A session whose handoff folder lists the given files, their text the values; `listing` steers and counts what the folder does. */
 async function listedSession($: Engine, on: On, files: Record<string, string>, data: Record<string, unknown> = {}) {
   data.config = { ...MINE, coldGuard: 'off' }
   sharedStore(on, data)
-  mock.clock(on, { now: T0 })
-  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  const clock = mock.clock(on, { now: T0 })
+  const usage = usageOf(1000)
+  const listing = { current: files, isDenied: false, isMissing: false, dropsPrompts: false, lists: 0, reads: 0 }
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 1000, window: 1_000_000, percent: 20 }, rateLimits: [] } }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('command.run', () => ({ text: 'engine' }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_$, e) => ({ text: e.answer }))
+  on('prompt.submit', (_$, e) => (listing.dropsPrompts ? { drop: 'dropped below' } : { text: e.text }) as never)
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage }
+  })
   mock.env(on, { HOME: '/home/me' })
   on('session.id', () => ({ value: 'session-1' }) as never)
-  const listing = { current: files, isDenied: false }
   on('fs.list', (_$, e) => {
     if (listing.isDenied) throw Object.assign(new Error('denied'), { code: 'EACCES' })
-    if (e.path === '/home/me/.claude/handoffs/unknown') return { value: Object.keys(listing.current).map(name => ({ name, kind: 'file', size: 1, mtimeMs: T0 - 60_000, isLink: false })) } as never
+    if (e.path === '/home/me/.claude/handoffs/unknown') {
+      listing.lists++
+      if (listing.isMissing) throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+      return { value: Object.keys(listing.current).map(name => ({ name, kind: 'file', size: 1, mtimeMs: T0 - 60_000, isLink: false })) } as never
+    }
     if (e.path === '/home/me/.claude/handoffs') return { value: [{ name: 'unknown', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }] } as never
     throw Object.assign(new Error('missing'), { code: 'ENOENT' })
   })
-  on('fs.read', (_$, e) => ({ value: listing.current[e.path.split('/').pop()!] ?? '' }) as never)
+  on('fs.exists', (_$, e) => ({ value: !(listing.isMissing && e.path === '/home/me/.claude/handoffs/unknown') }) as never)
+  on('fs.read', (_$, e) => {
+    listing.reads++
+    return { value: listing.current[e.path.split('/').pop()!] ?? '' } as never
+  })
   const filled: string[] = []
   on('prompt.fill', (_$, e) => {
     filled.push(e.text)
     return { isFilled: true } as never
   })
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
-  return { listing, filled, data }
+  await clock.settle()
+  return { listing, filled, data, clock }
 }
 
 test('the Handoffs pane lists open handoffs; Done and Not relevant fold them with a reason, Reopen brings one back', async ($, on) => {
@@ -1554,8 +1573,10 @@ test('a held cold send resumes nothing', async ($, on) => {
   guardSession(on, { context: 200_000, usage: usageOf(200_000) })
   mock.env(on, { HOME: '/home/me' })
   on('fs.list', (_$, e) => ({ value: e.path.endsWith('/unknown') ? [{ name: 'a.md', kind: 'file', size: 1, mtimeMs: T0, isLink: false }] : [] }) as never)
+  on('fs.exists', () => ({ value: true }) as never)
   on('fs.read', () => ({ value: '# A\n' }) as never)
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await clock.settle()
   await submit($, 'go')
   await $.turn.start({ text: 'go', turnId: 'go' })
   await step($, 'go')
@@ -1596,4 +1617,43 @@ test('a stale handoff keeps Done and Not relevant, and Reopen on an old closed o
   expect(await pane.find({ type: 'Text', text: 'Old done' })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: 'Stale one' })).toBeUndefined()
   await pane.unmount()
+})
+
+test('/route handoffs lists the folder once, and a file with no heading is read only once', async ($, on) => {
+  const { listing, clock } = await listedSession($, on, { 'plain.md': 'no heading here' })
+  const [lists, reads] = [listing.lists, listing.reads]
+  await route($, 'handoffs')
+  await clock.settle()
+  expect(listing.lists - lists).toBe(1)
+  await route($, 'handoffs')
+  await clock.settle()
+  expect(listing.reads - reads).toBe(0)
+})
+
+test('a prompt dropped further down does not resume the handoff it names', async ($, on) => {
+  const { listing, data } = await listedSession($, on, { 'a.md': '# A\n' })
+  listing.dropsPrompts = true
+  await submit($, 'resume from ~/.claude/handoffs/unknown/a.md')
+  expect((data.handoffs as Record<string, { status: string }>)['/home/me/.claude/handoffs/unknown/a.md']!.status).toBe('open')
+})
+
+test('two quick presses both stick', async ($, on) => {
+  const { data, clock } = await listedSession($, on, { 'a.md': '# A\n', 'b.md': '# B\n' })
+  const pane = await mountPane($, 'handoffs', 'desktop')
+  await Promise.all([pane.press({ key: 'done:/home/me/.claude/handoffs/unknown/a.md' }), pane.press({ key: 'drop:/home/me/.claude/handoffs/unknown/b.md' })])
+  await clock.settle()
+  const all = data.handoffs as Record<string, { status: string }>
+  expect([all['/home/me/.claude/handoffs/unknown/a.md']!.status, all['/home/me/.claude/handoffs/unknown/b.md']!.status]).toEqual(['done', 'dropped'])
+  await pane.unmount()
+})
+
+test('a repo folder that is gone forgets its handoffs, and other repos keep theirs', async ($, on) => {
+  const other = '/home/me/.claude/handoffs/other/x.md'
+  const data: Record<string, unknown> = { handoffs: { [other]: { repo: 'other', at: T0, title: 'X', status: 'open' } } }
+  const { listing, clock } = await listedSession($, on, { 'a.md': '# A\n' }, data)
+  expect(Object.keys(data.handoffs as object).sort()).toEqual([other, '/home/me/.claude/handoffs/unknown/a.md'])
+  listing.isMissing = true
+  await route($, 'handoffs')
+  await clock.settle()
+  expect(Object.keys(data.handoffs as object)).toEqual([other])
 })

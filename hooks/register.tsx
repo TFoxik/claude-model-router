@@ -189,7 +189,14 @@ async function setLessons($: $, fn: (all: Lesson[]) => Lesson[]): Promise<Lesson
   return next
 }
 
-async function setHandoffs($: $, fn: (all: Handoffs) => Handoffs): Promise<Handoffs> {
+/** One at a time: two overlapping edits would both start from the same stored value, and the later save would drop the earlier. */
+function setHandoffs($: $, fn: (all: Handoffs) => Handoffs): Promise<Handoffs> {
+  const run = mem.handoffsChain.then(() => applyHandoffs($, fn))
+  mem.handoffsChain = run.catch(() => undefined)
+  return run
+}
+
+async function applyHandoffs($: $, fn: (all: Handoffs) => Handoffs): Promise<Handoffs> {
   const stored = await load($, STORE.handoffs)
   const next = await update($, handoffs, all => fn(stored === UNREADABLE || stored === undefined ? all : sanitizeHandoffs(stored)))
   if (stored !== UNREADABLE) await save($, STORE.handoffs, next)
@@ -198,12 +205,13 @@ async function setHandoffs($: $, fn: (all: Handoffs) => Handoffs): Promise<Hando
 
 type Listed = { path: string; mtimeMs: number }[]
 
-/** A folder's handoff files, `[]` when the folder doesn't exist yet, `undefined` when it couldn't be read. */
+/** A folder's handoff files, `[]` when the folder doesn't exist, `undefined` when it couldn't be read. */
 async function listHandoffs($: $, dir: string): Promise<Listed | undefined> {
   try {
+    if (!(await $.fs.exists(dir))) return []
     return (await $.fs.list(dir)).filter(one => one.kind === 'file' && one.name.endsWith('.md')).map(one => ({ path: `${dir}/${one.name}`, mtimeMs: one.mtimeMs }))
-  } catch (err) {
-    return (err as { code?: unknown } | null)?.code === 'ENOENT' ? [] : undefined
+  } catch {
+    return undefined
   }
 }
 
@@ -214,16 +222,17 @@ async function refreshHandoffs($: $) {
   const scope = await read($, handoffScope)
   const repos = scope === 'repo' ? [segment(mem.repo)] : ((await $.fs.list(handoffsRoot(home)).catch(() => undefined))?.filter(one => one.kind === 'dir').map(one => one.name) ?? [])
   const listing: Record<string, Listed> = {}
+  const listedAt = await nowOf($)
   for (const repo of repos) {
     const files = await listHandoffs($, handoffDir(home, repo))
     if (files !== undefined) listing[repo] = files
   }
-  const merged = await setHandoffs($, all => mergeListing(all, listing))
+  const merged = await setHandoffs($, all => mergeListing(all, listing, listedAt))
   const untitled = Object.entries(merged).filter(([, r]) => r.title === undefined).sort((a, b) => b[1].at - a[1].at).slice(0, 20)
   const titles: Record<string, string> = {}
   for (const [path] of untitled) {
-    const title = titleOf(await $.fs.read(path).then(text => (typeof text === 'string' ? text : ''), () => ''))
-    if (title !== undefined) titles[path] = title
+    // An empty title marks a file read and found without a heading, so it isn't read again.
+    titles[path] = titleOf(await $.fs.read(path).then(text => (typeof text === 'string' ? text : ''), () => '')) ?? ''
   }
   if (Object.keys(titles).length > 0) {
     await setHandoffs($, all => Object.fromEntries(Object.entries(all).map(([path, r]) => [path, titles[path] === undefined ? r : { ...r, title: titles[path] }])))
@@ -539,7 +548,7 @@ async function noteToolCall($: $, e: Args<'tool.call'>, result: unknown) {
       const title = typeof input.content === 'string' ? titleOf(input.content) : undefined
       const sessionId = mem.kept.sessionId
       const at = await nowOf($)
-      await setHandoffs($, all => recordWritten(all, path, { repo: handoffRepo, at, ...(sessionId === undefined ? {} : { sessionId }), ...(title === undefined ? {} : { title }) }))
+      await setHandoffs($, all => recordWritten(all, path, { repo: handoffRepo, at, ...(sessionId === undefined ? {} : { sessionId }), ...(title === undefined ? {} : { title }) })).catch(() => undefined)
     }
     const plan = planEventOf(e.tool, input, result)
     if (plan?.kind === 'saved') mem.planPath = plan.path
@@ -885,6 +894,7 @@ const mem = {
   isTurnRunning: false,
   // The auto-handoff asked for and not yet answered: its turn once it starts, and the context it would have rewritten cold.
   handoff: undefined as PendingHandoff,
+  handoffsChain: Promise.resolve() as Promise<unknown>,
   // MCP servers and plugins used since the last save, whether this session has been counted yet, and what is loaded.
   kept: { used: {}, isUncounted: true } as Carried,
   loaded: undefined as { at: number; value: Promise<Loaded> } | undefined,
@@ -1041,7 +1051,7 @@ export const register: Register = on => {
       listCommands($),
     ])
     mem.home = home
-    await refreshHandoffs($).catch(() => undefined)
+    void refreshHandoffs($).catch(() => undefined)
     mem.hasHandoffSkill = hasHandoffCommand(commands.map(one => one.name))
     const isSame = sessionId !== undefined && before?.sessionId === sessionId
     // A copy: noteUse writes into `used`, and the atom's own value is not ours to change in place.
@@ -1111,6 +1121,7 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('prompt.submit', async ($, e, next) => {
+    let resumeText: string | undefined
     if (e.turnId === undefined) {
       const cfg = await read($, config)
       const guard = cfg.coldGuard
@@ -1128,14 +1139,19 @@ export const register: Register = on => {
         mem.handoffArmed = true
         mem.handoffPath = undefined
         await update($, handoffBandSeen, () => true)
-        const resumed = resumedBy(e.text, await read($, handoffs), mem.home)
-        if (resumed.length > 0) await setHandoffs($, all => resumed.reduce((acc, path) => setStatus(acc, path, 'resumed'), all)).catch(() => undefined)
+        resumeText = e.text
       }
       mem.pendingPrompt = commandLabel(e.text)
       if (!e.text.trimStart().startsWith('/')) mem.lastCommand = undefined
     }
     if (USER_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) mem.corrections = isCorrection(e.text) ? mem.corrections + 1 : 0
-    return next(e)
+    const out = await next(e)
+    // Marked once the prompt is through: a hook further down may still drop it.
+    if (resumeText !== undefined && out.drop === undefined && resumedBy(resumeText, await read($, handoffs), mem.home).length > 0) {
+      const text = resumeText
+      await setHandoffs($, all => resumedBy(text, all, mem.home).reduce((acc, path) => setStatus(acc, path, 'resumed'), all)).catch(() => undefined)
+    }
+    return out
   }).catch(($, e, next) => next(e))
 
   on('command.run', async ($, e, next) => {
@@ -1256,8 +1272,11 @@ export const register: Register = on => {
     const [verb = 'route', ...rest] = e.args.trim().split(/\s+/).filter(Boolean)
     if (Object.hasOwn(PANES, verb) && rest.length === 0) {
       const pane = verb as keyof typeof PANES
-      if (pane === 'handoffs') await refreshHandoffs($).catch(() => undefined)
-      openPane($)(pane)
+      if (pane === 'handoffs') {
+        await update($, handoffBandSeen, () => true)
+        await refreshHandoffs($).catch(() => undefined)
+        await raisePane($, pane).catch(() => undefined)
+      } else openPane($)(pane)
       return { text: `${PANES[pane].title} pane opened.` }
     }
     if (verb === 'away') return { text: await awayReport($) }
