@@ -343,7 +343,7 @@ export function awayText(f: AwayFacts): string {
       'Say what to keep: /compact keep the plan, open TODOs and touched files. Only while warm: cold, it reads everything at full price.',
     ),
     row('/rename, /resume', 'now   $0.00', 'on return: summary', 'On Pro and Max, /resume of a big session offers to continue from a summary.'),
-    row('Keep warm', `${money(warm * Math.ceil(60 / f.ttlMinutes))} an hour`, '', 'An idle ping before each expiry (cache-tax does this); pays off for a few hours, not overnight.'),
+    row('Keep warm', `${money(warm * Math.ceil(60 / f.ttlMinutes))} an hour`, '', 'An idle ping before each expiry; pays off for a few hours, not overnight.'),
     row('Do nothing', 'now   $0.00', `on return   ${money(write)}`, 'The first send re-writes the whole context.'),
     '',
     `Prices as of ${PRICES_AS_OF}, estimates; ≈ also guesses the note (${kTokens(NOTE_TOKENS)}) and summary (${kTokens(SUMMARY_TOKENS)}) sizes.`,

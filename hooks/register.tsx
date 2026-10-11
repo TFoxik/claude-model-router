@@ -962,10 +962,6 @@ export const register: Register = on => {
     mem.tick?.cancel()
     mem.tick = $.clock.every(60_000, () => void refreshStatus($).catch(() => undefined))
     await $.command.register({ name: 'route', description: 'Model router: open the pane, or one of the verbs', argumentHint: USAGE })
-    const hasCacheTax = (await read($, config)).coldGuard !== 'off' && commands.some(one => one.name === 'cache-tax')
-    if (hasCacheTax) {
-      $.ui.log('model-router: cache-tax is installed too, so a cold send is guarded twice. Run /route guard off to leave it to cache-tax.')
-    }
     return next(e)
   })
 
