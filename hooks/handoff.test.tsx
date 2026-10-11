@@ -1,9 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 
-import { handoffPath, handoffWindow, shouldAutoHandoff, tildePath } from './handoff'
+import { handoffPath, handoffWindow, pendingAfter, shouldAutoHandoff, tildePath } from './handoff'
 import type { HandoffFacts } from './handoff'
 
-const due: HandoffFacts = { isOn: true, isArmed: true, isIdle: true, isPromptEmpty: true, warmMinutes: 2, ttlMinutes: 60, tokens: 140_000, openSteps: 3, hasPlan: false }
+const due: HandoffFacts = { isOn: true, isArmed: true, isIdle: true, isPromptEmpty: true, canSave: true, warmMinutes: 2, ttlMinutes: 60, tokens: 140_000, openSteps: 3, hasPlan: false }
 
 test('auto-handoff fires in the last minutes of a warm cache with work open', () => {
   expect(shouldAutoHandoff(due)).toBe(true)
@@ -17,6 +17,7 @@ test('each condition alone holds it back', () => {
     { isArmed: false },
     { isIdle: false },
     { isPromptEmpty: false },
+    { canSave: false },
     { warmMinutes: 0 },
     { warmMinutes: 4 },
     { tokens: 49_000 },
@@ -53,4 +54,15 @@ test('paths under home are shown with a tilde', () => {
   expect(tildePath('/tmp/a.md', '/Users/x')).toBe('/tmp/a.md')
   expect(tildePath('/Users/xy/a.md', '/Users/x')).toBe('/Users/xy/a.md')
   expect(tildePath('/Users/x/a.md', undefined)).toBe('/Users/x/a.md')
+})
+
+test('a pending handoff is dropped once a refused submit, a prompt of yours or a fresh context outlives it', () => {
+  const asked = { tokens: 140_000, model: 'm' }
+  expect(pendingAfter(asked, { kind: 'submitted', isDropped: true })).toBeUndefined()
+  expect(pendingAfter(asked, { kind: 'submitted', isDropped: false })).toBe(asked)
+  expect(pendingAfter(asked, { kind: 'user-prompt' })).toBeUndefined()
+  const running = { ...asked, turnId: 't1' }
+  expect(pendingAfter(running, { kind: 'user-prompt' })).toBe(running)
+  expect(pendingAfter(running, { kind: 'fresh-context' })).toBeUndefined()
+  expect(pendingAfter(undefined, { kind: 'user-prompt' })).toBeUndefined()
 })

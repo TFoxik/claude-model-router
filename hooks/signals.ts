@@ -48,7 +48,8 @@ export function planEventOf(tool: string, input: Record<string, unknown>, result
 }
 
 const CORRECTION = [
-  /^(no|nope|wrong|again)\b/,
+  /^(no|nope)([,.!]|\s*$)/,
+  /^(wrong|again)\b/,
   /\bstill (fail|failing|fails|broken|wrong|not|doesn'?t|does not|isn'?t|is not|the same)\b/,
   /\b(that'?s|this is|it'?s|that is|it is) (wrong|not (it|right|what))/,
   /\b(didn'?t|doesn'?t|does not|did not) work\b/,

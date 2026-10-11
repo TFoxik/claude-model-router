@@ -71,7 +71,8 @@ import {
   withPreset,
   withRoute,
 } from './routes'
-import { HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, shouldAutoHandoff, tildePath } from './handoff'
+import { HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, pendingAfter, shouldAutoHandoff, tildePath } from './handoff'
+import type { PendingHandoff } from './handoff'
 import { NO_STEPS, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
 import type { Steps } from './signals'
 import { adviseSession, boundaryOf } from './strategy'
@@ -197,7 +198,12 @@ async function finishHandoff($: $, e: Args<'turn.complete'>) {
   if (e.reason !== 'answer' || e.answer.trim() === '' || mem.home === undefined) return
   const [now, sessionId, cost, cfg] = await Promise.all([nowOf($), $.session.id().catch(() => mem.kept.sessionId), read($, promptCost), read($, config)])
   const path = handoffPath(mem.home, mem.repo, now, sessionId ?? 'session')
-  await $.fs.write(path, `${e.answer.trim()}\n`)
+  try {
+    await $.fs.write(path, `${e.answer.trim()}\n`)
+  } catch (err) {
+    $.ui.log(`model-router: could not save the auto-handoff to ${path}: ${err instanceof Error ? err.message : String(err)}`)
+    return
+  }
   mem.handoffPath = path
   if (cfg.isLearning) {
     const avoidedUsd = rewritePrice(asked.model, asked.tokens, cfg.cacheTtlMinutes).write
@@ -355,6 +361,7 @@ async function maybeAutoHandoff($: $, cfg: RouterConfig, warm: { warmMinutes: nu
     isArmed: mem.handoffArmed && mem.handoff === undefined,
     isIdle: !mem.isTurnRunning,
     isPromptEmpty: true,
+    canSave: mem.home !== undefined,
     warmMinutes: warm.warmMinutes,
     ttlMinutes: cfg.cacheTtlMinutes,
     tokens: warm.tokens,
@@ -367,9 +374,8 @@ async function maybeAutoHandoff($: $, cfg: RouterConfig, warm: { warmMinutes: nu
   if (!shouldAutoHandoff({ ...facts, isIdle, isPromptEmpty: box.text.trim() === '' })) return
   mem.handoffArmed = false
   mem.handoff = { tokens: warm.tokens, model: warm.model }
-  await $.prompt.submit({ text: HANDOFF_PROMPT }).catch(() => {
-    mem.handoff = undefined
-  })
+  const sent = await $.prompt.submit({ text: HANDOFF_PROMPT }).catch(() => undefined)
+  mem.handoff = pendingAfter(mem.handoff, { kind: 'submitted', isDropped: sent === undefined || sent.drop !== undefined })
 }
 
 /** Every slash command, or none when the engine can't say. */
@@ -478,6 +484,7 @@ function resetSignals(isClear: boolean) {
   if (isClear) {
     mem.steps = NO_STEPS
     mem.handoffPath = undefined
+    mem.handoff = pendingAfter(mem.handoff, { kind: 'fresh-context' })
   }
   mem.planPath = undefined
   mem.corrections = 0
@@ -775,7 +782,7 @@ const mem = {
   handoffArmed: false,
   isTurnRunning: false,
   // The auto-handoff asked for and not yet answered: its turn once it starts, and the context it would have rewritten cold.
-  handoff: undefined as { turnId?: string; tokens: number; model: string } | undefined,
+  handoff: undefined as PendingHandoff,
   // MCP servers and plugins used since the last save, whether this session has been counted yet, and what is loaded.
   kept: { used: {}, isUncounted: true } as Carried,
   loaded: undefined as { at: number; value: Promise<Loaded> } | undefined,
@@ -1013,6 +1020,7 @@ export const register: Register = on => {
         }
       }
       if (USER_ORIGINS.has(e.origin.kind)) {
+        mem.handoff = pendingAfter(mem.handoff, { kind: 'user-prompt' })
         mem.handoffArmed = true
         mem.handoffPath = undefined
         if (!e.text.trimStart().startsWith('/')) mem.corrections = isCorrection(e.text) ? mem.corrections + 1 : 0
@@ -1073,6 +1081,8 @@ export const register: Register = on => {
       const isNew = sessionId !== mem.kept.sessionId
       const current = { label, text: cfg.keepPromptText ? printable(typedText(e.text).slice(0, 120)) : '', at }
       mem.kept = { ...mem.kept, current, ...(isNew ? { sessionId, isUncounted: true } : {}) }
+      // Plan approval's "clear context" and /resume change the session without a /clear.
+      if (isNew) resetSignals(true)
       await carry($)
       await update($, promptCost, () => EMPTY_PROMPT)
     }

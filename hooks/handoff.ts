@@ -13,6 +13,8 @@ export type HandoffFacts = {
   /** No turn and no subagent running. */
   isIdle: boolean
   isPromptEmpty: boolean
+  /** Somewhere to save it: without a home directory the turn would be spent for nothing. */
+  canSave: boolean
   warmMinutes: number
   ttlMinutes: number
   tokens: number
@@ -30,11 +32,23 @@ export function shouldAutoHandoff(f: HandoffFacts): boolean {
     f.isArmed &&
     f.isIdle &&
     f.isPromptEmpty &&
+    f.canSave &&
     f.warmMinutes > 0 &&
     f.warmMinutes <= handoffWindow(f.ttlMinutes) &&
     f.tokens >= GUARD_MIN_TOKENS &&
     (f.openSteps >= OPEN_MIN || f.hasPlan)
   )
+}
+
+export type PendingHandoff = { turnId?: string; tokens: number; model: string } | undefined
+type PendingEvent = { kind: 'submitted'; isDropped: boolean } | { kind: 'user-prompt' } | { kind: 'fresh-context' }
+
+/** A handoff asked for and not yet started is dropped once a refused submit, a prompt of yours or a fresh context outlives it; one already running is kept for its reply. */
+export function pendingAfter(pending: PendingHandoff, event: PendingEvent): PendingHandoff {
+  if (pending === undefined) return undefined
+  if (event.kind === 'submitted') return event.isDropped ? undefined : pending
+  if (event.kind === 'user-prompt') return pending.turnId === undefined ? undefined : pending
+  return undefined
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')

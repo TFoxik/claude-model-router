@@ -56,7 +56,8 @@ test('correcting prompts are recognised; ordinary follow-ups are not', () => {
     'same error as before',
     'Wrong file',
   ]) expect(isCorrection(hit)).toBe(true)
-  for (const miss of ['now add tests', 'nothing else, thanks', 'note the edge case', 'looks good, commit it', '/clear', '', 'nobody uses that flag, drop it']) {
+  expect(isCorrection('no')).toBe(true)
+  for (const miss of ['no need to add tests', 'no worries, do the next one', 'no problem, now the docs', 'now add tests', 'nothing else, thanks', 'note the edge case', 'looks good, commit it', '/clear', '', 'nobody uses that flag, drop it']) {
     expect(isCorrection(miss)).toBe(false)
   }
 })
