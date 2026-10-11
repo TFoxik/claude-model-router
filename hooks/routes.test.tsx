@@ -2,6 +2,7 @@ import type { Args, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { Lesson } from '../types'
+import { HANDOFF_PROMPT } from './handoff'
 import { stamp } from './ui/kit'
 
 import {
@@ -1336,4 +1337,82 @@ test('the Context pane advises compacting from its own breakdown, before any req
   const ui = await mountPane($, 'context')
   expect(await ui.find({ type: 'Text', text: /^100k tokens to auto-compact: \/compact now/ })).toBeDefined()
   await ui.unmount()
+})
+
+/** An auto-handoff session: 200k tokens on a 60m cache, two steps open, the writes and plugin prompts collected. */
+async function handoffSession($: Engine, on: On) {
+  mock.store(on, { config: { ...MINE, coldGuard: 'off', autoHandoff: true, cacheTtlMinutes: 60 } })
+  const clock = mock.clock(on, { now: T0 })
+  const usage = usageOf(200_000)
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 200_000, window: 1_000_000, percent: 20 }, rateLimits: [] } }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_$, e) => ({ text: e.answer }))
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage }
+  })
+  okTool(on)
+  mock.env(on, { HOME: '/home/me' })
+  on('prompt.read', () => ({ value: { text: '', cursor: 0 } }) as never)
+  on('agent.list', () => ({ value: [] }) as never)
+  on('session.id', () => ({ value: 'session-1' }) as never)
+  const written: string[] = []
+  on('fs.write', (_$, e) => {
+    written.push(e.text)
+    return { value: undefined } as never
+  })
+  const asked: string[] = []
+  on('prompt.submit', (_$, e) => {
+    if (e.origin.kind === 'plugin') asked.push(e.text)
+    return { text: e.text }
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await submit($, 'a')
+  await $.turn.start({ text: 'a', turnId: 'a' })
+  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'one', status: 'pending' }, { content: 'two', status: 'pending' }], tool_use_id: 't1' } as never)
+  await step($, 'a')
+  await complete($, 'a')
+  const answer = ($: Engine, turnId: string, text: string) =>
+    $.turn.complete({ turnId, answer: text, durationMs: 1, isAborted: false, reason: 'answer' } as unknown as Args<'turn.complete'>)
+  return { clock, written, asked, answer }
+}
+
+test('auto-handoff asks once in the cache\'s last minutes and saves the reply of its own turn', async ($, on) => {
+  const { clock, written, asked, answer } = await handoffSession($, on)
+  await clock.advance(56 * 60_000)
+  expect(asked).toEqual([])
+  await clock.advance(2 * 60_000)
+  expect(asked).toEqual([HANDOFF_PROMPT])
+  await clock.advance(60_000)
+  expect(asked).toHaveLength(1)
+  await $.turn.start({ text: HANDOFF_PROMPT, turnId: 'h' })
+  await answer($, 'h', '# Handoff')
+  expect(written).toEqual(['# Handoff\n'])
+})
+
+test('another plugin\'s prompt running before the auto-handoff is not saved as the handoff', async ($, on) => {
+  const { clock, written, asked, answer } = await handoffSession($, on)
+  await clock.advance(58 * 60_000)
+  expect(asked).toEqual([HANDOFF_PROMPT])
+  await $.prompt.submit({ text: 'from another plugin', origin: { kind: 'plugin', name: 'other' } } as Args<'prompt.submit'>)
+  await $.turn.start({ text: 'from another plugin', turnId: 'o' })
+  await answer($, 'o', 'not a handoff')
+  expect(written).toEqual([])
+  await $.turn.start({ text: HANDOFF_PROMPT, turnId: 'h' })
+  await answer($, 'h', '# Handoff')
+  expect(written).toEqual(['# Handoff\n'])
+})
+
+test('a correction typed while Claude is working counts toward the corrections advice', async ($, on) => {
+  const { prompt } = await learningSession($, on)
+  await submit($, 'no, use the other file')
+  await $.turn.start({ text: 'no, use the other file', turnId: 'b' })
+  await $.prompt.submit({ text: 'still broken', turnId: 'b', origin: { kind: 'composer' } } as Args<'prompt.submit'>)
+  await step($, 'b')
+  await complete($, 'b')
+  const band = await bandOf($)
+  expect((await band.find({ key: 'advice' }))?.text).toBe('next /clear')
+  await band.unmount()
+  await prompt('c')
 })

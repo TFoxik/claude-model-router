@@ -1034,11 +1034,11 @@ export const register: Register = on => {
         mem.handoff = pendingAfter(mem.handoff, { kind: 'user-prompt' })
         mem.handoffArmed = true
         mem.handoffPath = undefined
-        if (!e.text.trimStart().startsWith('/')) mem.corrections = isCorrection(e.text) ? mem.corrections + 1 : 0
       }
-      mem.pendingPrompt = e.origin.kind === 'plugin' && mem.handoff !== undefined && mem.handoff.turnId === undefined ? HANDOFF_LABEL : commandLabel(e.text)
+      mem.pendingPrompt = commandLabel(e.text)
       if (!e.text.trimStart().startsWith('/')) mem.lastCommand = undefined
     }
+    if (USER_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) mem.corrections = isCorrection(e.text) ? mem.corrections + 1 : 0
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -1081,9 +1081,13 @@ export const register: Register = on => {
       await learnModelCommand($, name).catch(() => undefined)
     }
     const [cfg, route] = await Promise.all([read($, config), mainRoute($)])
+    // The auto-handoff's own submit never reaches this plugin's prompt.submit hook, so its turn is told by its text.
+    if (mem.handoff !== undefined && mem.handoff.turnId === undefined && e.text.includes(HANDOFF_PROMPT)) {
+      mem.handoff = { ...mem.handoff, turnId: e.turnId }
+      mem.pendingPrompt = HANDOFF_LABEL
+    }
     if (mem.pendingPrompt !== undefined) {
       const label = mem.pendingPrompt
-      if (label === HANDOFF_LABEL && mem.handoff !== undefined) mem.handoff = { ...mem.handoff, turnId: e.turnId }
       mem.pendingPrompt = undefined
       mem.boundary = undefined
       await recordPrompt($).catch(() => undefined)
