@@ -1587,12 +1587,16 @@ test('a held cold send resumes nothing', async ($, on) => {
   expect((data.handoffs as Record<string, { status: string }>)['/home/me/.claude/handoffs/unknown/a.md']!.status).toBe('open')
 })
 
-test('the band shows handoffs ●N for other sessions\' open handoffs until the first prompt', async ($, on) => {
+test('the band shows handoffs ●N for other sessions\' open handoffs, through prompts, until the pane is opened', async ($, on) => {
   await listedSession($, on, { 'a.md': '# A\n', 'b.md': '# B\n' })
   const band = await bandOf($)
   expect((await band.find({ key: 'band-handoffs' }))?.text).toBe('handoffs ●2')
   await band.unmount()
   await submit($, 'hello')
+  const still = await bandOf($)
+  expect((await still.find({ key: 'band-handoffs' }))?.text).toBe('handoffs ●2')
+  await still.press({ key: 'band-handoffs' })
+  await still.unmount()
   const after = await bandOf($)
   expect(await after.find({ key: 'band-handoffs' })).toBeUndefined()
   await after.unmount()

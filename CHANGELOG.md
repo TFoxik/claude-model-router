@@ -4,7 +4,7 @@
 
 ### Added
 
-- **Handoffs pane.** `/route handoffs` lists this repo's handoffs with Resume, Done and Not relevant. Handoffs close on their own when superseded by a newer one from the same session or resumed by a prompt naming them, and fold away as stale after 14 days. The band shows `handoffs ●N` for handoffs other sessions left open.
+- **Handoffs pane.** `/route handoffs` lists this repo's handoffs with Resume, Done and Not relevant. Handoffs close on their own when superseded by a newer one from the same session or resumed by a prompt naming them, and fold away as stale after 14 days. The band shows `handoffs ●N` for handoffs other sessions left open, until you open the pane.
 
 ### Fixed
 

@@ -1138,7 +1138,6 @@ export const register: Register = on => {
         mem.handoff = pendingAfter(mem.handoff, { kind: 'user-prompt' })
         mem.handoffArmed = true
         mem.handoffPath = undefined
-        await update($, handoffBandSeen, () => true)
         resumeText = e.text
       }
       mem.pendingPrompt = commandLabel(e.text)
