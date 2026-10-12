@@ -272,10 +272,12 @@ export function toastText(one: Lesson, earlier: readonly Lesson[]): string {
 /**
  * Lessons the band counts as unread: those that toasted, and those of a kind that has not toasted yet.
  * Quiet repeats of a kind already taught (a routed Opus main loop teaches pricey-model every prompt) stay in the pane only.
+ * Only this session's count: another session's lessons, and this one's from before its start or last /clear, stay in the pane only too.
  */
-export function unreadCount(lessons: readonly Lesson[], readAt: number, muted: readonly LessonKind[]): number {
+export function unreadCount(lessons: readonly Lesson[], readAt: number, muted: readonly LessonKind[], session: { since: number; sessionId?: string } = { since: 0 }): number {
   const taught = new Set(lessons.filter(one => one.isToasted).map(one => one.kind))
-  return lessons.filter(one => one.at > readAt && !muted.includes(one.kind) && (one.isToasted || !taught.has(one.kind))).length
+  const isThisSession = (one: Lesson) => one.at >= session.since && (session.sessionId === undefined || one.sessionId === session.sessionId)
+  return lessons.filter(one => one.at > readAt && isThisSession(one) && !muted.includes(one.kind) && (one.isToasted || !taught.has(one.kind))).length
 }
 
 /** The last PER_KIND lessons of each kind, so a lesson that fires every prompt can't crowd out the rest. */
@@ -294,7 +296,7 @@ export function capLessons(list: readonly Lesson[]): Lesson[] {
 
 const isLesson = (l: unknown): l is Lesson => {
   const x = l as Lesson | null
-  return typeof x === 'object' && x !== null && isLessonKind(x.kind) && typeof x.at === 'number' && typeof x.repo === 'string' && typeof x.fact === 'string'
+  return typeof x === 'object' && x !== null && isLessonKind(x.kind) && typeof x.at === 'number' && typeof x.repo === 'string' && typeof x.fact === 'string' && (x.sessionId === undefined || typeof x.sessionId === 'string')
 }
 
 export const sanitizeLessons = (stored: unknown): Lesson[] =>

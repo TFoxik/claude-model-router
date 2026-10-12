@@ -1229,10 +1229,11 @@ test('the Learn pane points to other repos when this one has no lessons', async 
   await pane.unmount()
 })
 
-test('the band counts unread lessons in the Learn pane scope', async ($, on) => {
+test('the band counts unread lessons in the Learn pane scope, from this session only', async ($, on) => {
   const lesson = (repo: string, at: number): Lesson => ({ kind: 'cold-rewrite', at, repo, fact: `fact in ${repo}`, isToasted: true })
-  const saved: Record<string, unknown> = { config: { ...MINE, isLearning: true }, lessons: [lesson('unknown', 1), lesson('beta', 2), lesson('beta', 3)] }
+  const saved: Record<string, unknown> = { config: { ...MINE, isLearning: true }, lessons: [lesson('unknown', T0 - 1), lesson('unknown', T0 + 1), lesson('beta', T0 + 2), lesson('beta', T0 + 3)] }
   sharedStore(on, saved)
+  const clock = mock.clock(on, { now: T0 })
   guardSession(on, { context: 1000, usage: usageOf(1000) })
   on('ui.open', () => ({ value: undefined }) as never)
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
@@ -1243,12 +1244,39 @@ test('the band counts unread lessons in the Learn pane scope', async ($, on) => 
   const pane = await mountPane($, 'learn', 'desktop')
   await pane.press({ key: 'scope-all' })
   await pane.unmount()
-  expect(saved.lessonsReadAt).toBe(3)
-  saved.lessons = [...(saved.lessons as Lesson[]), lesson('beta', 4)]
+  expect(saved.lessonsReadAt).toBe(T0 + 3)
+  saved.lessons = [...(saved.lessons as Lesson[]), lesson('beta', T0 + 4)]
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   const all = await mountBand()
   expect(await all.find({ type: 'Button', text: 'Learn ●1' })).toBeDefined()
   await all.unmount()
+  await clock.advance(10)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const fresh = await mountBand()
+  expect(await fresh.find({ type: 'Button', text: /^Learn/ })).toBeUndefined()
+  await fresh.unmount()
+  saved.lessons = [...(saved.lessons as Lesson[]), lesson('unknown', T0 + 15)]
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await clock.advance(10)
+  const before = await mountBand()
+  expect(await before.find({ type: 'Button', text: 'Learn ●1' })).toBeDefined()
+  await before.unmount()
+  await $.command.run({ command: 'clear', args: '', origin: { kind: 'user' } } as unknown as Args<'command.run'>)
+  const cleared = await mountBand()
+  expect(await cleared.find({ type: 'Button', text: /^Learn/ })).toBeUndefined()
+  await cleared.unmount()
+})
+
+test('the band leaves out lessons another session in the same repo made meanwhile', async ($, on) => {
+  const lesson = (sessionId: string, at: number): Lesson => ({ kind: 'cold-rewrite', at, repo: 'unknown', fact: `fact in ${sessionId}`, isToasted: true, sessionId })
+  sharedStore(on, { config: { ...MINE, isLearning: true }, lessons: [lesson('other', T0 + 1), lesson('other', T0 + 2), lesson('mine', T0 + 3)] })
+  mock.clock(on, { now: T0 })
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  on('session.id', () => ({ value: 'mine' }) as never)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const band = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
+  expect(await band.find({ type: 'Button', text: 'Learn ●1' })).toBeDefined()
+  await band.unmount()
 })
 
 const okTool = (on: On) => on('tool.call', () => ({ result: '', text: 'ok' }) as never)

@@ -305,7 +305,8 @@ async function teach($: $, drafts: readonly LessonDraft[], now: number) {
   if (all.length === 0) return
   let toast: string | undefined
   await setLessons($, earlier => {
-    const fresh: Lesson[] = all.map(d => ({ ...d, at: now, repo: mem.repo }))
+    const { sessionId } = mem.kept
+    const fresh: Lesson[] = all.map(d => ({ ...d, at: now, repo: mem.repo, ...(sessionId === undefined ? {} : { sessionId }) }))
     const pick = pickToast(fresh, earlier, now)
     toast = pick && toastText(pick, earlier)
     return capLessons([...earlier, ...fresh.map(one => (one === pick ? { ...one, isToasted: true } : one))])
@@ -799,7 +800,7 @@ async function renderBand($: $, e: Args<'ui.render'>) {
     read($, handoffBandSeen),
   ])
   const handoffsOpen = isBandSeen || !cfg.isHandoffs ? 0 : bandCount(records, segment(mem.repo), mem.kept.sessionId, await nowOf($))
-  const learnUnread = cfg.isLearning ? unreadCount(inScope(kept, scope), readAt, cfg.learnMuted) : 0
+  const learnUnread = cfg.isLearning ? unreadCount(inScope(kept, scope), readAt, cfg.learnMuted, { since: mem.kept.since ?? 0, sessionId: mem.kept.sessionId }) : 0
   const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp, learnUnread, handoffsOpen }
   return bandView($.ui.resolve(e), data, { open: openPane($) })
 }
@@ -1097,12 +1098,13 @@ export const register: Register = on => {
     const root = repo?.root ?? (await $.session.root().catch(() => ''))
     mem.repo = printable(repo?.name ?? (root.split('/').pop() || 'unknown'))
     // The same session starting again, after a hot reload of this code or a /login, keeps its running prompt, count and unsaved calls.
-    const [sessionId, before, idleDev, home, commands] = await Promise.all([
+    const [sessionId, before, idleDev, home, commands, startedAt] = await Promise.all([
       $.session.id().catch(() => undefined),
       read($, carried),
       $.env.get('MODEL_ROUTER_IDLE_DEV').catch(() => undefined),
       $.env.get('HOME').catch(() => undefined),
       listCommands($),
+      nowOf($),
     ])
     mem.home = home
     // The band only needs this repo's; the pane lists every repo when it opens under All.
@@ -1110,7 +1112,7 @@ export const register: Register = on => {
     mem.hasHandoffSkill = hasHandoffCommand(commands.map(one => one.name))
     const isSame = sessionId !== undefined && before?.sessionId === sessionId
     // A copy: noteUse writes into `used`, and the atom's own value is not ours to change in place.
-    mem.kept = isSame ? { ...before, used: { ...before.used } } : { sessionId, used: {}, isUncounted: true }
+    mem.kept = isSame ? { ...before, used: { ...before.used } } : { sessionId, used: {}, isUncounted: true, since: startedAt }
     if (!isSame) {
       await carry($)
       await update($, handoffBandSeen, () => false)
@@ -1229,6 +1231,8 @@ export const register: Register = on => {
     const done = await next(e)
     if (e.command === 'clear') {
       mem.boundary = undefined
+      mem.kept = { ...mem.kept, since: await nowOf($) }
+      await carry($)
       resetSignals(true)
       await refreshStatus($).catch(() => undefined)
     }
@@ -1263,7 +1267,7 @@ export const register: Register = on => {
       // A /clear starts a new session without a session.start: count it, and let a reload recognise it.
       const isNew = sessionId !== mem.kept.sessionId
       const current = { label, text: cfg.keepPromptText ? printable(typedText(e.text).slice(0, 120)) : '', at }
-      mem.kept = { ...mem.kept, current, ...(isNew ? { sessionId, isUncounted: true } : {}) }
+      mem.kept = { ...mem.kept, current, ...(isNew ? { sessionId, isUncounted: true, since: at } : {}) }
       // Plan approval's "clear context" and /resume change the session without a /clear.
       if (isNew) resetSignals(true)
       await carry($)

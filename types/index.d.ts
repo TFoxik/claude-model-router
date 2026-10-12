@@ -99,8 +99,10 @@ export type Carried = {
   current?: { label: string; text: string; at: number }
   used: Record<string, { calls: number; lastUsed: number }>
   isUncounted: boolean
+  /** When this session started or was last cleared: the band counts only lessons since then, also when the session id is unknown. */
+  since?: number
 }
-export type Lesson = { kind: LessonKind; at: number; repo: string; fact: string; usd?: number; isToasted?: boolean }
+export type Lesson = { kind: LessonKind; at: number; repo: string; fact: string; usd?: number; isToasted?: boolean; sessionId?: string }
 
 declare module 'claude-code' {
   interface PluginState {

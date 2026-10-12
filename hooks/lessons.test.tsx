@@ -188,6 +188,16 @@ test('unreadCount: new and toasted lessons, not quiet repeats or muted kinds', (
   expect(unreadCount(all, T0, [])).toBe(1)
   expect(unreadCount(all, 0, ['subagents'])).toBe(1)
   expect(unreadCount(all, 0, ['pricey-model', 'subagents'])).toBe(0)
+  expect(unreadCount(all, 0, [], { since: T0 + 4 })).toBe(1)
+  expect(unreadCount(all, 0, [], { since: T0 + 5 })).toBe(0)
+})
+
+test('unreadCount: with a session id, only that session counts; lessons without one are older than ids', () => {
+  const mine = lesson({ kind: 'subagents', at: T0 + 2, sessionId: 'a' })
+  const other = lesson({ kind: 'cold-rewrite', at: T0 + 3, sessionId: 'b', isToasted: true })
+  const legacy = lesson({ kind: 'pricey-model', at: T0 + 4, isToasted: true })
+  expect(unreadCount([mine, other, legacy], 0, [], { since: T0, sessionId: 'a' })).toBe(1)
+  expect(unreadCount([mine, other, legacy], 0, [], { since: T0 })).toBe(3)
 })
 
 test('capLessons keeps the last 20 of each kind, in order', () => {
@@ -204,6 +214,7 @@ test('sanitizeLessons drops what this version does not understand', () => {
   const good = lesson({})
   expect(sanitizeLessons([good, null, { ...good, kind: 'nope' }, { ...good, fact: 3 }, 'x'])).toEqual([good])
   expect(sanitizeLessons({})).toEqual([])
+  expect(sanitizeLessons([{ ...good, sessionId: 's' }, { ...good, sessionId: 3 }])).toEqual([{ ...good, sessionId: 's' }])
   expect(sanitizeLessons([lesson({ repo: 'r\u001b', fact: 'f\u0007' })])).toEqual([lesson({ repo: 'r ', fact: 'f ' })])
 })
 

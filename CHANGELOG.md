@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.2.1 — 2026-10-12
+
+### Fixed
+
+- **The band's Learn ●N counts only this session.** A new session or a `/clear` no longer inherits unread lessons from hours or days ago, and sessions running side by side in the same repo no longer count each other's. Every lesson still shows in the Learn pane.
+
 ## 1.2.0 — 2026-10-11
 
 ### Changed
