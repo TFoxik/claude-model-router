@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.4.1 — 2026-10-14
+
+### Fixed
+
+- **The Handoffs pane picks up edits to a handoff.** Tick off or rewrite a handoff's open steps, or let a tool rewrite the file, and the pane shows the new title, gist and steps the next time it lists the folder. Before, it kept what it read the first time.
+
 ## 1.4.0 — 2026-10-14
 
 ### Changed

@@ -1542,7 +1542,7 @@ async function listedSession($: Engine, on: On, files: Record<string, string>, d
   sharedStore(on, data)
   const clock = mock.clock(on, { now: T0 })
   const usage = usageOf(1000)
-  const listing = { current: files, isDenied: false, isMissing: false, dropsPrompts: false, lists: 0, reads: 0 }
+  const listing = { current: files, mtimeMs: T0 - 60_000, isDenied: false, isMissing: false, dropsPrompts: false, lists: 0, reads: 0 }
   on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 1000, window: 1_000_000, percent: 20 }, rateLimits: [] } }))
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
   on('command.run', () => ({ text: 'engine' }))
@@ -1560,7 +1560,7 @@ async function listedSession($: Engine, on: On, files: Record<string, string>, d
     if (e.path === '/home/me/.claude/handoffs/unknown') {
       listing.lists++
       if (listing.isMissing) throw Object.assign(new Error('missing'), { code: 'ENOENT' })
-      return { value: Object.keys(listing.current).map(name => ({ name, kind: 'file', size: 1, mtimeMs: T0 - 60_000, isLink: false })) } as never
+      return { value: Object.keys(listing.current).map(name => ({ name, kind: 'file', size: 1, mtimeMs: listing.mtimeMs, isLink: false })) } as never
     }
     if (e.path === '/home/me/.claude/handoffs') return { value: [{ name: 'unknown', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }] } as never
     throw Object.assign(new Error('missing'), { code: 'ENOENT' })
@@ -1705,6 +1705,19 @@ test('a handoff read before steps were kept is read once more for them', async (
   const data: Record<string, unknown> = { handoffs: { '/home/me/.claude/handoffs/unknown/a.md': { repo: 'unknown', at: T0, title: 'A', gist: '', status: 'open' } } }
   await listedSession($, on, { 'a.md': '# A\n## Open steps\n1. first\n' }, data)
   expect((data.handoffs as Record<string, { steps?: string[] }>)['/home/me/.claude/handoffs/unknown/a.md']!.steps).toEqual(['first'])
+})
+
+test('a handoff edited on disk is read again on the next listing, its steps updated', async ($, on) => {
+  const path = '/home/me/.claude/handoffs/unknown/a.md'
+  const { listing, data, clock } = await listedSession($, on, { 'a.md': '# A\n## Open steps\n1. first\n2. second\n' })
+  await route($, 'handoffs')
+  await clock.settle()
+  expect((data.handoffs as Record<string, { steps?: string[] }>)[path]!.steps).toEqual(['first', 'second'])
+  listing.current = { 'a.md': '# A\n## Open steps\n1. second\n2. third\n' }
+  listing.mtimeMs = T0
+  await route($, 'handoffs')
+  await clock.settle()
+  expect((data.handoffs as Record<string, { at: number; steps?: string[] }>)[path]).toMatchObject({ at: T0 - 60_000, steps: ['second', 'third'] })
 })
 
 test('with Handoffs off, auto-handoff never asks even when its own switch is on', async ($, on) => {

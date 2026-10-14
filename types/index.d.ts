@@ -24,8 +24,8 @@ export type Scope = 'repo' | 'all'
 /** A tab of the Cost pane. */
 export type CostTab = 'last' | 'session' | 'history'
 export type HandoffStatus = 'open' | 'done' | 'dropped' | 'resumed' | 'superseded'
-/** `title` and `gist` are read from the file once; an empty string marks a file read and found without one. */
-export type HandoffRecord = { repo: string; at: number; sessionId?: string; title?: string; gist?: string; steps?: string[]; stepCount?: number; status: HandoffStatus; reopenedAt?: number }
+/** `title`, `gist` and `steps` are read from the file, and again once its mtime passes `readMtimeMs`; an empty string marks a file read and found without one. */
+export type HandoffRecord = { repo: string; at: number; sessionId?: string; title?: string; gist?: string; steps?: string[]; stepCount?: number; readMtimeMs?: number; status: HandoffStatus; reopenedAt?: number }
 /** Keyed by the file's absolute path. */
 export type Handoffs = Record<string, HandoffRecord>
 export type Rewrite = { cause: 'cold' | 'switch'; tokens: number; usd: number }

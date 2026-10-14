@@ -124,6 +124,12 @@ test('without a Goal, the gist is the first paragraph after the title; none with
   expect(gistOf('')).toBeUndefined()
 })
 
+test('the mtime a handoff was read at survives the store', () => {
+  const records = sanitizeHandoffs({ [`${dir}/a.md`]: { repo: 'app', at: T0, readMtimeMs: T0 - 5, status: 'open' } })
+  expect(records[`${dir}/a.md`]).toEqual({ repo: 'app', at: T0, readMtimeMs: T0 - 5, status: 'open' })
+  expect(sanitizeHandoffs({ [`${dir}/b.md`]: { repo: 'app', at: T0, readMtimeMs: 'x', status: 'open' } })).toEqual({})
+})
+
 test('a long gist is cut at a word, under 320 characters, with an ellipsis', () => {
   expect(gistOf(`## Goal\n${'word '.repeat(60)}`)).toBe('word '.repeat(60).trim())
   const gist = gistOf(`## Goal\n${'word '.repeat(80)}`)!
@@ -131,7 +137,7 @@ test('a long gist is cut at a word, under 320 characters, with an ellipsis', () 
   expect(gist.endsWith('word…')).toBe(true)
 })
 
-test('details read from disk fill title and gist; an empty gist marks a file read', () => {
+test('details read from disk fill title and gist; an empty gist is kept', () => {
   const records: Handoffs = { [`${dir}/a.md`]: { repo: 'app', at: T0, title: 'Kept', status: 'open' } }
   const next = withDetails(records, { [`${dir}/a.md`]: { title: 'A', gist: 'Why\u0007it matters' }, [`${dir}/gone.md`]: { title: 'X', gist: '' } })
   expect(next).toEqual({ [`${dir}/a.md`]: { repo: 'app', at: T0, title: 'A', gist: 'Why it matters', status: 'open' } })

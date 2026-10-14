@@ -35,11 +35,12 @@ function isRecord(value: unknown): value is HandoffRecord {
     (r.gist === undefined || typeof r.gist === 'string') &&
     (r.steps === undefined || (Array.isArray(r.steps) && r.steps.every(one => typeof one === 'string'))) &&
     (r.stepCount === undefined || (typeof r.stepCount === 'number' && Number.isFinite(r.stepCount))) &&
+    (r.readMtimeMs === undefined || (typeof r.readMtimeMs === 'number' && Number.isFinite(r.readMtimeMs))) &&
     (r.reopenedAt === undefined || (typeof r.reopenedAt === 'number' && Number.isFinite(r.reopenedAt)))
   )
 }
 
-const clean = ({ repo, at, sessionId, title, gist, steps, stepCount, status, reopenedAt }: HandoffRecord): HandoffRecord => ({
+const clean = ({ repo, at, sessionId, title, gist, steps, stepCount, readMtimeMs, status, reopenedAt }: HandoffRecord): HandoffRecord => ({
   repo: printable(repo),
   at,
   ...(sessionId === undefined ? {} : { sessionId }),
@@ -47,6 +48,7 @@ const clean = ({ repo, at, sessionId, title, gist, steps, stepCount, status, reo
   ...(gist === undefined ? {} : { gist: printable(gist) }),
   ...(steps === undefined ? {} : { steps: steps.slice(0, STEPS_KEPT).map(printable) }),
   ...(stepCount === undefined ? {} : { stepCount }),
+  ...(readMtimeMs === undefined ? {} : { readMtimeMs }),
   status,
   ...(reopenedAt === undefined ? {} : { reopenedAt }),
 })
@@ -115,8 +117,8 @@ export function resumeIn(records: Handoffs, text: string, home: string | undefin
 
 export type Details = { title: string; gist: string; steps: string[]; stepCount: number }
 
-/** Titles, gists and steps read from disk, applied to the records they belong to; the same records when none apply. */
-export function withDetails(records: Handoffs, details: Readonly<Record<string, Details>>): Handoffs {
+/** Titles, gists and steps read from disk, with the file's mtime when read, applied to the records they belong to; the same records when none apply. */
+export function withDetails(records: Handoffs, details: Readonly<Record<string, Details & Pick<HandoffRecord, 'readMtimeMs'>>>): Handoffs {
   const known = Object.entries(details).filter(([path]) => records[path] !== undefined)
   return known.length === 0 ? records : { ...records, ...Object.fromEntries(known.map(([path, d]) => [path, clean({ ...records[path]!, ...d })])) }
 }

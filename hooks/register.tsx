@@ -234,7 +234,7 @@ async function listHandoffs($: $, dir: string): Promise<{ files: Listed; markers
   }
 }
 
-/** Brings the records in line with the folder on disk, and reads the title and gist of files not read yet. */
+/** Brings the records in line with the folder on disk, and reads the details of files not read yet or changed since. */
 async function refreshHandoffs($: $, scope?: Scope) {
   const home = mem.home
   if (home === undefined) return
@@ -245,10 +245,12 @@ async function refreshHandoffs($: $, scope?: Scope) {
   const listing: Record<string, Listed> = Object.fromEntries(repos.flatMap((repo, i) => (lists[i] === undefined ? [] : [[repo, lists[i]!.files]])))
   const markers = Object.assign({}, ...lists.map(one => one?.markers))
   const preview = mergeListing(await read($, handoffs), listing, listedAt)
-  const unread = Object.entries(preview).filter(([, r]) => r.gist === undefined || r.steps === undefined)
+  // A file outside the listing is stamped 0, so it is read once more when a listing shows its real mtime.
+  const mtimes: Record<string, number> = Object.fromEntries(Object.values(listing).flat().map(one => [one.path, one.mtimeMs]))
+  const unread = Object.entries(preview).filter(([path, r]) => r.readMtimeMs === undefined || (mtimes[path] ?? 0) > r.readMtimeMs)
     .sort((a, b) => Number(b[1].status === 'open') - Number(a[1].status === 'open') || b[1].at - a[1].at).slice(0, 20)
   const found = await Promise.all(unread.map(([path]) => $.fs.read(path).then(text => detailsOf(typeof text === 'string' ? text : ''), () => detailsOf(''))))
-  const details = Object.fromEntries(unread.map(([path], i) => [path, found[i]!]))
+  const details = Object.fromEntries(unread.map(([path], i) => [path, { ...found[i]!, readMtimeMs: mtimes[path] ?? 0 }]))
   await setHandoffs($, all => withDetails(closeMarked(mergeListing(all, listing, listedAt), markers), details))
 }
 
