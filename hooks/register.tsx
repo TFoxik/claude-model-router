@@ -75,7 +75,7 @@ import {
 } from './routes'
 import { HANDOFF_DIR, HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, pendingAfter, segment, shouldAutoHandoff, tildePath } from './handoff'
 import type { PendingHandoff } from './handoff'
-import { bandCount, handoffDir, handoffRows, handoffsRoot, mergeListing, recordWritten, reopen, repoOfHandoff, resumeIn, sanitizeHandoffs, setStatus, detailsOf, withDetails } from './handoffs'
+import { bandCount, closeMarked, handoffDir, handoffRows, handoffsRoot, mergeListing, recordWritten, reopen, repoOfHandoff, resumeIn, sanitizeHandoffs, setStatus, detailsOf, withDetails } from './handoffs'
 import type { HandoffStatus, Handoffs } from './handoffs'
 import { EXPLORE_MIN, NO_STEPS, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
 import type { Steps } from './signals'
@@ -222,11 +222,14 @@ async function recordHandoff($: $, path: string, repo: string, text: string | un
 
 type Listed = { path: string; mtimeMs: number }[]
 
-/** A folder's handoff files, `[]` when the folder doesn't exist, `undefined` when it couldn't be read. */
-async function listHandoffs($: $, dir: string): Promise<Listed | undefined> {
+/** A folder's handoff files, and the mtime of each `.md.closed` marker by the handoff it closes; empty when the folder doesn't exist, `undefined` when it couldn't be read. */
+async function listHandoffs($: $, dir: string): Promise<{ files: Listed; markers: Record<string, number> } | undefined> {
   try {
-    if (!(await $.fs.exists(dir))) return []
-    return (await $.fs.list(dir)).filter(one => one.kind === 'file' && one.name.endsWith('.md')).map(one => ({ path: `${dir}/${one.name}`, mtimeMs: one.mtimeMs }))
+    if (!(await $.fs.exists(dir))) return { files: [], markers: {} }
+    const entries = (await $.fs.list(dir)).filter(one => one.kind === 'file')
+    const files = entries.filter(one => one.name.endsWith('.md')).map(one => ({ path: `${dir}/${one.name}`, mtimeMs: one.mtimeMs }))
+    const markers = Object.fromEntries(entries.filter(one => one.name.endsWith('.md.closed')).map(one => [`${dir}/${one.name.slice(0, -'.closed'.length)}`, one.mtimeMs]))
+    return { files, markers }
   } catch {
     return undefined
   }
@@ -240,12 +243,13 @@ async function refreshHandoffs($: $, scope?: Scope) {
   const repos = inScope === 'repo' ? [segment(mem.repo)] : ((await $.fs.list(handoffsRoot(home)).catch(() => undefined))?.filter(one => one.kind === 'dir').map(one => one.name) ?? [])
   const listedAt = await nowOf($)
   const lists = await Promise.all(repos.map(repo => listHandoffs($, handoffDir(home, repo))))
-  const listing: Record<string, Listed> = Object.fromEntries(repos.flatMap((repo, i) => (lists[i] === undefined ? [] : [[repo, lists[i]!]])))
+  const listing: Record<string, Listed> = Object.fromEntries(repos.flatMap((repo, i) => (lists[i] === undefined ? [] : [[repo, lists[i]!.files]])))
+  const markers = Object.assign({}, ...lists.map(one => one?.markers))
   const preview = mergeListing(await read($, handoffs), listing, listedAt)
   const unread = Object.entries(preview).filter(([, r]) => r.gist === undefined).sort((a, b) => b[1].at - a[1].at).slice(0, 20)
   const found = await Promise.all(unread.map(([path]) => $.fs.read(path).then(text => detailsOf(typeof text === 'string' ? text : ''), () => detailsOf(''))))
   const details = Object.fromEntries(unread.map(([path], i) => [path, found[i]!]))
-  await setHandoffs($, all => withDetails(mergeListing(all, listing, listedAt), details))
+  await setHandoffs($, all => withDetails(closeMarked(mergeListing(all, listing, listedAt), markers), details))
 }
 
 async function renderHandoffsPane($: $, e: Args<'ui.render'>) {

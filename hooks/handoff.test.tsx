@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { handoffPath, handoffWindow, pendingAfter, shouldAutoHandoff, tildePath } from './handoff'
+import { HANDOFF_PROMPT, handoffPath, handoffWindow, pendingAfter, shouldAutoHandoff, tildePath } from './handoff'
 import type { HandoffFacts } from './handoff'
 
 const due: HandoffFacts = { isOn: true, isArmed: true, isIdle: true, isPromptEmpty: true, canSave: true, warmMinutes: 2, ttlMinutes: 60, tokens: 140_000, openSteps: 3, hasPlan: false }
@@ -65,4 +65,10 @@ test('a pending handoff is dropped once a refused submit, a prompt of yours or a
   expect(pendingAfter(running, { kind: 'user-prompt' })).toBe(running)
   expect(pendingAfter(running, { kind: 'fresh-context' })).toBeUndefined()
   expect(pendingAfter(undefined, { kind: 'user-prompt' })).toBeUndefined()
+})
+
+test('the handoff prompt asks for open steps under a heading, each tagged with who does it', () => {
+  expect(HANDOFF_PROMPT).toContain('## Open steps')
+  expect(HANDOFF_PROMPT).toContain('(you)')
+  expect(HANDOFF_PROMPT).toContain('(claude)')
 })

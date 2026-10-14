@@ -1,5 +1,15 @@
 # Release notes
 
+## 1.3.0 — 2026-10-14
+
+### Added
+
+- **Auto-handoffs end with their open steps**, under `## Open steps`, each tagged `(you)` or `(claude)`, so you see at a glance what's left and who does it.
+
+### For tool authors
+
+- **Handoffs can be closed by other tools.** A `<handoff>.md.closed` file beside a handoff shows it as done, unless you reopened it in the pane after the file was written. The router never writes these itself.
+
 ## 1.2.1 — 2026-10-12
 
 ### Fixed

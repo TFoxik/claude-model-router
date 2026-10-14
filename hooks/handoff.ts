@@ -5,7 +5,7 @@ export const HANDOFF_LABEL = 'auto-handoff'
 export const HANDOFF_DIR = '.claude/handoffs'
 
 export const HANDOFF_PROMPT =
-  'The prompt cache expires in a few minutes and work is still open. Reply with a handoff document in Markdown and nothing else: the goal, what is done, the open steps in order, files touched, decisions and their reasons, and the exact next step. Do not call any tools.'
+  'The prompt cache expires in a few minutes and work is still open. Reply with a handoff document in Markdown and nothing else: the goal, what is done, files touched, decisions and their reasons, and the exact next step, then last the open steps in order under an "## Open steps" heading, as a numbered list, each step starting with (you) or (claude) for who does it. Do not call any tools.'
 
 export type HandoffFacts = {
   isOn: boolean

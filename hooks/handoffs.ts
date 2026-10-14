@@ -87,6 +87,15 @@ export function setStatus(records: Handoffs, path: string, status: HandoffStatus
   return r === undefined ? records : { ...records, [path]: { ...r, status } }
 }
 
+/** Open handoffs another tool closed, from each `.md` path to its `.md.closed` marker's mtime; a reopen after the marker wins. */
+export function closeMarked(records: Handoffs, markers: Readonly<Record<string, number>>): Handoffs {
+  const closed = Object.entries(markers).flatMap(([path, at]) => {
+    const r = records[path]
+    return r?.status === 'open' && (r.reopenedAt ?? 0) <= at ? [[path, { ...r, status: 'done' as const }]] : []
+  })
+  return closed.length === 0 ? records : { ...records, ...Object.fromEntries(closed) }
+}
+
 /** Reopening restarts the stale clock, or an old handoff would fold straight back. */
 export function reopen(records: Handoffs, path: string, now: number): Handoffs {
   const r = records[path]

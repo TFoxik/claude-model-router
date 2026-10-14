@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { STALE_MS, bandCount, handoffDir, handoffRows, isStale, mergeListing, recordWritten, repoOfHandoff, resumedBy, sanitizeHandoffs, setStatus, gistOf, titleOf, withDetails } from './handoffs'
+import { STALE_MS, bandCount, closeMarked, handoffDir, handoffRows, isStale, mergeListing, recordWritten, repoOfHandoff, resumedBy, sanitizeHandoffs, setStatus, gistOf, titleOf, withDetails } from './handoffs'
 import type { Handoffs } from './handoffs'
 
 const HOME = '/home/me'
@@ -163,4 +163,30 @@ test('without a session id, handoffs on disk still count toward the band', () =>
 test('a file with no heading keeps an empty title, shown as its file name', () => {
   const records: Handoffs = { [`${dir}/plain.md`]: { repo: 'app', at: T0, title: '', status: 'open' } }
   expect(handoffRows(records, 'app', T0).open.map(r => r.title)).toEqual(['plain.md'])
+})
+
+test('a closed marker beside an open handoff marks it done', () => {
+  const records: Handoffs = { [`${dir}/a.md`]: { repo: 'app', at: T0, status: 'open' } }
+  expect(closeMarked(records, { [`${dir}/a.md`]: T0 + DAY })[`${dir}/a.md`]!.status).toBe('done')
+})
+
+test('a reopen after the marker keeps the handoff open; one before it does not', () => {
+  const after: Handoffs = { [`${dir}/a.md`]: { repo: 'app', at: T0, status: 'open', reopenedAt: T0 + 2 * DAY } }
+  expect(closeMarked(after, { [`${dir}/a.md`]: T0 + DAY })).toBe(after)
+  const before: Handoffs = { [`${dir}/a.md`]: { repo: 'app', at: T0, status: 'open', reopenedAt: T0 + DAY } }
+  expect(closeMarked(before, { [`${dir}/a.md`]: T0 + 2 * DAY })[`${dir}/a.md`]!.status).toBe('done')
+})
+
+test('without a marker nothing changes', () => {
+  const records: Handoffs = { [`${dir}/a.md`]: { repo: 'app', at: T0, status: 'open' } }
+  expect(closeMarked(records, {})).toBe(records)
+  expect(closeMarked(records, { [`${dir}/other.md`]: T0 })).toBe(records)
+})
+
+test('a marker leaves resumed and superseded handoffs as they are', () => {
+  const records: Handoffs = {
+    [`${dir}/r.md`]: { repo: 'app', at: T0, status: 'resumed' },
+    [`${dir}/s.md`]: { repo: 'app', at: T0, status: 'superseded' },
+  }
+  expect(closeMarked(records, { [`${dir}/r.md`]: T0 + DAY, [`${dir}/s.md`]: T0 + DAY })).toBe(records)
 })
