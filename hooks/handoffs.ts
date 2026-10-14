@@ -4,11 +4,13 @@ import { printable } from './routes'
 
 export type { HandoffRecord, HandoffStatus, Handoffs }
 export { handoffDir, handoffsRoot }
-export type HandoffRow = { path: string; repo: string; at: number; title: string; gist?: string; isOpen: boolean; reason?: string }
+export type HandoffRow = { path: string; repo: string; at: number; title: string; gist?: string; steps?: readonly string[]; stepCount?: number; isOpen: boolean; reason?: string }
 
 export const STALE_MS = 14 * 86_400_000
 const KEPT = 500
-const GIST_MAX = 160
+const GIST_MAX = 320
+const STEP_MAX = 120
+const STEPS_KEPT = 6
 const REASON: Record<Exclude<HandoffStatus, 'open'>, string> = { done: 'done', dropped: 'not relevant', resumed: 'resumed', superseded: 'superseded' }
 const STATUSES: ReadonlySet<string> = new Set(['open', ...Object.keys(REASON)])
 
@@ -31,16 +33,20 @@ function isRecord(value: unknown): value is HandoffRecord {
     (r.sessionId === undefined || typeof r.sessionId === 'string') &&
     (r.title === undefined || typeof r.title === 'string') &&
     (r.gist === undefined || typeof r.gist === 'string') &&
+    (r.steps === undefined || (Array.isArray(r.steps) && r.steps.every(one => typeof one === 'string'))) &&
+    (r.stepCount === undefined || (typeof r.stepCount === 'number' && Number.isFinite(r.stepCount))) &&
     (r.reopenedAt === undefined || (typeof r.reopenedAt === 'number' && Number.isFinite(r.reopenedAt)))
   )
 }
 
-const clean = ({ repo, at, sessionId, title, gist, status, reopenedAt }: HandoffRecord): HandoffRecord => ({
+const clean = ({ repo, at, sessionId, title, gist, steps, stepCount, status, reopenedAt }: HandoffRecord): HandoffRecord => ({
   repo: printable(repo),
   at,
   ...(sessionId === undefined ? {} : { sessionId }),
   ...(title === undefined ? {} : { title: printable(title) }),
   ...(gist === undefined ? {} : { gist: printable(gist) }),
+  ...(steps === undefined ? {} : { steps: steps.slice(0, STEPS_KEPT).map(printable) }),
+  ...(stepCount === undefined ? {} : { stepCount }),
   status,
   ...(reopenedAt === undefined ? {} : { reopenedAt }),
 })
@@ -107,16 +113,19 @@ export function resumeIn(records: Handoffs, text: string, home: string | undefin
   return resumedBy(text, records, home).reduce((acc, path) => setStatus(acc, path, 'resumed'), records)
 }
 
-export type Details = { title: string; gist: string }
+export type Details = { title: string; gist: string; steps: string[]; stepCount: number }
 
-/** Titles and gists read from disk, applied to the records they belong to; the same records when none apply. */
+/** Titles, gists and steps read from disk, applied to the records they belong to; the same records when none apply. */
 export function withDetails(records: Handoffs, details: Readonly<Record<string, Details>>): Handoffs {
   const known = Object.entries(details).filter(([path]) => records[path] !== undefined)
   return known.length === 0 ? records : { ...records, ...Object.fromEntries(known.map(([path, d]) => [path, clean({ ...records[path]!, ...d })])) }
 }
 
-/** What a handoff's text yields for its record: empty strings where it has no title or gist. */
-export const detailsOf = (markdown: string): Details => ({ title: titleOf(markdown) ?? '', gist: gistOf(markdown) ?? '' })
+/** What a handoff's text yields for its record: empty where it has no title, gist or steps. */
+export function detailsOf(markdown: string): Details {
+  const steps = stepsOf(markdown)
+  return { title: titleOf(markdown) ?? '', gist: gistOf(markdown) ?? '', steps: steps.slice(0, STEPS_KEPT), stepCount: steps.length }
+}
 
 export function resumedBy(text: string, records: Handoffs, home: string | undefined): string[] {
   return Object.entries(records)
@@ -137,7 +146,8 @@ export function handoffRows(records: Handoffs, repo: string | undefined, now: nu
     .sort((a, b) => b[1].at - a[1].at)
     .map(([path, r]) => {
       const reason = r.status !== 'open' ? REASON[r.status] : isStale(r, now) ? 'stale, 14+ days' : undefined
-      return { path, repo: r.repo, at: r.at, title: r.title || path.split('/').pop()!, ...(r.gist ? { gist: r.gist } : {}), isOpen: r.status === 'open', ...(reason === undefined ? {} : { reason }) }
+      const steps = r.steps?.length ? { steps: r.steps, stepCount: r.stepCount ?? r.steps.length } : {}
+      return { path, repo: r.repo, at: r.at, title: r.title || path.split('/').pop()!, ...(r.gist ? { gist: r.gist } : {}), ...steps, isOpen: r.status === 'open', ...(reason === undefined ? {} : { reason }) }
     })
   return { open: rows.filter(one => one.reason === undefined), closed: rows.filter(one => one.reason !== undefined) }
 }
@@ -148,6 +158,8 @@ export function titleOf(markdown: string): string | undefined {
 }
 
 const HEADING = /^#{1,6}\s/
+const TOP_ITEM = /^(?:[-*+]|\d+[.)])\s+/
+const STEPS_HEADING = /^#{1,6}\s+open steps\b/i
 const plain = (line: string) =>
   line
     .replace(/^\s*(?:[-*+]|\d+[.)]|>)\s+/, '')
@@ -156,8 +168,8 @@ const plain = (line: string) =>
     .trim()
 
 /**
- * What a handoff is about, in a line or two: the first paragraph under its Goal heading, as an auto-handoff writes one,
- * else the first paragraph after the title. Plain text, cut at a word.
+ * What a handoff is about, in a few lines: the first paragraph under its Goal heading, as an auto-handoff writes one,
+ * else the first paragraph after the title and before its open steps. Plain text, cut at a word.
  */
 export function gistOf(markdown: string): string | undefined {
   const lines = markdown.split('\n')
@@ -165,6 +177,7 @@ export function gistOf(markdown: string): string | undefined {
   const start = goal >= 0 ? goal + 1 : lines.findIndex(line => /^#\s/.test(line)) + 1
   const paragraph: string[] = []
   for (const line of lines.slice(start)) {
+    if (STEPS_HEADING.test(line)) break
     if (HEADING.test(line) && (goal >= 0 || paragraph.length > 0)) break
     if (HEADING.test(line) || line.trim() === '') {
       if (paragraph.length > 0) break
@@ -173,9 +186,31 @@ export function gistOf(markdown: string): string | undefined {
     paragraph.push(plain(line))
   }
   const text = paragraph.join(' ').replace(/\s+/g, ' ').trim()
-  if (text === '') return undefined
-  if (text.length <= GIST_MAX) return text
-  const cut = text.slice(0, GIST_MAX - 1)
+  return text === '' ? undefined : cutAt(text, GIST_MAX)
+}
+
+function cutAt(text: string, max: number): string {
+  if (text.length <= max) return text
+  const cut = text.slice(0, max - 1)
   const space = cut.lastIndexOf(' ')
   return `${(space > 0 ? cut.slice(0, space) : cut).replace(/[\s,;:.]+$/, '')}…`
+}
+
+/**
+ * The top-level list items under the first heading starting "Open steps", up to the next heading of its level or higher,
+ * as plain text cut to a line or two. Indented sub-items are left out; owner tags such as `(you)` stay in the text.
+ */
+export function stepsOf(markdown: string): string[] {
+  const lines = markdown.split('\n')
+  const at = lines.findIndex(line => STEPS_HEADING.test(line))
+  if (at < 0) return []
+  const level = /^#+/.exec(lines[at]!)![0].length
+  const steps: string[] = []
+  for (const line of lines.slice(at + 1)) {
+    const heading = /^(#{1,6})\s/.exec(line)
+    if (heading !== null && heading[1]!.length <= level) break
+    const text = TOP_ITEM.test(line) ? plain(line).replace(/\s+/g, ' ') : ''
+    if (text !== '') steps.push(cutAt(text, STEP_MAX))
+  }
+  return steps
 }

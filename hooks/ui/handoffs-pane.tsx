@@ -13,23 +13,51 @@ type HandoffsActions = {
   setScope: (scope: Scope) => void
 }
 
+const OWNER = /^\((you|claude)\)\s*/i
+
+/** An open step, its owner tag dimmed apart from the text. */
+function step({ Box, Text }: Els, path: string, text: string, i: number) {
+  const tag = OWNER.exec(text)?.[0].trim()
+  return (
+    <Box key={`s:${path}:${i}`} flexDirection="row" gap={1}>
+      <Box width={1} flexShrink={0}>
+        <Text dimColor>·</Text>
+      </Box>
+      {tag === undefined ? null : <Text dimColor>{tag}</Text>}
+      <Box flexShrink={1} minWidth={0}>
+        <Text wrap="wrap">{text.replace(OWNER, '')}</Text>
+      </Box>
+    </Box>
+  )
+}
+
 /**
- * A stamped title with its buttons on the line below.
+ * A handoff boxed apart from the others: stamp and title, what it is about and its open steps while it is open,
+ * then its buttons on the last line.
  *
  * The title stays out of every Button: a desktop draws a Button as a native one-line control.
  */
-function row({ Box, Text, Button }: Els, one: HandoffRow, showsRepo: boolean, isClosed: boolean, act: HandoffsActions) {
+function card(els: Els, one: HandoffRow, showsRepo: boolean, isClosed: boolean, act: HandoffsActions) {
+  const { Box, Text, Button } = els
+  const more = (one.stepCount ?? 0) - (one.steps?.length ?? 0)
   return (
-    <Box key={`h:${one.path}`} flexDirection="row">
+    <Box key={`h:${one.path}`} flexDirection="row" borderStyle="round" borderDimColor paddingX={1}>
       <Box width={STAMP_W} flexShrink={0}>
         <Text dimColor>{stamp(one.at)}</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-        <Text dimColor={isClosed} wrap="wrap">
+        <Text dimColor={isClosed} bold={!isClosed} wrap="wrap">
           {showsRepo ? <Text dimColor>{`${one.repo} · `}</Text> : null}
           {one.title}
         </Text>
-        {one.gist === undefined ? null : <Text dimColor wrap="wrap">{one.gist}</Text>}
+        {isClosed || one.gist === undefined ? null : <Text dimColor wrap="wrap">{one.gist}</Text>}
+        {isClosed || one.steps === undefined ? null : (
+          <Box flexDirection="column">
+            <Text dimColor>Open steps</Text>
+            {one.steps.map((text, i) => step(els, one.path, text, i))}
+            {more > 0 ? <Text dimColor>{`+${more} more`}</Text> : null}
+          </Box>
+        )}
         <Box flexDirection="row" gap={2}>
           {isClosed ? <Text dimColor italic>{one.reason}</Text> : null}
           <Button key={`resume:${one.path}`} label="Resume" plain onPress={() => act.resume(one.path)} />
@@ -63,11 +91,14 @@ export function handoffsPaneView(els: Els, { open, closed, isClosedShown, scope,
       {open.length === 0 && closed.length === 0 ? (
         <Text dimColor wrap="wrap">{`No handoffs in ${scope === 'repo' ? repo : 'any repo'}. Auto-handoff saves them here when it's on; so does /handoff.`}</Text>
       ) : null}
-      {open.map(one => row(els, one, showsRepo, false, act))}
+      {open.length === 0 ? null : (
+        <Text dimColor wrap="wrap">Resume to pick one up here. Done once its open steps are finished, Not relevant if they no longer matter.</Text>
+      )}
+      {open.map(one => card(els, one, showsRepo, false, act))}
       {closed.length === 0 ? null : (
         <Box flexDirection="column" gap={1}>
           <Button key="closed-toggle" label={isClosedShown ? 'hide closed' : `show ${closed.length} closed`} plain dimColor onPress={act.toggleClosed} />
-          {isClosedShown ? closed.map(one => row(els, one, showsRepo, true, act)) : null}
+          {isClosedShown ? closed.map(one => card(els, one, showsRepo, true, act)) : null}
         </Box>
       )}
       <Text dimColor wrap="wrap">{folder}</Text>

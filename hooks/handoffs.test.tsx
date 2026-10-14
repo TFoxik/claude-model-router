@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { STALE_MS, bandCount, closeMarked, handoffDir, handoffRows, isStale, mergeListing, recordWritten, repoOfHandoff, resumedBy, sanitizeHandoffs, setStatus, gistOf, titleOf, withDetails } from './handoffs'
+import { STALE_MS, bandCount, closeMarked, handoffDir, handoffRows, isStale, mergeListing, recordWritten, repoOfHandoff, resumedBy, sanitizeHandoffs, setStatus, detailsOf, gistOf, stepsOf, titleOf, withDetails } from './handoffs'
 import type { Handoffs } from './handoffs'
 
 const HOME = '/home/me'
@@ -124,9 +124,10 @@ test('without a Goal, the gist is the first paragraph after the title; none with
   expect(gistOf('')).toBeUndefined()
 })
 
-test('a long gist is cut at a word, under 160 characters, with an ellipsis', () => {
-  const gist = gistOf(`## Goal\n${'word '.repeat(60)}`)!
-  expect(gist.length).toBeLessThanOrEqual(160)
+test('a long gist is cut at a word, under 320 characters, with an ellipsis', () => {
+  expect(gistOf(`## Goal\n${'word '.repeat(60)}`)).toBe('word '.repeat(60).trim())
+  const gist = gistOf(`## Goal\n${'word '.repeat(80)}`)!
+  expect(gist.length).toBeLessThanOrEqual(320)
   expect(gist.endsWith('word…')).toBe(true)
 })
 
@@ -189,4 +190,47 @@ test('a marker leaves resumed and superseded handoffs as they are', () => {
     [`${dir}/s.md`]: { repo: 'app', at: T0, status: 'superseded' },
   }
   expect(closeMarked(records, { [`${dir}/r.md`]: T0 + DAY, [`${dir}/s.md`]: T0 + DAY })).toBe(records)
+})
+
+const STEPS_MD = `# Handoff
+## Goal
+Ship it.
+## Open steps, in order
+1. **Tests.** Run the \`suite\`.
+   - a sub-step that is not shown
+2) (you) click through the panes
+- (claude) write the [docs](x.md)
+### A deeper heading stays in the section
+* fourth
+
+5. fifth
+## Files
+1. not a step
+`
+
+test('the open steps are the top-level items under the first Open steps heading, as plain text', () => {
+  expect(stepsOf(STEPS_MD)).toEqual(['Tests. Run the suite.', '(you) click through the panes', '(claude) write the docs', 'fourth', 'fifth'])
+  expect(stepsOf('# T\n### open steps\n1. lower case, any level\n## Next\n1. no')).toEqual(['lower case, any level'])
+  expect(stepsOf('# T\n## Goal\n1. not steps')).toEqual([])
+  expect(stepsOf('')).toEqual([])
+})
+
+test('a long step is cut at a word, with an ellipsis', () => {
+  const [step] = stepsOf(`## Open steps\n1. ${'word '.repeat(40)}`)
+  expect(step!.length).toBeLessThanOrEqual(120)
+  expect(step!.endsWith('word…')).toBe(true)
+})
+
+test('details keep the first six steps and count them all', () => {
+  const md = `# T\n## Open steps\n${Array.from({ length: 8 }, (_, i) => `${i + 1}. s${i + 1}`).join('\n')}`
+  expect(detailsOf(md)).toEqual({ title: 'T', gist: '', steps: ['s1', 's2', 's3', 's4', 's5', 's6'], stepCount: 8 })
+  expect(detailsOf('no heading')).toEqual({ title: '', gist: 'no heading', steps: [], stepCount: 0 })
+})
+
+test('steps survive the store and reach the rows', () => {
+  const records = sanitizeHandoffs({ [`${dir}/a.md`]: { repo: 'app', at: T0, title: 'A', gist: '', steps: ['one\u0007', 'two'], stepCount: 3, status: 'open' } })
+  expect(records[`${dir}/a.md`]).toEqual({ repo: 'app', at: T0, title: 'A', gist: '', steps: ['one ', 'two'], stepCount: 3, status: 'open' })
+  expect(sanitizeHandoffs({ [`${dir}/b.md`]: { repo: 'app', at: T0, steps: [1], status: 'open' } })).toEqual({})
+  const row = handoffRows(records, 'app', T0).open[0]!
+  expect([row.steps, row.stepCount]).toEqual([['one ', 'two'], 3])
 })

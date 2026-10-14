@@ -1673,7 +1673,7 @@ test('a held cold send resumes nothing', async ($, on) => {
   expect((data.handoffs as Record<string, { status: string }>)['/home/me/.claude/handoffs/unknown/a.md']!.status).toBe('open')
 })
 
-test('the band shows handoffs ●N for other sessions\' open handoffs, through prompts, until the pane is opened', async ($, on) => {
+test('the band shows handoffs ●N for other sessions\' open handoffs, through prompts and after the pane is opened', async ($, on) => {
   await listedSession($, on, { 'a.md': '# A\n', 'b.md': '# B\n' })
   const band = await bandOf($)
   expect((await band.find({ key: 'band-handoffs' }))?.text).toBe('Handoffs ●2')
@@ -1685,8 +1685,26 @@ test('the band shows handoffs ●N for other sessions\' open handoffs, through p
   await still.press({ key: 'band-handoffs' })
   await still.unmount()
   const after = await bandOf($)
-  expect(await after.find({ key: 'band-handoffs' })).toBeUndefined()
+  expect((await after.find({ key: 'band-handoffs' }))?.text).toBe('Handoffs ●2')
   await after.unmount()
+})
+
+test('each open handoff shows its open steps, six at most, under a hint on what to do with it', async ($, on) => {
+  const steps = Array.from({ length: 8 }, (_, i) => `${i + 1}. ${i === 0 ? '(you) ' : ''}step ${i + 1}`).join('\n')
+  await listedSession($, on, { 'a.md': `# A\n## Open steps\n${steps}\n` })
+  const pane = await mountPane($, 'handoffs', 'desktop')
+  expect(await pane.find({ type: 'Text', text: /^Resume to pick one up here\./ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '(you)' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'step 6' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'step 7' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '+2 more' })).toBeDefined()
+  await pane.unmount()
+})
+
+test('a handoff read before steps were kept is read once more for them', async ($, on) => {
+  const data: Record<string, unknown> = { handoffs: { '/home/me/.claude/handoffs/unknown/a.md': { repo: 'unknown', at: T0, title: 'A', gist: '', status: 'open' } } }
+  await listedSession($, on, { 'a.md': '# A\n## Open steps\n1. first\n' }, data)
+  expect((data.handoffs as Record<string, { steps?: string[] }>)['/home/me/.claude/handoffs/unknown/a.md']!.steps).toEqual(['first'])
 })
 
 test('with Handoffs off, auto-handoff never asks even when its own switch is on', async ($, on) => {

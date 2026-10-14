@@ -1,5 +1,12 @@
 # Release notes
 
+## 1.4.0 — 2026-10-14
+
+### Changed
+
+- **Handoffs ●N stays in the band while handoffs are open.** Opening the Handoffs pane no longer hides it for the rest of the session; resume a handoff, or mark it Done or Not relevant, to clear it.
+- **Each handoff in its own box, with its open steps.** Under the title and what it is about (now a few lines, not two), the pane lists up to six of the handoff's open steps, the top-level items under its `## Open steps`, with `(you)` and `(claude)` dimmed. A line at the top says what each button is for.
+
 ## 1.3.0 — 2026-10-14
 
 ### Added

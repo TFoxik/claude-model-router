@@ -117,7 +117,6 @@ const learnScope = atom({ plugin: 'model-router', key: 'learnScope' } as const, 
 const handoffs = atom({ plugin: 'model-router', key: 'handoffs' } as const, {} as Handoffs)
 const handoffScope = atom({ plugin: 'model-router', key: 'handoffScope' } as const, 'repo' as Scope)
 const handoffClosedShown = atom({ plugin: 'model-router', key: 'handoffClosedShown' } as const, false)
-const handoffBandSeen = atom({ plugin: 'model-router', key: 'handoffBandSeen' } as const, false)
 // Atoms outlive a hot reload of this code and `mem` does not: this keeps what the session would lose with it.
 const carried = atom({ plugin: 'model-router', key: 'carried' } as const, null as Carried | null)
 
@@ -246,7 +245,8 @@ async function refreshHandoffs($: $, scope?: Scope) {
   const listing: Record<string, Listed> = Object.fromEntries(repos.flatMap((repo, i) => (lists[i] === undefined ? [] : [[repo, lists[i]!.files]])))
   const markers = Object.assign({}, ...lists.map(one => one?.markers))
   const preview = mergeListing(await read($, handoffs), listing, listedAt)
-  const unread = Object.entries(preview).filter(([, r]) => r.gist === undefined).sort((a, b) => b[1].at - a[1].at).slice(0, 20)
+  const unread = Object.entries(preview).filter(([, r]) => r.gist === undefined || r.steps === undefined)
+    .sort((a, b) => Number(b[1].status === 'open') - Number(a[1].status === 'open') || b[1].at - a[1].at).slice(0, 20)
   const found = await Promise.all(unread.map(([path]) => $.fs.read(path).then(text => detailsOf(typeof text === 'string' ? text : ''), () => detailsOf(''))))
   const details = Object.fromEntries(unread.map(([path], i) => [path, found[i]!]))
   await setHandoffs($, all => withDetails(closeMarked(mergeListing(all, listing, listedAt), markers), details))
@@ -738,10 +738,7 @@ async function raisePane($: $, pane: keyof typeof PANES) {
 /** What opening a pane does besides showing it. */
 async function onOpen($: $, pane: keyof typeof PANES) {
   if (pane === 'learn') await markLessonsRead($)
-  if (pane === 'handoffs') {
-    await update($, handoffBandSeen, () => true)
-    await refreshHandoffs($)
-  }
+  if (pane === 'handoffs') await refreshHandoffs($)
 }
 
 async function showPane($: $, target: Target) {
@@ -791,7 +788,7 @@ async function renderCostPane($: $, e: Args<'ui.render'>) {
 const setBand = async ($: $, isShown: boolean) => save($, STORE.bandShown, await update($, isBandShown, () => isShown))
 
 async function renderBand($: $, e: Args<'ui.render'>) {
-  const [cfg, now, pending, costs, hp, kept, readAt, scope, records, isBandSeen] = await Promise.all([
+  const [cfg, now, pending, costs, hp, kept, readAt, scope, records] = await Promise.all([
     read($, config),
     read($, active),
     read($, draft),
@@ -801,9 +798,8 @@ async function renderBand($: $, e: Args<'ui.render'>) {
     read($, lessonsReadAt),
     read($, learnScope),
     read($, handoffs),
-    read($, handoffBandSeen),
   ])
-  const handoffsOpen = isBandSeen || !cfg.isHandoffs ? 0 : bandCount(records, segment(mem.repo), mem.kept.sessionId, await nowOf($))
+  const handoffsOpen = !cfg.isHandoffs ? 0 : bandCount(records, segment(mem.repo), mem.kept.sessionId, await nowOf($))
   const learnUnread = cfg.isLearning ? unreadCount(inScope(kept, scope), readAt, cfg.learnMuted, { since: mem.kept.since ?? 0, sessionId: mem.kept.sessionId }) : 0
   const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp, learnUnread, handoffsOpen }
   return bandView($.ui.resolve(e), data, { open: openPane($) })
@@ -1117,10 +1113,7 @@ export const register: Register = on => {
     const isSame = sessionId !== undefined && before?.sessionId === sessionId
     // A copy: noteUse writes into `used`, and the atom's own value is not ours to change in place.
     mem.kept = isSame ? { ...before, used: { ...before.used } } : { sessionId, used: {}, isUncounted: true, since: startedAt }
-    if (!isSame) {
-      await carry($)
-      await update($, handoffBandSeen, () => false)
-    }
+    if (!isSame) await carry($)
     mem.loaded = undefined
     mem.savedUsage = undefined
     mem.patience = idleDev === '1' ? DEV_PATIENCE : PATIENCE
