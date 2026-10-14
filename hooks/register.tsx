@@ -73,7 +73,7 @@ import {
   withPreset,
   withRoute,
 } from './routes'
-import { HANDOFF_DIR, HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, pendingAfter, segment, shouldAutoHandoff, tildePath } from './handoff'
+import { HANDOFF_DIR, HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, isAgentBusy, pendingAfter, segment, shouldAutoHandoff, tildePath } from './handoff'
 import type { PendingHandoff } from './handoff'
 import { bandCount, closeMarked, handoffDir, handoffRows, handoffsRoot, mergeListing, recordWritten, reopen, repoOfHandoff, resumeIn, sanitizeHandoffs, setStatus, detailsOf, withDetails } from './handoffs'
 import type { HandoffStatus, Handoffs } from './handoffs'
@@ -491,7 +491,7 @@ async function maybeAutoHandoff($: $, cfg: RouterConfig, warm: { warmMinutes: nu
   // Claimed before the awaits, so a refresh running alongside cannot submit a second one.
   mem.handoffArmed = false
   const [agents, box] = await Promise.all([$.agent.list().catch(() => []), $.prompt.read()])
-  const isIdle = !mem.isTurnRunning && !agents.some(one => one.status === 'running' || one.status === 'pending')
+  const isIdle = !mem.isTurnRunning && !agents.some(one => isAgentBusy(one.status))
   if (!shouldAutoHandoff({ ...facts, isIdle, isPromptEmpty: box.text.trim() === '' })) {
     mem.handoffArmed = true
     return

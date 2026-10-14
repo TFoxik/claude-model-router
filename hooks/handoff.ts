@@ -41,7 +41,10 @@ export function shouldAutoHandoff(f: HandoffFacts): boolean {
   )
 }
 
-export type PendingHandoff = { turnId?: string; tokens: number; model: string } | undefined
+/** `waiting` is held on its own background work or a plan's approval, so still busy; `idle` may wait for a message forever and must not block the handoff. */
+export const isAgentBusy = (status: string) => status === 'pending' || status === 'running' || status === 'waiting'
+
+export type PendingHandoff ={ turnId?: string; tokens: number; model: string } | undefined
 type PendingEvent = { kind: 'submitted'; isDropped: boolean } | { kind: 'user-prompt' } | { kind: 'fresh-context' }
 
 /** A handoff asked for and not yet started is dropped once a refused submit, a prompt of yours or a fresh context outlives it; one already running is kept for its reply. */

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { HANDOFF_PROMPT, handoffPath, handoffWindow, pendingAfter, shouldAutoHandoff, tildePath } from './handoff'
+import { HANDOFF_PROMPT, handoffPath, handoffWindow, isAgentBusy, pendingAfter, shouldAutoHandoff, tildePath } from './handoff'
 import type { HandoffFacts } from './handoff'
 
 const due: HandoffFacts = { isOn: true, isArmed: true, isIdle: true, isPromptEmpty: true, canSave: true, warmMinutes: 2, ttlMinutes: 60, tokens: 140_000, openSteps: 3, hasPlan: false }
@@ -32,6 +32,11 @@ test('a 5-minute cache gets a narrower window the minute tick still sees', () =>
   expect(handoffWindow(5)).toBe(2)
   expect(shouldAutoHandoff({ ...due, ttlMinutes: 5, warmMinutes: 3 })).toBe(false)
   expect(shouldAutoHandoff({ ...due, ttlMinutes: 5, warmMinutes: 2 })).toBe(true)
+})
+
+test('an agent held on its own work counts as busy; one idle between turns does not', () => {
+  for (const status of ['pending', 'running', 'waiting']) expect(isAgentBusy(status)).toBe(true)
+  for (const status of ['idle', 'completed', 'failed', 'killed']) expect(isAgentBusy(status)).toBe(false)
 })
 
 test('handoff files go under ~/.claude/handoffs/<repo>/ with a local timestamp and short session id', () => {

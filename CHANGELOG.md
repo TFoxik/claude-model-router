@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.4.2 — 2026-10-14
+
+### Fixed
+
+- **Auto-handoff waits for background agents that are held.** A subagent waiting on its own background work or on a plan's approval now counts as busy, so the handoff is no longer asked for while it is about to change what the handoff would describe. Teammates idle between messages still don't hold it back.
+
 ## 1.4.1 — 2026-10-14
 
 ### Fixed
