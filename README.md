@@ -107,12 +107,14 @@ Routes: `main`, `plan`, `sub:*`, `sub:<agent-type>` (such as `sub:Explore`), `wo
 ## Develop
 
 ```
-claude --plugin-dir .
+scripts/try.sh [folder]
 claude plugin validate .
 claude plugin test .
 ```
 
-To see the unused MCP server and plugin advice without two weeks of history, start a session with `MODEL_ROUTER_IDLE_DEV=1 claude --plugin-dir .`. After its first prompt, `/route unused` and the Context pane list whatever was loaded but not used in the last 30 days. Turn off an installed copy of the mod in `/plugin` while you do, or both copies load.
+`scripts/try.sh` starts Claude in `folder` (default: here) with this checkout in place of the installed mod, which stays off for that session only. `/reload-plugins` there picks up later edits. The local copy keeps its own saved state; files such as handoffs are shared. In this repo, asking Claude to "try it locally" opens that session in a new terminal tab.
+
+To see the unused MCP server and plugin advice without two weeks of history, run `MODEL_ROUTER_IDLE_DEV=1 scripts/try.sh`. After its first prompt, `/route unused` and the Context pane list whatever was loaded but not used in the last 30 days.
 
 ## License
 
