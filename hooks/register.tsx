@@ -20,7 +20,6 @@ import {
   lessonsFromPrompt,
   pickLesson,
   sanitizeLessons,
-  unreadCount,
 } from './lessons'
 import type { AwayFacts, LessonDraft } from './lessons'
 import {
@@ -86,12 +85,11 @@ import { DEV_PATIENCE, PATIENCE, applyUsage, claudeAiKey, claudeAiReport, claude
 import type { ItemKey, OwnSkill, Patience, UsageStore } from './usage'
 import { bandView } from './ui/band'
 import { contextMobileView, contextPaneView } from './ui/context-pane'
-import { COST_TAB_LABEL, OLD_COST_IDS, PANES, isTarget, paneOf } from './ui/kit'
+import { COST_TAB_LABEL, OLD_COST_IDS, OLD_LEARN_ID, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
 import { costPaneView } from './ui/cost-pane'
 import { handoffsPaneView } from './ui/handoffs-pane'
 import { learnCardView } from './ui/learn-card'
-import { learnPaneView } from './ui/learn-pane'
 import { routesMobileView, routesPaneView } from './ui/routes-pane'
 import { statsFooterView } from './ui/stats'
 
@@ -112,10 +110,6 @@ const promptCost = atom({ plugin: 'model-router', key: 'promptCost' } as const, 
 const isBandShown = atom({ plugin: 'model-router', key: 'isBandShown' } as const, true)
 const lessons = atom({ plugin: 'model-router', key: 'lessons' } as const, [] as Lesson[])
 const learnCard = atom({ plugin: 'model-router', key: 'learnCard' } as const, null as LearnCard | null)
-const lessonsReadAt = atom({ plugin: 'model-router', key: 'lessonsReadAt' } as const, 0)
-const learnOpen = atom({ plugin: 'model-router', key: 'learnOpen' } as const, [] as LessonKind[])
-const learnRows = atom({ plugin: 'model-router', key: 'learnRows' } as const, [] as string[])
-const learnScope = atom({ plugin: 'model-router', key: 'learnScope' } as const, 'repo' as Scope)
 const handoffs = atom({ plugin: 'model-router', key: 'handoffs' } as const, {} as Handoffs)
 const handoffScope = atom({ plugin: 'model-router', key: 'handoffScope' } as const, 'repo' as Scope)
 const handoffClosedShown = atom({ plugin: 'model-router', key: 'handoffClosedShown' } as const, false)
@@ -126,7 +120,7 @@ type $ = EngineInterface
 
 // The store keys the atoms kept across sessions are saved under. The engine's
 // scan needs each update() to name its atom, so callers update, then save().
-const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown', modelCommands: 'modelCommands', lessons: 'lessons', lessonsReadAt: 'lessonsReadAt', learnScope: 'learnScope', toolUse: 'toolUse', connectorNames: 'connectorNames', handoffs: 'handoffs', handoffScope: 'handoffScope' } as const
+const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown', modelCommands: 'modelCommands', lessons: 'lessons', toolUse: 'toolUse', connectorNames: 'connectorNames', handoffs: 'handoffs', handoffScope: 'handoffScope' } as const
 
 /** Saves a value kept across sessions; a failed save keeps the session going. */
 async function save<T>($: $, key: string, value: T): Promise<T> {
@@ -367,15 +361,6 @@ async function muteFromCard($: $, kind: LessonKind) {
   $.ui.toast(muteText(kind))
 }
 
-/** Lessons the Learn pane and its count cover: this repo's, or every repo's under All. */
-const inScope = (all: readonly Lesson[], scope: Scope) => (scope === 'repo' ? all.filter(one => one.repo === mem.repo) : all)
-
-async function markLessonsRead($: $) {
-  const [all, scope] = await Promise.all([read($, lessons), read($, learnScope)])
-  const newest = Math.max(0, ...inScope(all, scope).map(one => one.at))
-  await save($, STORE.lessonsReadAt, await update($, lessonsReadAt, () => newest))
-}
-
 const nowOf = ($: $) => $.clock.now().catch(() => Date.now())
 
 /** Copies what a hot reload would drop into an atom; session.start puts it back. */
@@ -440,6 +425,12 @@ async function awayFacts($: $, cfg: RouterConfig, tokens?: number): Promise<Away
 }
 
 /** `/route away`: the ways to step away, priced for this session as it stands. */
+async function learnStatus($: $): Promise<string> {
+  const cfg = await read($, config)
+  const muted = cfg.learnMuted.length === 0 ? ['No topics muted.'] : cfg.learnMuted.map(kind => `Muted: ${kind} (/route learn unmute ${kind})`)
+  return [`Learn mode is ${cfg.isLearning ? 'on' : 'off'}.`, ...muted].join('\n')
+}
+
 async function awayReport($: $): Promise<string> {
   const facts = await awayFacts($, await read($, config))
   return facts === undefined ? 'Nothing is cached in this session yet.' : awayText(facts)
@@ -832,7 +823,6 @@ async function raisePane($: $, pane: keyof typeof PANES) {
 
 /** What opening a pane does besides showing it. */
 async function onOpen($: $, pane: keyof typeof PANES) {
-  if (pane === 'learn') await markLessonsRead($)
   if (pane === 'handoffs') await refreshHandoffs($)
 }
 
@@ -843,20 +833,6 @@ async function showPane($: $, target: Target) {
 }
 
 const openPane = ($: $): Open => target => void showPane($, target)
-
-async function renderLearnPane($: $, e: Args<'ui.render'>) {
-  const [cfg, all, expanded, rows, scope] = await Promise.all([read($, config), read($, lessons), read($, learnOpen), read($, learnRows), read($, learnScope)])
-  return learnPaneView($.ui.resolve(e), { lessons: all, isLearning: cfg.isLearning, muted: cfg.learnMuted, expanded, rows, scope, repo: mem.repo }, {
-    setLearning: isOn => void setLearning($, isOn),
-    setMuted: (kind, isMuted) => void setMuted($, kind, isMuted),
-    toggle: kind => void update($, learnOpen, open => (open.includes(kind) ? open.filter(one => one !== kind) : [...open, kind])),
-    toggleRow: id => void update($, learnRows, open => (open.includes(id) ? open.filter(one => one !== id) : [...open, id])),
-    setScope: async next => {
-      await save($, STORE.learnScope, await update($, learnScope, () => next))
-      await markLessonsRead($)
-    },
-  })
-}
 
 /** Saved history plus the prompt still running, every repo; the Cost pane's History tab narrows it to one. */
 async function allRecords($: $): Promise<{ records: PromptRecord[]; now: number }> {
@@ -890,20 +866,16 @@ async function renderCard($: $, e: Args<'ui.render'>) {
 }
 
 async function renderBand($: $, e: Args<'ui.render'>) {
-  const [cfg, now, pending, costs, hp, kept, readAt, scope, records] = await Promise.all([
+  const [cfg, now, pending, costs, hp, records] = await Promise.all([
     read($, config),
     read($, active),
     read($, draft),
     read($, spend),
     read($, health),
-    read($, lessons),
-    read($, lessonsReadAt),
-    read($, learnScope),
     read($, handoffs),
   ])
   const handoffsOpen = !cfg.isHandoffs ? 0 : bandCount(records, segment(mem.repo), mem.kept.sessionId, await nowOf($))
-  const learnUnread = cfg.isLearning ? unreadCount(inScope(kept, scope), readAt, cfg.learnMuted, { since: mem.kept.since ?? 0, sessionId: mem.kept.sessionId }) : 0
-  const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp, learnUnread, handoffsOpen }
+  const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp, handoffsOpen }
   return bandView($.ui.resolve(e), data, { open: openPane($) })
 }
 
@@ -965,7 +937,6 @@ async function renderPane($: $, e: Args<'ui.render'>) {
     setBand: isShown => void setBand($, isShown),
     openHandoffs: () => openPane($)('handoffs'),
     setShowNext: isOn => void setShowNext($, isOn),
-    openLearn: () => openPane($)('learn'),
     setGuard: mode => void setConfig($, c => ({ ...c, coldGuard: mode })),
     setTtl: minutes => void setConfig($, c => ({ ...c, cacheTtlMinutes: minutes })),
     setKeepText: keep => void setKeepText($, keep),
@@ -989,7 +960,7 @@ const guardText = (cfg: RouterConfig, cold: { text: string }, tail: string) =>
   `model-router: ${cold.text} ${tail}${cfg.isLearning && !cfg.learnMuted.includes('cold-rewrite') ? `\n\nWhy: ${CONCEPTS['cold-rewrite'].body}` : ''}`
 
 const LEARN_ON_TEXT =
-  'Learn mode on: when a cache rewrite, a pricey model, a growing context or busy subagents cost you, a toast explains it with the numbers. /route learn lists them.'
+  'Learn mode on: when a cache rewrite, a pricey model, a growing context or busy subagents cost you, a card above the band explains it with the numbers, until your next prompt.'
 
 const HANDOFFS_ON_TEXT = 'Handoffs on: the band counts handoffs other sessions left open, and auto-handoff runs when it is on (/route handoffs auto on|off).'
 const HANDOFFS_OFF_TEXT = 'Handoffs off: no count in the band and no auto-handoff. Handoffs you save with /handoff are still listed in /route handoffs.'
@@ -1173,7 +1144,7 @@ async function recordStep($: $, agentId: string | undefined, key: string, s: Ste
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const [stored, saved, scope, band, learned, repo, storedLessons, readAt, lessonScope, storedHandoffs, handoffScopeSaved] = await Promise.all([
+    const [stored, saved, scope, band, learned, repo, storedLessons, storedHandoffs, handoffScopeSaved] = await Promise.all([
       load($, STORE.config),
       load($, STORE.history),
       load($, STORE.statsScope),
@@ -1181,8 +1152,6 @@ export const register: Register = on => {
       load($, STORE.modelCommands),
       $.session.repo().catch(() => null),
       load($, STORE.lessons),
-      load($, STORE.lessonsReadAt),
-      load($, STORE.learnScope),
       load($, STORE.handoffs),
       load($, STORE.handoffScope),
     ])
@@ -1200,9 +1169,7 @@ export const register: Register = on => {
     if (storedLessons !== UNREADABLE) await update($, lessons, () => sanitizeLessons(storedLessons))
     if (storedHandoffs !== UNREADABLE) await update($, handoffs, () => sanitizeHandoffs(storedHandoffs))
     if (handoffScopeSaved === 'repo' || handoffScopeSaved === 'all') await update($, handoffScope, () => handoffScopeSaved)
-    if (typeof readAt === 'number') await update($, lessonsReadAt, () => readAt)
     if (scope === 'repo' || scope === 'all') await update($, statsScope, () => scope)
-    if (lessonScope === 'repo' || lessonScope === 'all') await update($, learnScope, () => lessonScope)
     if (typeof band === 'boolean') await update($, isBandShown, () => band)
     const root = repo?.root ?? (await $.session.root().catch(() => ''))
     mem.repo = printable(repo?.name ?? (root.split('/').pop() || 'unknown'))
@@ -1232,6 +1199,7 @@ export const register: Register = on => {
     await refreshStatus($).catch(() => undefined)
     mem.tick?.cancel()
     mem.tick = $.clock.every(60_000, () => void refreshStatus($).catch(() => undefined))
+    if ((await $.ui.panes().catch(() => [])).some(one => one.id === OLD_LEARN_ID)) await $.ui.close({ id: OLD_LEARN_ID }).catch(() => undefined)
     await $.command.register({ name: 'route', description: 'Model router: open the pane, or one of the verbs', argumentHint: USAGE })
     return next(e)
   })
@@ -1446,13 +1414,14 @@ export const register: Register = on => {
       const { pane, tab } = paneOf(verb)
       return { text: tab === undefined ? `${PANES[pane].title} pane opened.` : `Cost pane opened on ${COST_TAB_LABEL[tab]}.` }
     }
+    if (verb === 'learn' && rest.length === 0) return { text: await learnStatus($) }
     if (verb === 'away') return { text: await awayReport($) }
     if (verb === 'unused') return { text: await unusedReport($) }
     if (!USER_ORIGINS.has(e.origin.kind)) return { text: `model-router: /route ${verb} only runs when you type it.` }
     if (verb === 'learn' && (rest[0] === 'on' || rest[0] === 'off')) {
       const isOn = rest[0] === 'on'
       await setLearning($, isOn)
-      return { text: isOn ? LEARN_ON_TEXT : 'Learn mode off. Lessons already kept stay in /route learn.' }
+      return { text: isOn ? LEARN_ON_TEXT : 'Learn mode off.' }
     }
     if (verb === 'learn' && (rest[0] === 'mute' || rest[0] === 'unmute')) {
       const kind = rest[1]
@@ -1536,8 +1505,6 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANES.cost.id }, ($, e) => renderCostPane($, e))
 
   for (const id of OLD_COST_IDS) on('ui.render', { component: 'Pane', requestId: id }, ($, e) => renderCostPane($, e))
-
-  on('ui.render', { component: 'Pane', requestId: PANES.learn.id }, ($, e) => renderLearnPane($, e))
 
   on('ui.render', { component: 'Pane', requestId: PANES.handoffs.id }, ($, e) => renderHandoffsPane($, e))
 

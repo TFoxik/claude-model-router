@@ -45,14 +45,14 @@ function healthRowView({ Text }: Els, health: Health | null, total: number) {
   )
 }
 
-type BandData = { cfg: RouterConfig; now: ActiveRoute | null; pending: RouterConfig | null; total: number; health: Health | null; learnUnread: number; handoffsOpen: number }
+type BandData = { cfg: RouterConfig; now: ActiveRoute | null; pending: RouterConfig | null; total: number; health: Health | null; handoffsOpen: number }
 
 /**
  * Always three rows, so the band never changes height: the route line and the health row are text across the full
  * width, and every button sits right-aligned on the last row, where a desktop's native button padding can't break the
  * left edge. Hiding lives in the Routes pane, away from the buttons pressed every day.
  */
-export function bandView(els: Els, { cfg, now, pending, total, health, learnUnread, handoffsOpen }: BandData, { open }: { open: Open }) {
+export function bandView(els: Els, { cfg, now, pending, total, health, handoffsOpen }: BandData, { open }: { open: Open }) {
   const { Box, Text, Button } = els
   return (
     <Box flexDirection="column">
@@ -71,7 +71,6 @@ export function bandView(els: Els, { cfg, now, pending, total, health, learnUnre
       </Box>
       <Box key="band-actions" flexDirection="row" justifyContent="flex-end" gap={1}>
         {handoffsOpen > 0 ? <Button key="band-handoffs" label={`Handoffs ●${handoffsOpen}`} plain onPress={() => open('handoffs')} /> : null}
-        {learnUnread > 0 ? <Button key="band-learn" label={`Learn ●${learnUnread}`} plain onPress={() => open('learn')} /> : null}
         {health?.advice === undefined ? null : (
           <Button key="advice" label={`next ${health.advice.command}`} variant="primary" onPress={() => open('context')} />
         )}

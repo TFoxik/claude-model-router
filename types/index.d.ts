@@ -124,10 +124,6 @@ declare module 'claude-code' {
       costTab: CostTab
       lessons: Lesson[]
       learnCard: LearnCard | null
-      lessonsReadAt: number
-      learnOpen: LessonKind[]
-      learnRows: string[]
-      learnScope: Scope
       carried: Carried | null
       handoffs: Handoffs
       handoffScope: Scope

@@ -42,7 +42,7 @@ const opus = MODELS.opus.id
 const sonnet = MODELS.sonnet.id
 const haiku = MODELS.haiku.id
 const MINE = withPreset(DEFAULT_CONFIG, 'mine')!
-const PANE_IDS = { route: 'model-router', cost: 'model-router-cost', context: 'model-router-ctx', learn: 'model-router-learn', handoffs: 'model-router-handoffs' } as const
+const PANE_IDS = { route: 'model-router', cost: 'model-router-cost', context: 'model-router-ctx', handoffs: 'model-router-handoffs' } as const
 const mountPane = ($: Engine, pane: keyof typeof PANE_IDS, surface: 'terminal' | 'desktop' = 'terminal') =>
   $.ui.mount({ plugin: 'model-router', surface, component: 'Pane', requestId: PANE_IDS[pane], props: {} as never })
 /** The Cost pane, switched to `tab` the way `/route cost <tab>` does. */
@@ -1105,16 +1105,30 @@ test('on a phone the card leaves the concept out', async ($, on) => {
   expect(await shownCard($, 'mobile')).toMatchObject({ title: '📚 Cache went cold', hasBody: false })
 })
 
-test('/route learn opens the pane from anywhere; on and off only when typed', async ($, on) => {
-  mock.store(on)
+test('/route learn prints learn mode and the muted topics from anywhere; on, off and mute only when typed', async ($, on) => {
+  mock.store(on, { config: { ...MINE, learnMuted: ['cold-rewrite'] } })
   guardSession(on, { context: 1000, usage: usageOf(1000) })
-  on('ui.open', () => ({ value: undefined }) as never)
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   const run = (args: string, kind: string) => $.command.run({ command: 'route', args, origin: { kind } } as unknown as Args<'command.run'>)
-  expect((await run('learn', 'peer')).text).toBe('Learn pane opened.')
+  expect((await run('learn', 'peer')).text).toBe('Learn mode is off.\nMuted: cold-rewrite (/route learn unmute cold-rewrite)')
   expect((await run('learn on', 'peer')).text).toMatch(/only runs when you type it/)
   expect((await run('learn on', 'composer')).text).toMatch(/^Learn mode on/)
-  expect((await run('learn off', 'composer')).text).toMatch(/^Learn mode off/)
+  await run('learn unmute cold-rewrite', 'composer')
+  expect((await run('learn', 'peer')).text).toBe('Learn mode is on.\nNo topics muted.')
+  expect((await run('learn off', 'composer')).text).toBe('Learn mode off.')
+})
+
+test('a Learn pane left open by an older version is closed at start', async ($, on) => {
+  mock.store(on)
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  const closed: string[] = []
+  on('ui.panes', () => ({ value: [{ id: 'model-router-learn', title: 'Learn', isShown: true, isFocused: false, isPlaced: true }] }) as never)
+  on('ui.close', (_$, e) => {
+    closed.push(e.id)
+    return { value: undefined } as never
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  expect(closed).toEqual(['model-router-learn'])
 })
 
 test('a failed lessons read never saves over them', async ($, on) => {
@@ -1136,26 +1150,6 @@ test('a failed lessons read never saves over them', async ($, on) => {
     await complete($, id)
   }
   expect(data.lessons).toEqual(kept)
-})
-
-test('the learn pane explains a kind until seen enough, toggles why, and offers to turn learn mode on', async ($, on) => {
-  const at = (i: number) => T0 + i * 60_000
-  const cold = [0, 1, 2].map(i => ({ kind: 'cold-rewrite', at: at(i), repo: 'unknown', fact: `cold ${i}` }))
-  const ctx = [{ kind: 'context-high', at: at(5), repo: 'unknown', fact: 'ctx 0' }]
-  mock.store(on, { config: MINE, lessons: [...cold, ...ctx] })
-  guardSession(on, { context: 1000, usage: usageOf(1000) })
-  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
-  const pane = await mountPane($, 'learn', 'desktop')
-  expect(await pane.find({ type: 'Text', text: 'Context is getting big' })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^Every turn sends the whole context again/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^Each request re-sends the whole conversation/ })).toBeUndefined()
-  expect(await pane.find({ type: 'Text', text: /cold 2$/ })).toBeDefined()
-  await pane.press({ key: 'why:cold-rewrite' })
-  expect(await pane.find({ type: 'Text', text: /^Each request re-sends the whole conversation/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^Learn mode is off/ })).toBeDefined()
-  await pane.press({ key: 'learn-on' })
-  expect(await pane.find({ type: 'Text', text: /^Learn mode is off/ })).toBeUndefined()
-  await pane.unmount()
 })
 
 /** A learning session over a 200k context on the mine preset, one warm prompt in. */
@@ -1216,131 +1210,18 @@ test('/route away prices stepping away for this session, from anywhere', async (
   expect(away.text).toContain('200k tokens of context on Opus 5.5, cache warm for 42m more (60-minute TTL).')
 })
 
-test('learn mode can be switched from the /route pane and the Learn pane', async ($, on) => {
+test('learn mode is switched from the /route pane, which no longer opens a Learn pane', async ($, on) => {
   mock.store(on, { config: MINE })
   guardSession(on, { context: 1000, usage: usageOf(1000) })
   on('session.model', () => ({ value: opus }))
   on('ui.open', () => ({ value: undefined }) as never)
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   const routes = await mountPane($, 'route', 'desktop')
-  expect(await routes.find({ type: 'Text', text: /^Learn mode/ })).toBeDefined()
   expect(await routes.find({ type: 'Text', text: /explains cache misses and model costs/ })).toBeDefined()
+  expect(await routes.find({ key: 'learn-open' })).toBeUndefined()
   await routes.press({ key: 'learn-toggle' })
   expect(await routes.find({ type: 'Text', text: /explains cache misses and model costs/ })).toBeUndefined()
   await routes.unmount()
-  const learn = await mountPane($, 'learn', 'desktop')
-  expect(await learn.find({ type: 'Text', text: /^Learn mode is off/ })).toBeUndefined()
-  await learn.press({ key: 'learn-off' })
-  expect(await learn.find({ type: 'Text', text: /^Learn mode is off/ })).toBeDefined()
-  await learn.unmount()
-})
-
-test('the Learn pane shows this repo first, and All tags each fact with its repo', async ($, on) => {
-  const lesson = (repo: string, at: number): Lesson => ({ kind: 'cold-rewrite', at, repo, fact: `fact in ${repo}` })
-  const saved: Record<string, unknown> = { config: { ...MINE, isLearning: true }, lessons: [lesson('unknown', 1), lesson('beta', 2)] }
-  sharedStore(on, saved)
-  guardSession(on, { context: 1000, usage: usageOf(1000) })
-  on('ui.open', () => ({ value: undefined }) as never)
-  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
-  const pane = await mountPane($, 'learn', 'desktop')
-  expect(await pane.find({ type: 'Text', text: 'Learn · unknown' })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /fact in unknown$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /fact in beta$/ })).toBeUndefined()
-  expect(await pane.find({ type: 'Text', text: 'unknown · ' })).toBeUndefined()
-  await pane.press({ key: 'scope-all' })
-  expect(await pane.find({ type: 'Text', text: 'Learn · all repos' })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: 'beta · ' })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: 'unknown · ' })).toBeDefined()
-  expect(saved.learnScope).toBe('all')
-  await pane.unmount()
-})
-
-test('an earlier Learn row shows whole on press, and the earlier ones past two show on demand', async ($, on) => {
-  const at = (i: number) => T0 + i * 60_000
-  const lessons: Lesson[] = [0, 1, 2, 3, 4].map(i => ({ kind: 'cold-rewrite', at: at(i), repo: 'unknown', fact: `fact ${i}` }))
-  mock.store(on, { config: { ...MINE, isLearning: true }, lessons })
-  guardSession(on, { context: 1000, usage: usageOf(1000) })
-  on('ui.open', () => ({ value: undefined }) as never)
-  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
-  for (const surface of ['terminal', 'desktop'] as const) {
-    const pane = await mountPane($, 'learn', surface)
-    expect(await pane.find({ type: 'Text', text: stamp(at(4)) })).toBeDefined()
-    expect(await pane.find({ type: 'Text', text: /fact 0$/ })).toBeUndefined()
-    expect(await pane.find({ type: 'Button', key: `row:cold-rewrite:${at(4)}` })).toBeUndefined()
-    const row = { type: 'Text', text: 'fact 3' } as const
-    expect((await pane.find(row))?.props).toMatchObject({ wrap: 'truncate-end', dimColor: true })
-    await pane.press({ key: `row:cold-rewrite:${at(3)}` })
-    expect((await pane.find(row))?.props).toMatchObject({ wrap: 'wrap', dimColor: false })
-    expect((await pane.find({ type: 'Button', key: `row:cold-rewrite:${at(3)}` }))?.text).toBe(stamp(at(3)))
-    await pane.press({ key: `row:cold-rewrite:${at(3)}` })
-    expect((await pane.find(row))?.props).toMatchObject({ wrap: 'truncate-end' })
-    expect(await pane.find({ type: 'Button', text: 'show 2 more' })).toBeDefined()
-    await pane.press({ key: 'all:cold-rewrite' })
-    expect(await pane.find({ type: 'Text', text: /fact 0$/ })).toBeDefined()
-    await pane.press({ key: 'all:cold-rewrite' })
-    expect(await pane.find({ type: 'Text', text: 'Habits' })).toBeDefined()
-    await pane.unmount()
-  }
-})
-
-test('the Learn pane points to other repos when this one has no lessons', async ($, on) => {
-  mock.store(on, { config: { ...MINE, isLearning: true }, lessons: [{ kind: 'cold-rewrite', at: 1, repo: 'beta', fact: 'elsewhere' }] })
-  guardSession(on, { context: 1000, usage: usageOf(1000) })
-  on('ui.open', () => ({ value: undefined }) as never)
-  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
-  const pane = await mountPane($, 'learn', 'desktop')
-  expect(await pane.find({ type: 'Text', text: 'No lessons in unknown yet; 1 lesson in other repos under All.' })).toBeDefined()
-  await pane.unmount()
-})
-
-test('the band counts unread lessons in the Learn pane scope, from this session only', async ($, on) => {
-  const lesson = (repo: string, at: number): Lesson => ({ kind: 'cold-rewrite', at, repo, fact: `fact in ${repo}`, isToasted: true })
-  const saved: Record<string, unknown> = { config: { ...MINE, isLearning: true }, lessons: [lesson('unknown', T0 - 1), lesson('unknown', T0 + 1), lesson('beta', T0 + 2), lesson('beta', T0 + 3)] }
-  sharedStore(on, saved)
-  const clock = mock.clock(on, { now: T0 })
-  guardSession(on, { context: 1000, usage: usageOf(1000) })
-  on('ui.open', () => ({ value: undefined }) as never)
-  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
-  const mountBand = () => $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
-  const band = await mountBand()
-  expect(await band.find({ type: 'Button', text: 'Learn ●1' })).toBeDefined()
-  await band.unmount()
-  const pane = await mountPane($, 'learn', 'desktop')
-  await pane.press({ key: 'scope-all' })
-  await pane.unmount()
-  expect(saved.lessonsReadAt).toBe(T0 + 3)
-  saved.lessons = [...(saved.lessons as Lesson[]), lesson('beta', T0 + 4)]
-  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
-  const all = await mountBand()
-  expect(await all.find({ type: 'Button', text: 'Learn ●1' })).toBeDefined()
-  await all.unmount()
-  await clock.advance(10)
-  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
-  const fresh = await mountBand()
-  expect(await fresh.find({ type: 'Button', text: /^Learn/ })).toBeUndefined()
-  await fresh.unmount()
-  saved.lessons = [...(saved.lessons as Lesson[]), lesson('unknown', T0 + 15)]
-  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
-  await clock.advance(10)
-  const before = await mountBand()
-  expect(await before.find({ type: 'Button', text: 'Learn ●1' })).toBeDefined()
-  await before.unmount()
-  await $.command.run({ command: 'clear', args: '', origin: { kind: 'user' } } as unknown as Args<'command.run'>)
-  const cleared = await mountBand()
-  expect(await cleared.find({ type: 'Button', text: /^Learn/ })).toBeUndefined()
-  await cleared.unmount()
-})
-
-test('the band leaves out lessons another session in the same repo made meanwhile', async ($, on) => {
-  const lesson = (sessionId: string, at: number): Lesson => ({ kind: 'cold-rewrite', at, repo: 'unknown', fact: `fact in ${sessionId}`, isToasted: true, sessionId })
-  sharedStore(on, { config: { ...MINE, isLearning: true }, lessons: [lesson('other', T0 + 1), lesson('other', T0 + 2), lesson('mine', T0 + 3)] })
-  mock.clock(on, { now: T0 })
-  guardSession(on, { context: 1000, usage: usageOf(1000) })
-  on('session.id', () => ({ value: 'mine' }) as never)
-  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
-  const band = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
-  expect(await band.find({ type: 'Button', text: 'Learn ●1' })).toBeDefined()
-  await band.unmount()
 })
 
 const okTool = (on: On) => on('tool.call', () => ({ result: '', text: 'ok' }) as never)
@@ -1361,7 +1242,7 @@ test('a commit over a big context turns the band to next /clear until the next p
   const band = await bandOf($)
   expect((await band.find({ key: 'advice' }))?.text).toBe('next /clear')
   expect(await band.find({ type: 'Text', text: /next \/clear/ })).toBeUndefined()
-  expect(await buttonKeys(band)).toEqual(['band-learn', 'advice', 'ctx', 'band-cost', 'band-open'])
+  expect(await buttonKeys(band)).toEqual(['advice', 'ctx', 'band-cost', 'band-open'])
   await band.unmount()
   await prompt('d')
   const after = await bandOf($)
@@ -1565,8 +1446,8 @@ test('pressing a pane that is open behind another brings it to the front', async
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   const calls: string[] = []
-  const shown = { current: 'model-router-learn' }
-  on('ui.panes', () => ({ value: ['model-router-cost', 'model-router-learn'].map(id => ({ id, title: id, isShown: id === shown.current, isFocused: false, isPlaced: true })) }) as never)
+  const shown = { current: 'model-router-handoffs' }
+  on('ui.panes', () => ({ value: ['model-router-cost', 'model-router-handoffs'].map(id => ({ id, title: id, isShown: id === shown.current, isFocused: false, isPlaced: true })) }) as never)
   on('ui.close', (_$, e) => {
     calls.push(`close ${e.id}`)
     return { value: undefined } as never

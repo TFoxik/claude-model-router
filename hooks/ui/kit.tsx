@@ -8,12 +8,14 @@ export const PANES = {
   route: { id: 'model-router', title: 'Routes' },
   cost: { id: 'model-router-cost', title: 'Cost' },
   context: { id: 'model-router-ctx', title: 'Context' },
-  learn: { id: 'model-router-learn', title: 'Learn' },
   handoffs: { id: 'model-router-handoffs', title: 'Handoffs' },
 } as const
 
 /** Ids of panes merged into Cost: one left open across an update still renders. */
 export const OLD_COST_IDS = ['model-router-last', 'model-router-stats'] as const
+
+/** The Learn pane's id before the card replaced it: one left open across an update is closed at start. */
+export const OLD_LEARN_ID = 'model-router-learn'
 
 export const COST_TABS: readonly CostTab[] = ['last', 'session', 'history']
 export const COST_TAB_LABEL: Record<CostTab, string> = { last: 'Last prompt', session: 'Session', history: 'History' }
@@ -25,7 +27,6 @@ const TARGETS = {
   route: { pane: 'route' },
   cost: { pane: 'cost' },
   context: { pane: 'context' },
-  learn: { pane: 'learn' },
   handoffs: { pane: 'handoffs' },
   last: { pane: 'cost', tab: 'last' },
   session: { pane: 'cost', tab: 'session' },

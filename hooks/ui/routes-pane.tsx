@@ -72,7 +72,6 @@ type PaneActions = {
   setBand: (isShown: boolean) => void
   openHandoffs: () => void
   setShowNext: (isOn: boolean) => void
-  openLearn: () => void
   setGuard: (mode: ColdGuard) => void
   setTtl: (minutes: number) => void
   setKeepText: (keep: boolean) => void
@@ -130,7 +129,7 @@ function settingsSection(els: InputEls, { cfg, isBand }: PaneData, a: PaneAction
       <Text bold dimColor>SETTINGS</Text>
       <Box flexDirection="column" gap={1}>
         {group('Coaching')}
-        {toggle('learn', 'Learn mode', cfg.isLearning, a.setLearning, 'explains cache misses and model costs with your own numbers, when they happen', <Button key="learn-open" label="Open" onPress={a.openLearn} />)}
+        {toggle('learn', 'Learn mode', cfg.isLearning, a.setLearning, 'explains cache misses and model costs with your own numbers, when they happen')}
         {toggle('next', 'Next-step advice', cfg.showNext, a.setShowNext, 'shows next /clear, /compact or /handoff in the band when carrying on is not the best move')}
       </Box>
       <Box flexDirection="column" gap={1}>

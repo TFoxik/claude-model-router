@@ -3,11 +3,9 @@ import { expect, test } from 'claude-code/testing'
 import type { Lesson, PromptCost, PromptItem } from '../types'
 import {
   CONCEPTS,
-  HABITS,
   TOPICS,
   awayOptions,
   awayText,
-  byKind,
   capLessons,
   cardOf,
   lessonFromAdvice,
@@ -21,7 +19,6 @@ import {
   lessonsFromPrompt,
   pickLesson,
   sanitizeLessons,
-  unreadCount,
 } from './lessons'
 import { MODELS } from './routes'
 import { adviseSession } from './strategy'
@@ -180,27 +177,6 @@ test('cardOf: the concept until the kind has been shown once, and how many other
   expect(cardOf(cold, [lesson({ kind: 'subagents', isToasted: true })], 1).isFirst).toBe(true)
 })
 
-test('unreadCount: new and toasted lessons, not quiet repeats or muted kinds', () => {
-  const toasted = lesson({ kind: 'pricey-model', at: T0, isToasted: true })
-  const repeats = [1, 2, 3].map(i => lesson({ kind: 'pricey-model', at: T0 + i }))
-  const neverToasted = lesson({ kind: 'subagents', at: T0 + 4 })
-  const all = [toasted, ...repeats, neverToasted]
-  expect(unreadCount(all, 0, [])).toBe(2)
-  expect(unreadCount(all, T0, [])).toBe(1)
-  expect(unreadCount(all, 0, ['subagents'])).toBe(1)
-  expect(unreadCount(all, 0, ['pricey-model', 'subagents'])).toBe(0)
-  expect(unreadCount(all, 0, [], { since: T0 + 4 })).toBe(1)
-  expect(unreadCount(all, 0, [], { since: T0 + 5 })).toBe(0)
-})
-
-test('unreadCount: with a session id, only that session counts; lessons without one are older than ids', () => {
-  const mine = lesson({ kind: 'subagents', at: T0 + 2, sessionId: 'a' })
-  const other = lesson({ kind: 'cold-rewrite', at: T0 + 3, sessionId: 'b', isToasted: true })
-  const legacy = lesson({ kind: 'pricey-model', at: T0 + 4, isToasted: true })
-  expect(unreadCount([mine, other, legacy], 0, [], { since: T0, sessionId: 'a' })).toBe(1)
-  expect(unreadCount([mine, other, legacy], 0, [], { since: T0 })).toBe(3)
-})
-
 test('capLessons keeps the last 20 of each kind, in order', () => {
   const many = Array.from({ length: 30 }, (_, i) => lesson({ kind: 'pricey-model', at: i }))
   const mixed = [lesson({ kind: 'cold-rewrite', at: -1 }), ...many]
@@ -217,13 +193,6 @@ test('sanitizeLessons drops what this version does not understand', () => {
   expect(sanitizeLessons({})).toEqual([])
   expect(sanitizeLessons([{ ...good, sessionId: 's' }, { ...good, sessionId: 3 }])).toEqual([{ ...good, sessionId: 's' }])
   expect(sanitizeLessons([lesson({ repo: 'r\u001b', fact: 'f\u0007' })])).toEqual([lesson({ repo: 'r ', fact: 'f ' })])
-})
-
-test('byKind groups newest first', () => {
-  const a = lesson({ kind: 'cold-rewrite', at: 1 })
-  const b = lesson({ kind: 'subagents', at: 2 })
-  const c = lesson({ kind: 'cold-rewrite', at: 3 })
-  expect(byKind([a, b, c])).toEqual([['cold-rewrite', [c, a]], ['subagents', [b]]])
 })
 
 test('awayText prices the ways to step away for this session', () => {
@@ -285,8 +254,7 @@ test('exploration and auto-handoff lessons carry their numbers', () => {
   expect(lessonFromAutoHandoff({ spentUsd: 0, avoidedUsd: 0, tokens: 140_000, path: 'x.md' }).fact).toBe('Saved a handoff to x.md before the cache went cold. /route handoffs auto off turns this off.')
 })
 
-test('every lesson kind has a concept, and the habits are the three agreed', () => {
+test('every lesson kind has a concept', () => {
   for (const kind of TOPICS) expect(CONCEPTS[kind].title.length).toBeGreaterThan(0)
   expect(TOPICS).toContain('auto-handoff')
-  expect(HABITS.map(one => one.title)).toEqual(['/clear between unrelated tasks', '/btw for side questions', 'Esc Esc to rewind'])
 })

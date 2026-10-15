@@ -5,7 +5,7 @@ import { ENGINE, FORK, GUARD_MIN_TOKENS, MODELS, PRICES_AS_OF, costOf, fmtAge, i
 export type LessonDraft = Pick<Lesson, 'kind' | 'fact' | 'usd'>
 type Level = Health['ctxLevel']
 
-export const SEEN_ENOUGH = 3
+const SEEN_ENOUGH = 3
 const TOAST_COOLDOWN_MS = 3_600_000
 const PER_KIND = 20
 export const MIN_REWRITE_USD = 0.05
@@ -237,13 +237,6 @@ export function lessonFromAutoHandoff({ spentUsd, avoidedUsd, tokens, path }: Au
   }
 }
 
-/** Good habits no hook can spot, shown in the Learn pane whether learn mode is on or off. */
-export const HABITS: ReadonlyArray<{ title: string; body: string }> = [
-  { title: '/clear between unrelated tasks', body: 'A new topic on top of an old one pays to re-read it on every turn, and the old one distracts Claude.' },
-  { title: '/btw for side questions', body: 'The answer never enters the conversation, so a quick check costs no context.' },
-  { title: 'Esc Esc to rewind', body: 'Restore to before a bad turn instead of correcting on top of it: the failed attempt leaves the context too.' },
-]
-
 export function lessonFromCompact(beforeTokens: number): LessonDraft {
   const from = beforeTokens > 0 ? ` from about ${kTokens(beforeTokens)} tokens` : ''
   return {
@@ -268,17 +261,6 @@ export function cardOf(pick: Lesson, earlier: readonly Lesson[], freshCount: num
   return { kind: pick.kind, fact: pick.fact, isFirst, more: Math.max(0, freshCount - 1) }
 }
 
-/**
- * Lessons the band counts as unread: those that toasted, and those of a kind that has not toasted yet.
- * Quiet repeats of a kind already taught (a routed Opus main loop teaches pricey-model every prompt) stay in the pane only.
- * Only this session's count: another session's lessons, and this one's from before its start or last /clear, stay in the pane only too.
- */
-export function unreadCount(lessons: readonly Lesson[], readAt: number, muted: readonly LessonKind[], session: { since: number; sessionId?: string } = { since: 0 }): number {
-  const taught = new Set(lessons.filter(one => one.isToasted).map(one => one.kind))
-  const isThisSession = (one: Lesson) => one.at >= session.since && (session.sessionId === undefined || one.sessionId === session.sessionId)
-  return lessons.filter(one => one.at > readAt && isThisSession(one) && !muted.includes(one.kind) && (one.isToasted || !taught.has(one.kind))).length
-}
-
 /** The last PER_KIND lessons of each kind, so a lesson that fires every prompt can't crowd out the rest. */
 export function capLessons(list: readonly Lesson[]): Lesson[] {
   const counts = new Map<LessonKind, number>()
@@ -300,17 +282,6 @@ const isLesson = (l: unknown): l is Lesson => {
 
 export const sanitizeLessons = (stored: unknown): Lesson[] =>
   Array.isArray(stored) ? capLessons(stored.filter(isLesson)).map(one => ({ ...one, repo: printable(one.repo), fact: printable(one.fact) })) : []
-
-/** Kinds ordered by their newest lesson, each with its lessons newest first. */
-export function byKind(lessons: readonly Lesson[]): Array<[LessonKind, Lesson[]]> {
-  const groups = new Map<LessonKind, Lesson[]>()
-  for (const one of [...lessons].sort((a, b) => b.at - a.at)) {
-    const group = groups.get(one.kind)
-    if (group === undefined) groups.set(one.kind, [one])
-    else group.push(one)
-  }
-  return [...groups.entries()]
-}
 
 const NOTE_TOKENS = 1_000
 const SUMMARY_TOKENS = 4_000
