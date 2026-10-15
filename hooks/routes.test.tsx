@@ -36,6 +36,7 @@ import {
   routeForSpawn,
   shouldSwitch,
   labelOf,
+  versionOf,
 } from './routes'
 
 const opus = MODELS.opus.id
@@ -1171,6 +1172,55 @@ test('/route learn prints learn mode and the muted topics from anywhere; on, off
   await run('learn unmute cold-rewrite', 'composer')
   expect((await run('learn', 'peer')).text).toBe('Learn mode is on.\nNo topics muted.')
   expect((await run('learn off', 'composer')).text).toBe('Learn mode off.')
+})
+
+test('versionOf reads a plausible version from plugin.json, nothing else', () => {
+  expect(versionOf('{ "name": "model-router", "version": "1.6.0" }')).toBe('1.6.0')
+  expect(versionOf('{ "version": "2.0.0-beta.1" }')).toBe('2.0.0-beta.1')
+  expect(versionOf('{ "version": "1.6.0\u001b[2J" }')).toBeUndefined()
+  expect(versionOf('{ "version": 3 }')).toBeUndefined()
+  expect(versionOf('{}')).toBeUndefined()
+  expect(versionOf('not json')).toBeUndefined()
+})
+
+/** A session whose plugin.json says `manifest.version`, its store in `data`, toasts collected. */
+function versionSession(on: On, data: Record<string, unknown>, unreadable = new Set<string>()) {
+  sharedStore(on, data, unreadable)
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  const manifest = { version: '1.5.0' }
+  on('fs.read', (_$, e) => ({ value: e.path.endsWith('/.claude-plugin/plugin.json') ? JSON.stringify(manifest) : '' }) as never)
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined } as never
+  })
+  return { manifest, toasts }
+}
+
+test('a new version says so once after it loads; the first run and the same version stay quiet', async ($, on) => {
+  const data: Record<string, unknown> = { config: MINE }
+  const { manifest, toasts } = versionSession(on, data)
+  const start = () => $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await start()
+  expect(data.version).toBe('1.5.0')
+  expect(toasts).toEqual([])
+  await start()
+  expect(toasts).toEqual([])
+  manifest.version = '1.6.0'
+  await start()
+  expect(toasts).toEqual(['model-router 1.6.0 loaded (was 1.5.0)'])
+  expect(data.version).toBe('1.6.0')
+  await start()
+  expect(toasts).toHaveLength(1)
+})
+
+test('a failed store read never toasts or saves a version', async ($, on) => {
+  const data: Record<string, unknown> = { config: MINE, version: '1.5.0' }
+  const { manifest, toasts } = versionSession(on, data, new Set(['version']))
+  manifest.version = '1.6.0'
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  expect(toasts).toEqual([])
+  expect(data.version).toBe('1.5.0')
 })
 
 test('a Learn pane left open by an older version is closed at start', async ($, on) => {

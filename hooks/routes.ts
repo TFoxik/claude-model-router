@@ -498,6 +498,16 @@ export const contextFill = (tokens: number, window: number, compactAt?: number) 
 
 export const HISTORY_LIMIT = 2000
 
+/** The `version` of a plugin.json, when it is a plain semver one: anything else is never shown. */
+export function versionOf(manifest: string): string | undefined {
+  try {
+    const version = (JSON.parse(manifest) as { version?: unknown }).version
+    return typeof version === 'string' && /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version) ? version : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function commandLabel(text: string): string {
   const first = printable(text).trim().split(/\s+/)[0] ?? ''
   return first.startsWith('/') && first.length > 1 ? first : 'prompt'

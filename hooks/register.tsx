@@ -66,6 +66,7 @@ import {
   subagentCount,
   sumUsd,
   todayUsd,
+  versionOf,
   warmMinutesLeft,
   withoutText,
   withPreset,
@@ -120,7 +121,7 @@ type $ = EngineInterface
 
 // The store keys the atoms kept across sessions are saved under. The engine's
 // scan needs each update() to name its atom, so callers update, then save().
-const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown', modelCommands: 'modelCommands', lessons: 'lessons', toolUse: 'toolUse', connectorNames: 'connectorNames', handoffs: 'handoffs', handoffScope: 'handoffScope' } as const
+const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown', modelCommands: 'modelCommands', lessons: 'lessons', toolUse: 'toolUse', connectorNames: 'connectorNames', handoffs: 'handoffs', handoffScope: 'handoffScope', version: 'version' } as const
 
 /** Saves a value kept across sessions; a failed save keeps the session going. */
 async function save<T>($: $, key: string, value: T): Promise<T> {
@@ -430,6 +431,15 @@ async function awayFacts($: $, cfg: RouterConfig, tokens?: number): Promise<Away
   tokens ??= (await $.session.usage()).context.tokens ?? promptTokens(last)
   const warmMinutes = warmMinutesLeft(last.at, await nowOf($), cfg.cacheTtlMinutes)
   return { tokens, model: await routedMainModel($, cfg, last.model), ttlMinutes: cfg.cacheTtlMinutes, warmMinutes }
+}
+
+/** Says once which version runs after an update reaches this session; the first run only remembers it. */
+async function noteVersion($: $) {
+  const [seen, manifest] = await Promise.all([load($, STORE.version), $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`).catch(() => undefined)])
+  const now = typeof manifest === 'string' ? versionOf(manifest) : undefined
+  if (seen === UNREADABLE || now === undefined || now === seen) return
+  await save($, STORE.version, now)
+  if (typeof seen === 'string') $.ui.toast(`model-router ${now} loaded (was ${seen})`)
 }
 
 async function closeOldLearnPane($: $) {
@@ -1211,6 +1221,7 @@ export const register: Register = on => {
     mem.tick?.cancel()
     mem.tick = $.clock.every(60_000, () => void refreshStatus($).catch(() => undefined))
     void closeOldLearnPane($)
+    void noteVersion($).catch(() => undefined)
     await $.command.register({ name: 'route', description: 'Model router: open the pane, or one of the verbs', argumentHint: USAGE })
     return next(e)
   })

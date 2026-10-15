@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.7.0 — 2026-10-15
+
+### Added
+
+- **The router says when an update reaches your session.** After `claude plugin update` and `/reload-plugins` (or a restart), a toast says `model-router 1.7.0 loaded (was 1.6.0)` once, so you know the new version is running. A first install and further reloads of the same version stay quiet.
+
 ## 1.6.0 — 2026-10-15
 
 ### Changed
