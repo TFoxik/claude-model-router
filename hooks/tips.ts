@@ -7,8 +7,13 @@ import { isExplorationHeavy } from './signals'
 import type { Advice } from './strategy'
 
 export type Breakdown = SessionContextBreakdown
-/** `weight` ranks tips within one pane: tokens in Context, dollars in Last and Stats; `replaces` names a tip this one says more than. */
-export type Tip = { key: string; text: string; weight: number; replaces?: string }
+/**
+ * `weight` ranks tips within one pane: tokens in Context, dollars in Last and Stats; `replaces` names a tip this one says more than;
+ * `action` is what its button does; `title`, when set, leads in bold with `text` dimmed under it.
+ */
+export type Tip = { key: string; text: string; weight: number; replaces?: string; action?: TipAction; title?: string }
+/** What a tip's button does: put `command` in the prompt for the person to run, or with `isSlash` run the slash command `command` names, as a menu like /mcp. */
+export type TipAction = { label: string; command: string; isSlash?: boolean }
 
 const MEMORY_MIN = 3000
 const MCP_SERVER_MIN = 5000
@@ -48,10 +53,10 @@ function byCause(rewrites: readonly Rewrite[]): Array<[Rewrite['cause'], number]
 // The engine names no kind for the conversation row, so this matches /context's label; a rename only silences the advice that uses it.
 export const messagesOf = (b: Breakdown) => b.categories.find(one => one.kind === 'used' && one.name === 'Messages')?.tokens ?? 0
 
-type ContextExtras = { advice?: Pick<Advice, 'verdict' | 'text'>; more?: readonly Tip[]; explored?: number }
+type ContextExtras = { advice?: Pick<Advice, 'verdict' | 'text'>; more?: readonly Tip[]; explored?: number; drop?: ReadonlySet<string> }
 
-/** What to trim in the context window, biggest first, from the /context breakdown; advice to compact or clear comes first, and `more` joins the ranking. */
-export function contextTips(b: Breakdown, { advice, more = [], explored = 0 }: ContextExtras = {}): Tip[] {
+/** What to trim in the context window, biggest first, from the /context breakdown; advice to compact or clear comes first, `more` joins the ranking, and tips keyed in `drop` are left out, said better elsewhere. */
+export function contextTips(b: Breakdown, { advice, more = [], explored = 0, drop = new Set() }: ContextExtras = {}): Tip[] {
   const tips: Tip[] = [...more]
   if (advice !== undefined && advice.verdict !== 'continue') tips.push({ key: `advice:${advice.verdict}`, weight: Infinity, text: advice.text })
 
@@ -82,7 +87,7 @@ export function contextTips(b: Breakdown, { advice, more = [], explored = 0 }: C
       text: `File reads and searches put ${kTokens(explored)} tokens (${pct(explored / b.totalTokens)}) into the main context: next time ask for a subagent ('use a subagent to find…'). It reads in its own context, and /route set sub:Explore haiku makes it cheap.`,
     })
   }
-  return top(tips)
+  return top(tips.filter(one => !drop.has(one.key)))
 }
 
 /** What the last prompt's spend says to change: the learn-mode lessons for it, with an action, and its cache rewrites. */

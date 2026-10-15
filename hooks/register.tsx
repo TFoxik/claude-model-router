@@ -82,8 +82,9 @@ import type { Steps } from './signals'
 import { adviseSession, boundaryOf } from './strategy'
 import type { Boundary } from './strategy'
 import { messagesOf, tokensByServer } from './tips'
-import { DEV_PATIENCE, PATIENCE, applyUsage, connectedServers, idleItems, idleReport, idleTips, itemOfCommand, itemOfToolCall, mcpKey, patienceText, pluginKey, pluginName, pluginOfMcpTool, pluginServer, sanitizeUsage } from './usage'
-import type { ItemKey, Patience, UsageStore } from './usage'
+import type { TipAction } from './tips'
+import { DEV_PATIENCE, PATIENCE, applyUsage, claudeAiKey, claudeAiReport, claudeAiTips, connectedServers, connectorAliases, idleItems, idleReport, idleTips, itemOfCommand, itemOfToolCall, listingTokens, mcpKey, mergeAliases, onlyHere, patienceText, pluginKey, pluginName, pluginOfMcpTool, pluginServer, sanitizeAliases, sanitizeUsage, skillKey, skillReport, skillTips, sourcesOfLock, syncedSkillNames } from './usage'
+import type { ItemKey, OwnSkill, Patience, UsageStore } from './usage'
 import { bandView } from './ui/band'
 import { contextMobileView, contextPaneView } from './ui/context-pane'
 import { COST_TAB_LABEL, OLD_COST_IDS, PANES, isTarget, paneOf } from './ui/kit'
@@ -124,7 +125,7 @@ type $ = EngineInterface
 
 // The store keys the atoms kept across sessions are saved under. The engine's
 // scan needs each update() to name its atom, so callers update, then save().
-const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown', modelCommands: 'modelCommands', lessons: 'lessons', lessonsReadAt: 'lessonsReadAt', learnScope: 'learnScope', toolUse: 'toolUse', handoffs: 'handoffs', handoffScope: 'handoffScope' } as const
+const STORE = { config: 'config', history: 'history', statsScope: 'statsScope', bandShown: 'bandShown', modelCommands: 'modelCommands', lessons: 'lessons', lessonsReadAt: 'lessonsReadAt', learnScope: 'learnScope', toolUse: 'toolUse', connectorNames: 'connectorNames', handoffs: 'handoffs', handoffScope: 'handoffScope' } as const
 
 /** Saves a value kept across sessions; a failed save keeps the session going. */
 async function save<T>($: $, key: string, value: T): Promise<T> {
@@ -504,8 +505,23 @@ async function maybeAutoHandoff($: $, cfg: RouterConfig, warm: { warmMinutes: nu
 /** Every slash command, or none when the engine can't say. */
 const listCommands = ($: $) => $.command.list().catch(() => [])
 
-/** `names`: what to show for a key; `owners`: the plugin key behind a plugin-shipped server's key; `commands`: the plugin key behind a slash command. */
-type Loaded = { keys: ItemKey[]; names: Record<ItemKey, string>; owners: Record<ItemKey, ItemKey>; commands: Record<string, ItemKey>; plugins: string[] }
+/**
+ * `names`: what to show for a key; `owners`: the plugin key behind a plugin-shipped server's key; `commands`: the plugin or own-skill key behind a slash command;
+ * `own`: your own skills and commands under ~/.claude by key, and `ownNames` the same by name;
+ * `aliases`: the `claude_ai_<Name>` key of each desktop-app connector id; `synced`: claude.ai skills by every spelling a call uses, and `syncedCount` how many are loaded.
+ */
+type Loaded = {
+  keys: ItemKey[]
+  names: Record<ItemKey, string>
+  owners: Record<ItemKey, ItemKey>
+  commands: Record<string, ItemKey>
+  plugins: string[]
+  own: Record<ItemKey, OwnSkill>
+  ownNames: Set<string>
+  aliases: Record<ItemKey, ItemKey>
+  synced: Map<string, string>
+  syncedCount: number
+}
 
 // What is loaded changes only on /mcp, /plugin or a reload, so a minute-old answer serves a pane that redraws often.
 const LOADED_TTL_MS = 60_000
@@ -524,8 +540,53 @@ async function loadedItems($: $): Promise<Loaded> {
 /** What was last loaded, however old, for hot paths that only need the plugin list or command names. */
 const cachedLoaded = ($: $) => mem.loaded?.value ?? loadedItems($)
 
+/** Your skills (a folder or a link with a SKILL.md) and commands (`.md` files) under ~/.claude, with where the `skills` CLI installed each from. */
+async function ownSkills($: $): Promise<OwnSkill[]> {
+  const home = mem.home ?? (await $.env.get('HOME').catch(() => undefined))
+  if (home === undefined) return []
+  const [skills, commands, lock] = await Promise.all([
+    $.fs.list(`${home}/.claude/skills`).catch(() => []),
+    $.fs.list(`${home}/.claude/commands`).catch(() => []),
+    $.fs.read(`${home}/.agents/.skill-lock.json`).then(sourcesOfLock, () => ({}) as Record<string, string>),
+  ])
+  const found = await Promise.all(
+    skills
+      .filter(one => !one.name.startsWith('.') && (one.kind === 'dir' || one.isLink))
+      .map(async one =>
+        (await $.fs.exists(`${home}/.claude/skills/${one.name}/SKILL.md`).catch(() => false))
+          ? [{ name: one.name, kind: 'skill' as const, isLink: one.isLink, ...(lock[one.name] === undefined ? {} : { source: lock[one.name] }) }]
+          : [],
+      ),
+  )
+  const files = commands
+    .filter(one => !one.name.startsWith('.') && one.name.endsWith('.md') && (one.kind === 'file' || one.isLink))
+    .map(one => ({ name: one.name.slice(0, -'.md'.length), kind: 'command' as const, isLink: one.isLink }))
+  return [...found.flat(), ...files]
+}
+
+/**
+ * Connector names: what /context shows now, over what earlier sessions saved,
+ * so an id the app no longer lists still merges into its name. Saved when
+ * something new turns up.
+ */
+function connectorNames($: $, stored: unknown, mcpTools: ReadonlyArray<{ name: string; serverName: string }>): Record<ItemKey, ItemKey> {
+  const known = stored === UNREADABLE ? {} : sanitizeAliases(stored)
+  const fresh = connectorAliases(mcpTools)
+  const merged = { ...known, ...fresh }
+  if (stored !== UNREADABLE && Object.entries(fresh).some(([id, key]) => known[id] !== key)) void save($, STORE.connectorNames, merged)
+  return merged
+}
+
 async function fetchLoaded($: $): Promise<Loaded> {
-  const [tools, settings, list] = await Promise.all([$.tool.list().catch(() => []), $.settings.read().catch(() => ({}) as Record<string, unknown>), listCommands($)])
+  const [tools, settings, list, ownList, breakdown, storedNames] = await Promise.all([
+    $.tool.list().catch(() => []),
+    $.settings.read().catch(() => ({}) as Record<string, unknown>),
+    listCommands($),
+    ownSkills($),
+    $.session.usage({ breakdown: 'summary' }).then(u => u.context.breakdown).catch(() => undefined),
+    load($, STORE.connectorNames),
+  ])
+  const aliases = connectorNames($, storedNames, breakdown?.mcpTools ?? [])
   const enabled = settings.enabledPlugins
   const ids = Object.entries(typeof enabled === 'object' && enabled !== null ? enabled : {})
     .filter(([id, isOn]) => isOn === true && pluginName(id) !== $.plugin.name)
@@ -538,7 +599,7 @@ async function fetchLoaded($: $): Promise<Loaded> {
   }
   const seen = new Set(Object.values(commands))
   const allMcp = tools.filter(one => one.mcp).map(one => one.name)
-  const keys = new Set(connectedServers(allMcp))
+  const keys = new Set(connectedServers(allMcp, aliases))
   const names: Record<ItemKey, string> = {}
   const owners: Record<ItemKey, ItemKey> = {}
   for (const tool of allMcp) {
@@ -554,7 +615,21 @@ async function fetchLoaded($: $): Promise<Loaded> {
     keys.add(pluginKey(id))
     names[pluginKey(id)] = id
   }
-  return { keys: [...keys], names, owners, commands, plugins }
+  const own: Record<ItemKey, OwnSkill> = {}
+  for (const one of ownList) {
+    const key = skillKey(one.name)
+    own[key] = one
+    keys.add(key)
+    names[key] = one.name
+    commands[one.name] ??= key
+  }
+  const synced = syncedSkillNames(breakdown?.skills?.skillFrontmatter ?? [])
+  const listed = new Set(synced.values())
+  for (const name of listed) {
+    keys.add(claudeAiKey(name))
+    names[claudeAiKey(name)] = name
+  }
+  return { keys: [...keys], names, owners, commands, plugins, own, ownNames: new Set(ownList.map(one => one.name)), aliases, synced, syncedCount: listed.size }
 }
 
 function noteUse(key: ItemKey, at: number, calls: number) {
@@ -562,9 +637,11 @@ function noteUse(key: ItemKey, at: number, calls: number) {
   mem.kept.used[key] = { calls: (was?.calls ?? 0) + calls, lastUsed: Math.max(was?.lastUsed ?? at, at) }
 }
 
-/** The MCP server and plugin a tool use counts toward, if any. */
+/** The MCP server, plugin or own skill a tool use counts toward, if any. */
 async function itemsOfToolUse($: $, tool: string, input: Record<string, unknown>): Promise<ItemKey[]> {
-  const direct = itemOfToolCall(tool, input)
+  // Only a Skill call needs the loaded names; a connector id is merged into its name when usage is saved.
+  const known = tool === 'Skill' ? await cachedLoaded($) : undefined
+  const direct = itemOfToolCall(tool, input, known?.ownNames, known?.synced)
   if (direct === undefined) return []
   const owner = direct.startsWith('mcp:plugin_') ? pluginOfMcpTool(tool, (await cachedLoaded($)).plugins) : undefined
   return owner === undefined ? [direct] : [direct, owner]
@@ -650,11 +727,11 @@ async function flushUsage($: $, canCount: boolean) {
   if (!isNewSession && Object.keys(mem.kept.used).length === 0) return
   // Taken fresh: a list cached at session start may predate the MCP servers that connect late.
   if (isNewSession) mem.loaded = undefined
-  const [stored, now, loaded] = await Promise.all([load($, STORE.toolUse), nowOf($), isNewSession ? loadedItems($) : undefined])
+  const [stored, now, loaded] = await Promise.all([load($, STORE.toolUse), nowOf($), isNewSession ? loadedItems($) : mem.loaded?.value.catch(() => undefined)])
   if (stored === UNREADABLE) return
   const used = mem.kept.used
   mem.kept = { ...mem.kept, used: {}, isUncounted: mem.kept.isUncounted && !isNewSession }
-  const next = applyUsage(sanitizeUsage(stored), mem.repo, { at: now, isNewSession, seen: loaded?.keys ?? [], used })
+  const next = applyUsage(mergeAliases(sanitizeUsage(stored), loaded?.aliases ?? {}), mem.repo, { at: now, isNewSession, seen: isNewSession ? (loaded?.keys ?? []) : [], used })
   const isSaved = await $.store.set(STORE.toolUse, next).then(() => true, () => false)
   if (isSaved) {
     mem.savedUsage = { at: now, value: next }
@@ -676,11 +753,12 @@ async function savedUsage($: $): Promise<UsageStore> {
   return value
 }
 
-/** Idle MCP servers and plugins in this repo, counting this session's calls not yet saved, with what is loaded and this repo's saved usage. */
+/** Idle MCP servers, plugins and own skills in this repo, and own skills used only here, counting this session's calls not yet saved, with what is loaded and this repo's saved usage. */
 async function idleHere($: $) {
   const [saved, loaded, now] = await Promise.all([savedUsage($), loadedItems($), nowOf($)])
-  const store = applyUsage(saved, mem.repo, { at: now, isNewSession: false, seen: [], used: mem.kept.used })
-  return { idle: idleItems(store, mem.repo, loaded.keys, now, { patience: mem.patience, owners: loaded.owners }), loaded, repo: saved[mem.repo] }
+  const store = applyUsage(mergeAliases(saved, loaded.aliases), mem.repo, { at: now, isNewSession: false, seen: [], used: mem.kept.used })
+  const idle = idleItems(store, mem.repo, loaded.keys, now, { patience: mem.patience, owners: loaded.owners })
+  return { idle, only: onlyHere(store, mem.repo, Object.keys(loaded.own), now, mem.patience), loaded, repo: saved[mem.repo] }
 }
 
 /** Names to show: what the mod worked out, over the /mcp names of servers /context lists. */
@@ -691,17 +769,17 @@ const withServerNames = (names: Record<ItemKey, string>, servers: readonly { ser
 
 /** `/route unused`: every idle MCP server and plugin here, or why nothing is listed yet. */
 async function unusedReport($: $): Promise<string> {
-  const [breakdown, { idle, loaded, repo }] = await Promise.all([
+  const [breakdown, { idle, only, loaded, repo }] = await Promise.all([
     $.session.usage({ breakdown: 'summary' }).then(u => u.context.breakdown).catch(() => undefined),
     idleHere($),
   ])
   const here = printable(mem.repo)
   const patience = `${patienceText(mem.patience)}${mem.patience === DEV_PATIENCE ? ' (MODEL_ROUTER_IDLE_DEV)' : ''}`
-  if (repo === undefined) return `No usage recorded for ${here} yet. model-router notes which MCP servers and plugins each repo uses; idle ones show here after ${patience}.`
-  if (idle.length === 0) {
-    return `Nothing idle in ${here}: every MCP server and plugin loaded here was used in the last 30 days, or has been loaded for under ${patience} (${plural(repo.sessions, 'session')} recorded).`
+  if (repo === undefined) return `No usage recorded for ${here} yet. model-router notes which MCP servers, plugins and your own skills each repo uses; idle ones show here after ${patience}.`
+  const lines = [...idleReport(idle, withServerNames(loaded.names, breakdown?.mcpTools ?? []), loaded.keys), ...skillReport(idle, only, loaded.own, mem.root), ...claudeAiReport(idle, loaded.syncedCount)]
+  if (lines.length === 0) {
+    return `Nothing idle in ${here}: every MCP server, plugin and skill of yours loaded here was used in the last 30 days, or has been loaded for under ${patience} (${plural(repo.sessions, 'session')} recorded).`
   }
-  const lines = idleReport(idle, withServerNames(loaded.names, breakdown?.mcpTools ?? []), loaded.keys)
   return [`Unused in ${here} (${plural(repo.sessions, 'session')} recorded):`, ...lines.map(line => `  ${line}`)].join('\n')
 }
 
@@ -810,7 +888,7 @@ async function renderBand($: $, e: Args<'ui.render'>) {
 async function renderCtxPane($: $, e: Args<'ui.render'>) {
   if (e.surface === 'mobile') return contextMobileView($.ui.resolve(e))
   const columns = (e.component === 'Pane' ? e.props.bodyColumns : undefined) || 80
-  const [{ context }, hp, cfg, { idle, loaded }] = await Promise.all([$.session.usage({ breakdown: 'summary', columns }), read($, health), read($, config), idleHere($)])
+  const [{ context }, hp, cfg, { idle, only, loaded }] = await Promise.all([$.session.usage({ breakdown: 'summary', columns }), read($, health), read($, config), idleHere($)])
   const b = context.breakdown
   const servers = b?.mcpTools ?? []
   // Worked out from this breakdown, not the band's last refresh, so it holds before the first request and right after a /clear.
@@ -828,8 +906,13 @@ async function renderCtxPane($: $, e: Args<'ui.render'>) {
   // Only once there is enough cached to be worth planning a break around: the cold guard's threshold.
   const facts = (context.tokens ?? 0) >= GUARD_MIN_TOKENS ? await awayFacts($, cfg, context.tokens) : undefined
   const away = facts && awayOptions(facts)
-  const data = { breakdown: b, isTerminal: e.surface === 'terminal', columns, advice: advice || undefined, explored: mem.explored, idle: idleTips(idle, withServerNames(loaded.names, servers), tokensByServer(servers)), away }
-  return contextPaneView($.ui.resolve(e), data)
+  const tokens = listingTokens(b?.skills?.skillFrontmatter ?? [])
+  const tips = [...idleTips(idle, withServerNames(loaded.names, servers), tokensByServer(servers), { root: mem.root, tokens }), ...skillTips(idle, only, loaded.own, mem.root, tokens), ...claudeAiTips(idle, loaded.syncedCount, tokens)]
+  const data = { breakdown: b, isTerminal: e.surface === 'terminal', columns, advice: advice || undefined, explored: mem.explored, unused: tips, away }
+  const fill = (text: string) => void $.prompt.fill({ text, mode: 'replace' }).catch(() => undefined)
+  // A menu such as /mcp opens as if typed; where the engine refuses, it is left in the prompt instead.
+  const act = (action: TipAction) => (action.isSlash ? void $.command.run({ command: action.command }).catch(() => fill(`/${action.command}`)) : fill(action.command))
+  return contextPaneView($.ui.resolve(e), data, { act })
 }
 
 async function renderPane($: $, e: Args<'ui.render'>) {
@@ -945,6 +1028,8 @@ const mem = {
   isExploreTaught: false,
   hasHandoffSkill: false,
   home: undefined as string | undefined,
+  // The repo's root, for commands a tip puts in the prompt.
+  root: undefined as string | undefined,
   // An auto-handoff saved since the person last prompted, and whether one may still run before they prompt again.
   handoffPath: undefined as string | undefined,
   handoffArmed: false,
@@ -1099,6 +1184,7 @@ export const register: Register = on => {
     if (typeof band === 'boolean') await update($, isBandShown, () => band)
     const root = repo?.root ?? (await $.session.root().catch(() => ''))
     mem.repo = printable(repo?.name ?? (root.split('/').pop() || 'unknown'))
+    mem.root = root === '' ? undefined : root
     // The same session starting again, after a hot reload of this code or a /login, keeps its running prompt, count and unsaved calls.
     const [sessionId, before, idleDev, home, commands, startedAt] = await Promise.all([
       $.session.id().catch(() => undefined),

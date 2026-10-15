@@ -159,6 +159,7 @@ test('extra tips join the ranking, and drop the tips they replace', () => {
   expect(keys(b)).toEqual(['mcp:claude.ai Jira'])
   const idle = { key: 'idle:mcp:claude_ai_Jira', weight: 6000, text: 'unused', replaces: 'mcp:claude.ai Jira' }
   expect(contextTips(b, { more: [idle] }).map(one => one.key)).toEqual(['idle:mcp:claude_ai_Jira'])
+  expect(contextTips(b, { drop: new Set(['mcp:claude.ai Jira']) })).toEqual([])
 })
 
 test('heavy exploration in the main context suggests a subagent next time', () => {

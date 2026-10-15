@@ -1339,6 +1339,11 @@ test('the Context pane names an idle MCP server in place of its size tip', async
   mock.store(on, { toolUse: { unknown: { sessions: 12, items: { 'mcp:jira': old } } } })
   mock.clock(on, { now: T0 })
   on('tool.list', () => ({ value: [{ name: 'mcp__jira__search', description: '', mcp: true }] }) as never)
+  const ran: string[] = []
+  on('command.run', (_$, e) => {
+    ran.push(e.command)
+    return { text: '' }
+  })
   on('session.usage', () => ({
     value: {
       startedAt: 0,
@@ -1366,8 +1371,11 @@ test('the Context pane names an idle MCP server in place of its size tip', async
     } as never,
   }))
   const ui = await mountPane($, 'context')
-  expect(await ui.find({ type: 'Text', text: /^MCP server jira has not been used in this repo over 12 sessions/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'jira' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^MCP server · not used in this repo over 12 sessions\. In \/mcp, pick it and choose Disable/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /MCP server jira loads/ })).toBeUndefined()
+  await ui.press({ key: 'action:idle:mcp:jira' })
+  expect(ran).toEqual(['mcp'])
   await ui.unmount()
 })
 
@@ -1913,4 +1921,78 @@ test('the Context pane prices the ways to step away once a big context is cached
   expect(header).toMatch(/^200k tokens of context on .+, cache warm for 60m more/)
   expect(await after.find({ type: 'Text', text: header! })).toBeDefined()
   await after.unmount()
+})
+
+test('own skills no repo uses, and one only this repo uses, are listed with their fix and a button', async ($, on) => {
+  const DAY = 86_400_000
+  const seen = { firstSeen: T0 - 20 * DAY, sessionsSeen: 12, calls: 0 }
+  const data: Record<string, unknown> = {
+    config: { ...MINE, coldGuard: 'off' },
+    toolUse: {
+      app: { sessions: 12, items: { 'skill:tdd': seen, 'skill:sprint': { ...seen, calls: 3, lastUsed: T0 - DAY } } },
+      web: { sessions: 12, items: { 'skill:tdd': seen, 'skill:sprint': seen } },
+      cli: { sessions: 12, items: { 'skill:tdd': seen, 'skill:sprint': seen } },
+    },
+  }
+  sharedStore(on, data)
+  mock.clock(on, { now: T0 })
+  const breakdown = {
+    categories: [{ name: 'Messages', tokens: 14_000, color: 'claude', isDeferred: false, kind: 'used' }],
+    totalTokens: 20_000,
+    maxTokens: 1_000_000,
+    rawMaxTokens: 1_000_000,
+    autocompactSource: 'model-default',
+    percentage: 2,
+    gridRows: [],
+    model: 'claude-opus-5-5',
+    memoryFiles: [],
+    mcpTools: [],
+    agents: [],
+    skills: { totalSkills: 2, includedSkills: 2, tokens: 120, skillFrontmatter: [{ name: 'tdd', source: 'userSettings', tokens: 53 }, { name: 'sprint', source: 'userSettings', tokens: 67 }] },
+    isAutoCompactEnabled: false,
+    apiUsage: null,
+  }
+  guardSession(on, { context: 20_000, usage: usageOf(1000), breakdown })
+  mock.env(on, { HOME: '/home/me' })
+  on('session.repo', () => ({ value: { root: '/home/me/app', remote: null, internal: false, name: null } as never }))
+  const missing = () => {
+    throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+  }
+  on('fs.list', (_$, e) =>
+    e.path === '/home/me/.claude/skills'
+      ? ({
+          value: [
+            { name: 'tdd', kind: 'dir', size: 0, mtimeMs: 0, isLink: false },
+            { name: 'sprint', kind: 'other', size: 0, mtimeMs: 0, isLink: true },
+            { name: '.trash', kind: 'dir', size: 0, mtimeMs: 0, isLink: false },
+          ],
+        } as never)
+      : missing(),
+  )
+  on('fs.exists', (_$, e) => ({ value: e.path.endsWith('/SKILL.md') }) as never)
+  on('fs.read', (_$, e) => (e.path === '/home/me/.agents/.skill-lock.json' ? ({ value: JSON.stringify({ skills: { tdd: { source: 'mattpocock/skills' } } }) } as never) : missing()))
+  const filled: string[] = []
+  on('prompt.fill', (_$, e) => {
+    filled.push(e.text)
+    return { isFilled: true } as never
+  })
+  await $.session.start({ cwd: '/home/me/app', surface: null, isInteractive: true })
+  const unused = (await $.command.run({ command: 'route', args: 'unused', origin: { kind: 'peer' } } as unknown as Args<'command.run'>)).text
+  expect(unused).toBe(
+    [
+      'Unused in app (12 sessions recorded):',
+      '  › Skills and commands not used in any repo: tdd (from mattpocock/skills). Archive them (moving back restores; installed ones stay in ~/.agents/skills for other agents):',
+      '      ! mkdir -p ~/.claude/skills-archive && mv ~/.claude/skills/tdd ~/.claude/skills-archive/',
+      '  › sprint is only used in this repo. Make it a project skill here:',
+      '      ! mkdir -p "/home/me/app/.claude/skills" && ln -s "$(readlink -f ~/.claude/skills/sprint)" "/home/me/app/.claude/skills"/sprint && rm ~/.claude/skills/sprint',
+    ].join('\n'),
+  )
+  const ui = await mountPane($, 'context', 'desktop')
+  expect(await ui.find({ type: 'Text', text: 'UNUSED MCP SERVERS, PLUGINS AND SKILLS' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^skill · not used in any repo for 30 days · ~53 tokens a session \(1 from mattpocock\/skills/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^skill · used only in this repo · ~67 tokens a session elsewhere/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /skills listed take/ })).toBeUndefined()
+  await ui.press({ key: 'action:idle:own-skills' })
+  expect(filled).toEqual(['! mkdir -p ~/.claude/skills-archive && mv ~/.claude/skills/tdd ~/.claude/skills-archive/'])
+  await ui.unmount()
 })

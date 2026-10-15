@@ -1,6 +1,6 @@
 import { contextLevel, kTokens, printable, shortPath } from '../routes'
 import { contextTips, tokensByServer } from '../tips'
-import type { Breakdown, Tip } from '../tips'
+import type { Breakdown, Tip, TipAction } from '../tips'
 import type { Advice } from '../strategy'
 import type { Away } from '../lessons'
 import { bulletSection, tipsSection } from './kit'
@@ -71,9 +71,21 @@ export function contextMobileView({ Text }: Els) {
   return <Text dimColor>Open the context breakdown from a terminal or desktop.</Text>
 }
 
-type ContextData = { breakdown: Breakdown | undefined; isTerminal: boolean; columns: number; advice?: Pick<Advice, 'verdict' | 'text'>; idle?: readonly Tip[]; explored?: number; away?: Away }
+/** `unused`: idle MCP servers, plugins and skills, each with its fix, listed in full below the tips; each one's `replaces` drops the size tip it says more than. */
+type ContextData = { breakdown: Breakdown | undefined; isTerminal: boolean; columns: number; advice?: Pick<Advice, 'verdict' | 'text'>; unused?: readonly Tip[]; explored?: number; away?: Away }
+// Beyond this many, the section points at /route unused for the rest.
+const UNUSED_SHOWN = 6
 
-export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, advice, idle, explored, away }: ContextData) {
+/** Tips the unused list says more than: each idle server's size tip, and the skills-listing tip once plugins or skills are named. */
+function dropped(unused: readonly Tip[]): Set<string> {
+  const keys = new Set(unused.flatMap(one => (one.replaces === undefined ? [] : [one.replaces])))
+  if (unused.some(one => !one.key.startsWith('idle:mcp:'))) keys.add('skills')
+  return keys
+}
+/** `act` does what a tip's button says: puts its command in the prompt, or runs the slash command it names. */
+export type ContextActions = { act: (action: TipAction) => void }
+
+export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, advice, unused = [], explored, away }: ContextData, act?: ContextActions) {
   const { Box, Text } = els
   const Svg = 'Svg' in els ? els.Svg : undefined
   if (b === undefined) return <Text dimColor>No context breakdown available yet.</Text>
@@ -149,7 +161,13 @@ export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, a
           {topMemory.map(one => line(`f:${one.path}`, printable(`${one.type} · ${shortPath(one.path)}`), one.tokens, 'planMode'))}
         </Box>
       ) : null}
-      {tipsSection(els, contextTips(b, { advice, more: idle, explored }))}
+      {tipsSection(els, contextTips(b, { advice, explored, drop: dropped(unused) }), act?.act)}
+      {tipsSection(els, [...unused].sort((x, y) => y.weight - x.weight).slice(0, UNUSED_SHOWN), act?.act, {
+        title: 'UNUSED MCP SERVERS, PLUGINS AND SKILLS',
+        color: 'suggestion',
+        lead: 'Each loads into every session in this repo and takes context, but none was called lately. A fix button puts its command in your prompt; nothing changes until you press Enter.',
+        ...(unused.length > UNUSED_SHOWN ? { tail: [`+${unused.length - UNUSED_SHOWN} more in /route unused`] } : {}),
+      })}
       {away === undefined ? null : awaySection(els, away)}
       <Text dimColor>
         {b.skills ? `skills listing ${kTokens(b.skills.tokens)} (${b.skills.includedSkills}/${b.skills.totalSkills}) · ` : ''}

@@ -1,5 +1,36 @@
 # Release notes
 
+## 1.5.0 — 2026-10-15
+
+### Added
+
+- **Personal skills and commands are tracked too.** The unused-items advice now covers everything in `~/.claude/skills` and `~/.claude/commands`, downloaded ones included, per repo, next to MCP servers and plugins. A plugin's skills still count toward their plugin. Project skills and Claude Code's built-in skills aren't tracked.
+  - Recording of them starts with this version, so their advice shows after the usual two weeks and ten sessions.
+  - Ones no repo has used in 30 days share one Context-pane tip with an **Archive** button, which moves them to `~/.claude/skills-archive`. Moving them back restores them.
+  - One used only in this repo, and never in at least two other settled repos, gets **Move here**: it becomes a project skill, and other repos stop loading it. A linked skill is re-linked to its resolved target.
+  - A skill the `skills` CLI installed is named with its source, from `~/.agents/.skill-lock.json`. Archiving it moves only Claude Code's link.
+  - Tips are weighed by the listing tokens `/context` reports for each skill and plugin.
+- **claude.ai skills are tracked too.** The skills synced from your claude.ai account (what `/context` lists as synced) are counted per repo like the others, by the tokens their listing costs.
+  - Ones no repo has used in 30 days share one Context-pane tip that points to claude.ai/customize/skills, where they are switched off for every repo at once. Claude Code drops a skill switched off there at its next sync.
+  - When at least half of them are unused, the tip also names `"syncClaudeAiSkills": false` in `~/.claude/settings.json`, which stops syncing every claude.ai skill, the ones you use too.
+  - There is no button: no command switches one off.
+- **An "Unused MCP servers, plugins and skills" section in the Context pane.** Idle MCP servers, plugins and skills are listed there, sorted by the tokens they cost, instead of competing for the three TIPS slots. Each shows its name, then one line on what it is and why it's listed. Six are shown, and `/route unused` has the rest. The generic "skills listed take Nk" tip steps aside while the section names plugins or skills.
+  - Plugins get **Disable here** (`claude plugin disable <id> --scope local`, run from the repo root) or **Disable everywhere** (`--scope user`). Skills get **Archive** or **Move here**. These buttons put the command in your prompt; nothing changes until you press Enter.
+  - Claude Code has no command that turns one MCP server off, so an MCP row says how: pick it in `/mcp` and choose Disable for this repo, or for a claude.ai connector no repo uses, disconnect it under Settings → Connectors. Its **Open /mcp** button opens that menu.
+  - `/route unused` prints the same commands.
+
+### Fixed
+
+- **A claude.ai connector counts once, whichever app loaded it.** The desktop app names a connector by an id where the CLI says `claude.ai Figma`. These were tracked as two servers, so a connector used only from the CLI could be listed as unused in every repo, with advice to disconnect it in claude.ai.
+  - The id is now matched to the connector's name through `/context`, and usage recorded under the id is merged into that name.
+  - An id with no known name is only ever advised off for this repo, in `/mcp`, never disconnected everywhere.
+
+### Changed
+
+- claude.ai's own Visualize connector is no longer tracked, under either name.
+- Servers that Claude Code's own apps bring are no longer tracked, so they are never suggested for turning off. These are the desktop app's panes, browser and terminal, Claude in Chrome, and the IDE bridge.
+- The README's privacy section lists the new reads: your skill folders and the skills CLI's lock file.
+
 ## 1.4.2 — 2026-10-14
 
 ### Fixed

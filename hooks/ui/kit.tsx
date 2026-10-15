@@ -2,7 +2,7 @@ import type { EngineInterface, RenderChildren } from 'claude-code'
 
 import type { CostTab, Rewrite, RouteSpend } from '../../types'
 import { kTokens, money } from '../routes'
-import type { Tip } from '../tips'
+import type { Tip, TipAction } from '../tips'
 
 export const PANES = {
   route: { id: 'model-router', title: 'Routes' },
@@ -146,9 +146,28 @@ export function bulletSection({ Box, Text }: Els, { title, color, items, lead, t
   )
 }
 
-/** A pane's TIPS section, or nothing when there are none. */
-export function tipsSection(els: Els, tips: readonly Tip[]) {
-  const { Text } = els
+/**
+ * A pane's TIPS section, or nothing when there are none. A tip with an action
+ * gets a button under its text that hands the action on.
+ * `title`, `color` and `tail` let another list of tips, such as the unused
+ * items, take the same shape.
+ */
+export function tipsSection(
+  els: Els,
+  tips: readonly Tip[],
+  onAction?: (action: TipAction) => void,
+  { title = 'TIPS', color = 'warning', lead, tail }: { title?: string; color?: string; lead?: string; tail?: readonly string[] } = {},
+) {
+  const { Box, Text, Button } = els
   if (tips.length === 0) return null
-  return bulletSection(els, { title: 'TIPS', color: 'warning', items: tips.map(one => ({ key: one.key, body: <Text>{one.text}</Text> })) })
+  const body = (one: Tip) => {
+    const text =
+      one.title === undefined
+        ? [<Text key="text">{one.text}</Text>]
+        : [<Text key="title" bold>{one.title}</Text>, <Text key="text" dimColor wrap="wrap">{one.text}</Text>]
+    if (one.action === undefined || onAction === undefined) return text
+    const action = one.action
+    return [...text, <Box key="action" flexDirection="row"><Button key={`action:${one.key}`} label={action.label} onPress={() => onAction(action)} /></Box>]
+  }
+  return bulletSection(els, { title, color, items: tips.map(one => ({ key: one.key, body: body(one) })), ...(lead === undefined ? {} : { lead }), ...(tail ? { tail } : {}) })
 }
