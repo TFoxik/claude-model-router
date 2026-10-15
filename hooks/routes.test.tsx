@@ -1197,8 +1197,8 @@ function versionSession(on: On, data: Record<string, unknown>, unreadable = new 
   return { manifest, toasts }
 }
 
-test('a new version says so once after it loads; the first run and the same version stay quiet', async ($, on) => {
-  const data: Record<string, unknown> = { config: MINE }
+test('a new version says so once after it loads; a fresh install and the same version stay quiet', async ($, on) => {
+  const data: Record<string, unknown> = {}
   const { manifest, toasts } = versionSession(on, data)
   const start = () => $.session.start({ cwd: '/', surface: null, isInteractive: false })
   await start()
@@ -1212,6 +1212,14 @@ test('a new version says so once after it loads; the first run and the same vers
   expect(data.version).toBe('1.6.0')
   await start()
   expect(toasts).toHaveLength(1)
+})
+
+test('the first version that records itself, over settings an older one saved, says it loaded', async ($, on) => {
+  const data: Record<string, unknown> = { config: MINE }
+  const { toasts } = versionSession(on, data)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  expect(toasts).toEqual(['model-router 1.5.0 loaded'])
+  expect(data.version).toBe('1.5.0')
 })
 
 test('a failed store read never toasts or saves a version', async ($, on) => {

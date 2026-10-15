@@ -433,13 +433,17 @@ async function awayFacts($: $, cfg: RouterConfig, tokens?: number): Promise<Away
   return { tokens, model: await routedMainModel($, cfg, last.model), ttlMinutes: cfg.cacheTtlMinutes, warmMinutes }
 }
 
-/** Says once which version runs after an update reaches this session; the first run only remembers it. */
-async function noteVersion($: $) {
+/**
+ * Says once which version runs after an update reaches this session. A fresh install only remembers it; an install
+ * with settings from a version too old to record itself says it loaded, with no previous version to name.
+ */
+async function noteVersion($: $, hadSettings: boolean) {
   const [seen, manifest] = await Promise.all([load($, STORE.version), $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`).catch(() => undefined)])
   const now = typeof manifest === 'string' ? versionOf(manifest) : undefined
   if (seen === UNREADABLE || now === undefined || now === seen) return
   await save($, STORE.version, now)
   if (typeof seen === 'string') $.ui.toast(`model-router ${now} loaded (was ${seen})`)
+  else if (hadSettings) $.ui.toast(`model-router ${now} loaded`)
 }
 
 async function closeOldLearnPane($: $) {
@@ -1221,7 +1225,7 @@ export const register: Register = on => {
     mem.tick?.cancel()
     mem.tick = $.clock.every(60_000, () => void refreshStatus($).catch(() => undefined))
     void closeOldLearnPane($)
-    void noteVersion($).catch(() => undefined)
+    void noteVersion($, stored !== undefined && stored !== UNREADABLE).catch(() => undefined)
     await $.command.register({ name: 'route', description: 'Model router: open the pane, or one of the verbs', argumentHint: USAGE })
     return next(e)
   })

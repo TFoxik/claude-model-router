@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.7.1 — 2026-10-15
+
+### Fixed
+
+- **The update toast also shows the first time.** Updating from 1.6.0 or older, which never recorded a version, now says `model-router 1.7.1 loaded` instead of staying quiet. A fresh install still stays quiet.
+
 ## 1.7.0 — 2026-10-15
 
 ### Added
