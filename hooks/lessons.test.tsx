@@ -9,6 +9,7 @@ import {
   awayText,
   byKind,
   capLessons,
+  cardOf,
   lessonFromAdvice,
   lessonFromAutoHandoff,
   lessonFromCompact,
@@ -18,7 +19,7 @@ import {
   lessonFromPlanToggle,
   lessonFromRewrite,
   lessonsFromPrompt,
-  pickToast,
+  pickLesson,
   sanitizeLessons,
   toastText,
   unreadCount,
@@ -157,19 +158,19 @@ test('compaction lesson', () => {
   expect(lessonFromCompact(0).fact).toBe('The conversation was compacted down to a summary. Turns now re-read far less, but details the summary left out are gone.')
 })
 
-test('pickToast: costliest fresh lesson, not one toasted 3 times, not within the hour', () => {
+test('pickLesson: costliest fresh lesson, not one shown 3 times, not within the hour', () => {
   const cold = lesson({ kind: 'cold-rewrite', at: T0, usd: 0.78 })
   const ctx = lesson({ kind: 'context-high', at: T0, usd: 0.06 })
-  expect(pickToast([ctx, cold], [], T0)).toBe(cold)
+  expect(pickLesson([ctx, cold], [], T0)).toBe(cold)
   const seen3 = [1, 2, 3].map(i => lesson({ kind: 'cold-rewrite', at: T0 - i * 2 * HOUR, isToasted: true }))
-  expect(pickToast([ctx, cold], seen3, T0)).toBe(ctx)
-  const keptNotToasted = [1, 2, 3].map(i => lesson({ kind: 'cold-rewrite', at: T0 - i * 2 * HOUR }))
-  expect(pickToast([ctx, cold], keptNotToasted, T0)).toBe(cold)
-  const toastedRecently = [lesson({ kind: 'cold-rewrite', at: T0 - 30 * 60_000, isToasted: true })]
-  expect(pickToast([ctx, cold], toastedRecently, T0)).toBe(ctx)
-  const toastedLongAgo = [lesson({ kind: 'cold-rewrite', at: T0 - HOUR, isToasted: true })]
-  expect(pickToast([ctx, cold], toastedLongAgo, T0)).toBe(cold)
-  expect(pickToast([], [], T0)).toBeUndefined()
+  expect(pickLesson([ctx, cold], seen3, T0)).toBe(ctx)
+  const keptNotShown = [1, 2, 3].map(i => lesson({ kind: 'cold-rewrite', at: T0 - i * 2 * HOUR }))
+  expect(pickLesson([ctx, cold], keptNotShown, T0)).toBe(cold)
+  const shownRecently = [lesson({ kind: 'cold-rewrite', at: T0 - 30 * 60_000, isToasted: true })]
+  expect(pickLesson([ctx, cold], shownRecently, T0)).toBe(ctx)
+  const shownLongAgo = [lesson({ kind: 'cold-rewrite', at: T0 - HOUR, isToasted: true })]
+  expect(pickLesson([ctx, cold], shownLongAgo, T0)).toBe(cold)
+  expect(pickLesson([], [], T0)).toBeUndefined()
 })
 
 test('toastText leads with the concept title until the kind has toasted once', () => {
@@ -177,6 +178,14 @@ test('toastText leads with the concept title until the kind has toasted once', (
   expect(toastText(cold, [])).toBe('Cache went cold: X. · /route learn')
   expect(toastText(cold, [lesson({})])).toBe('Cache went cold: X. · /route learn')
   expect(toastText(cold, [lesson({ isToasted: true })])).toBe('▸ X. · /route learn')
+})
+
+test('cardOf: the concept until the kind has been shown once, and how many others fired', () => {
+  const cold = lesson({ fact: 'X.' })
+  expect(cardOf(cold, [], 1)).toEqual({ kind: 'cold-rewrite', fact: 'X.', isFirst: true, more: 0 })
+  expect(cardOf(cold, [lesson({})], 3)).toEqual({ kind: 'cold-rewrite', fact: 'X.', isFirst: true, more: 2 })
+  expect(cardOf(cold, [lesson({ isToasted: true })], 1).isFirst).toBe(false)
+  expect(cardOf(cold, [lesson({ kind: 'subagents', isToasted: true })], 1).isFirst).toBe(true)
 })
 
 test('unreadCount: new and toasted lessons, not quiet repeats or muted kinds', () => {

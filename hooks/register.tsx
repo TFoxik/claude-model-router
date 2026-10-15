@@ -18,7 +18,7 @@ import {
   lessonFromPlanToggle,
   lessonFromRewrite,
   lessonsFromPrompt,
-  pickToast,
+  pickLesson,
   sanitizeLessons,
   toastText,
   unreadCount,
@@ -314,7 +314,7 @@ async function teach($: $, drafts: readonly LessonDraft[], now: number) {
   await setLessons($, earlier => {
     const { sessionId } = mem.kept
     const fresh: Lesson[] = all.map(d => ({ ...d, at: now, repo: mem.repo, ...(sessionId === undefined ? {} : { sessionId }) }))
-    const pick = pickToast(fresh, earlier, now)
+    const pick = pickLesson(fresh, earlier, now)
     toast = pick && toastText(pick, earlier)
     return capLessons([...earlier, ...fresh.map(one => (one === pick ? { ...one, isToasted: true } : one))])
   })

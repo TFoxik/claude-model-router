@@ -1,4 +1,4 @@
-import type { Effort, Health, Lesson, LessonKind, PromptCost, PromptItem, Rewrite } from '../types'
+import type { Effort, Health, LearnCard, Lesson, LessonKind, PromptCost, PromptItem, Rewrite } from '../types'
 import type { Advice } from './strategy'
 import { ENGINE, FORK, GUARD_MIN_TOKENS, MODELS, PRICES_AS_OF, costOf, fmtAge, isLessonKind, isRouteKey, isSub, kTokens, labelOf, modelKeyOf, money, plural, printable, rewritePrice, routeText, sumUsd } from './routes'
 
@@ -253,8 +253,8 @@ export function lessonFromCompact(beforeTokens: number): LessonDraft {
   }
 }
 
-/** The one fresh lesson worth a toast: costliest first, skipping kinds toasted enough or within the cooldown. */
-export function pickToast(fresh: readonly Lesson[], earlier: readonly Lesson[], now: number): Lesson | undefined {
+/** The one fresh lesson worth a card: costliest first, skipping kinds shown enough or within the cooldown. */
+export function pickLesson(fresh: readonly Lesson[], earlier: readonly Lesson[], now: number): Lesson | undefined {
   const due = fresh.filter(one => {
     const before = earlier.filter(e => e.kind === one.kind)
     const toasted = before.filter(e => e.isToasted)
@@ -267,6 +267,11 @@ export function pickToast(fresh: readonly Lesson[], earlier: readonly Lesson[], 
 export function toastText(one: Lesson, earlier: readonly Lesson[]): string {
   const isFirst = !earlier.some(e => e.kind === one.kind && e.isToasted)
   return `${isFirst ? `${CONCEPTS[one.kind].title}: ` : '▸ '}${one.fact} · /route learn`
+}
+
+export function cardOf(pick: Lesson, earlier: readonly Lesson[], freshCount: number): LearnCard {
+  const isFirst = !earlier.some(e => e.kind === pick.kind && e.isToasted)
+  return { kind: pick.kind, fact: pick.fact, isFirst, more: Math.max(0, freshCount - 1) }
 }
 
 /**

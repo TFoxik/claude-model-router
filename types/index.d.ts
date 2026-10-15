@@ -104,6 +104,9 @@ export type Carried = {
 }
 export type Lesson = { kind: LessonKind; at: number; repo: string; fact: string; usd?: number; isToasted?: boolean; sessionId?: string }
 
+/** The lesson a card above the band shows until the next prompt: the concept comes from CONCEPTS, the numbers from the fact. */
+export type LearnCard = { kind: LessonKind; fact: string; isFirst: boolean; more: number }
+
 declare module 'claude-code' {
   interface PluginState {
     'model-router': {
