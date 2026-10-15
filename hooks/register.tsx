@@ -1,14 +1,14 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, Register, Timer } from 'claude-code'
 
-import type { ActiveRoute, Carried, ColdGuard, CostTab, Effort, Health, LastUsage, Lesson, LessonKind, PromptCost, PromptRecord, RouteSpend, RouterConfig, Scope } from '../types'
+import type { ActiveRoute, Carried, ColdGuard, CostTab, Effort, Health, LastUsage, LearnCard, Lesson, LessonKind, PromptCost, PromptRecord, RouteSpend, RouterConfig, Scope } from '../types'
 import {
   CONCEPTS,
-  TOAST_MS,
   TOPICS,
   awayOptions,
   awayText,
   capLessons,
+  cardOf,
   lessonFromAdvice,
   lessonFromAutoHandoff,
   lessonFromCompact,
@@ -20,7 +20,6 @@ import {
   lessonsFromPrompt,
   pickLesson,
   sanitizeLessons,
-  toastText,
   unreadCount,
 } from './lessons'
 import type { AwayFacts, LessonDraft } from './lessons'
@@ -91,6 +90,7 @@ import { COST_TAB_LABEL, OLD_COST_IDS, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
 import { costPaneView } from './ui/cost-pane'
 import { handoffsPaneView } from './ui/handoffs-pane'
+import { learnCardView } from './ui/learn-card'
 import { learnPaneView } from './ui/learn-pane'
 import { routesMobileView, routesPaneView } from './ui/routes-pane'
 import { statsFooterView } from './ui/stats'
@@ -111,6 +111,7 @@ const costTab = atom({ plugin: 'model-router', key: 'costTab' } as const, 'last'
 const promptCost = atom({ plugin: 'model-router', key: 'promptCost' } as const, null as PromptCost | null)
 const isBandShown = atom({ plugin: 'model-router', key: 'isBandShown' } as const, true)
 const lessons = atom({ plugin: 'model-router', key: 'lessons' } as const, [] as Lesson[])
+const learnCard = atom({ plugin: 'model-router', key: 'learnCard' } as const, null as LearnCard | null)
 const lessonsReadAt = atom({ plugin: 'model-router', key: 'lessonsReadAt' } as const, 0)
 const learnOpen = atom({ plugin: 'model-router', key: 'learnOpen' } as const, [] as LessonKind[])
 const learnRows = atom({ plugin: 'model-router', key: 'learnRows' } as const, [] as string[])
@@ -305,25 +306,31 @@ async function finishHandoff($: $, e: Args<'turn.complete'>) {
   await refreshStatus($).catch(() => undefined)
 }
 
-/** Keeps the lessons of topics not muted and toasts the one most worth it, if any is due. */
+/** Keeps the lessons of topics not muted and puts the one most worth it on the card, if any is due. */
 async function teach($: $, drafts: readonly LessonDraft[], now: number) {
   const { learnMuted } = await read($, config)
   const all = drafts.filter(d => !learnMuted.includes(d.kind))
   if (all.length === 0) return
-  let toast: string | undefined
+  let card: LearnCard | undefined
   await setLessons($, earlier => {
     const { sessionId } = mem.kept
     const fresh: Lesson[] = all.map(d => ({ ...d, at: now, repo: mem.repo, ...(sessionId === undefined ? {} : { sessionId }) }))
     const pick = pickLesson(fresh, earlier, now)
-    toast = pick && toastText(pick, earlier)
+    card = pick && cardOf(pick, earlier, fresh.length)
     return capLessons([...earlier, ...fresh.map(one => (one === pick ? { ...one, isToasted: true } : one))])
   })
-  if (toast !== undefined) $.ui.toast(toast, { timeoutMs: TOAST_MS })
+  const shown = card
+  if (shown !== undefined) await update($, learnCard, () => shown)
 }
 
-/** Learn mode on or off; off drops what the running turn had drafted, so nothing is kept or toasted from it. */
+const clearCard = ($: $) => update($, learnCard, () => null)
+
+/** Learn mode on or off; off drops what the running turn had drafted and the card, so nothing is kept or shown from it. */
 async function setLearning($: $, isOn: boolean) {
-  if (!isOn) mem.pendingLessons = []
+  if (!isOn) {
+    mem.pendingLessons = []
+    await clearCard($)
+  }
   await setConfig($, c => ({ ...c, isLearning: isOn }))
 }
 
@@ -350,6 +357,14 @@ async function setKeepText($: $, keep: boolean) {
 
 async function setMuted($: $, kind: LessonKind, isMuted: boolean) {
   await setConfig($, c => ({ ...c, learnMuted: isMuted ? [...new Set([...c.learnMuted, kind])] : c.learnMuted.filter(one => one !== kind) }))
+}
+
+const muteText = (kind: LessonKind) => `Learn mode stays quiet about "${CONCEPTS[kind].title}" now. /route learn unmute ${kind} brings it back.`
+
+async function muteFromCard($: $, kind: LessonKind) {
+  await setMuted($, kind, true)
+  await clearCard($)
+  $.ui.toast(muteText(kind))
 }
 
 /** Lessons the Learn pane and its count cover: this repo's, or every repo's under All. */
@@ -867,6 +882,13 @@ async function renderCostPane($: $, e: Args<'ui.render'>) {
 
 const setBand = async ($: $, isShown: boolean) => save($, STORE.bandShown, await update($, isBandShown, () => isShown))
 
+async function renderCard($: $, e: Args<'ui.render'>) {
+  const [card, cfg] = await Promise.all([read($, learnCard), read($, config)])
+  if (card === null || !cfg.isLearning || cfg.learnMuted.includes(card.kind)) return null
+  const actions = { dismiss: () => void clearCard($), mute: () => void muteFromCard($, card.kind) }
+  return learnCardView($.ui.resolve(e), card, actions, { isCompact: e.surface === 'mobile' })
+}
+
 async function renderBand($: $, e: Args<'ui.render'>) {
   const [cfg, now, pending, costs, hp, kept, readAt, scope, records] = await Promise.all([
     read($, config),
@@ -1287,7 +1309,10 @@ export const register: Register = on => {
       mem.pendingPrompt = commandLabel(e.text)
       if (!e.text.trimStart().startsWith('/')) mem.lastCommand = undefined
     }
-    if (USER_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) mem.corrections = isCorrection(e.text) ? mem.corrections + 1 : 0
+    if (USER_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) {
+      mem.corrections = isCorrection(e.text) ? mem.corrections + 1 : 0
+      await clearCard($)
+    }
     const out = await next(e)
     // Marked once the prompt is through: a hook further down may still drop it.
     if (resumeText !== undefined && out.drop === undefined) {
@@ -1319,6 +1344,7 @@ export const register: Register = on => {
       mem.kept = { ...mem.kept, since: await nowOf($) }
       await carry($)
       resetSignals(true)
+      await clearCard($)
       await refreshStatus($).catch(() => undefined)
     }
     return done
@@ -1434,7 +1460,7 @@ export const register: Register = on => {
       const isMuted = rest[0] === 'mute'
       await setMuted($, kind, isMuted)
       const title = CONCEPTS[kind].title
-      return { text: isMuted ? `Learn mode stays quiet about "${title}" now. /route learn unmute ${kind} brings it back.` : `Learn mode explains "${title}" again.` }
+      return { text: isMuted ? muteText(kind) : `Learn mode explains "${title}" again.` }
     }
     if (verb === 'stats' && rest[0] === 'clear') {
       await setHistory($, () => [])
@@ -1521,7 +1547,16 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey || !(await read($, isBandShown))) return next(e)
-    return renderBand($, e)
+    if (e.props.hasSurvey) return next(e)
+    const [card, isShown] = await Promise.all([renderCard($, e), read($, isBandShown)])
+    const below = isShown ? await renderBand($, e) : await next(e)
+    if (card === null) return below
+    const { Box } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        {card}
+        {below}
+      </Box>
+    )
   })
 }

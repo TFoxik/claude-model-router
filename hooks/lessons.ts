@@ -7,7 +7,6 @@ type Level = Health['ctxLevel']
 
 export const SEEN_ENOUGH = 3
 const TOAST_COOLDOWN_MS = 3_600_000
-export const TOAST_MS = 8000
 const PER_KIND = 20
 export const MIN_REWRITE_USD = 0.05
 const MIN_PROMPT_USD = 0.25
@@ -262,11 +261,6 @@ export function pickLesson(fresh: readonly Lesson[], earlier: readonly Lesson[],
     return toasted.length < SEEN_ENOUGH && now - lastToast >= TOAST_COOLDOWN_MS
   })
   return [...due].sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0))[0]
-}
-
-export function toastText(one: Lesson, earlier: readonly Lesson[]): string {
-  const isFirst = !earlier.some(e => e.kind === one.kind && e.isToasted)
-  return `${isFirst ? `${CONCEPTS[one.kind].title}: ` : '▸ '}${one.fact} · /route learn`
 }
 
 export function cardOf(pick: Lesson, earlier: readonly Lesson[], freshCount: number): LearnCard {

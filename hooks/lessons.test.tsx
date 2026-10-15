@@ -21,7 +21,6 @@ import {
   lessonsFromPrompt,
   pickLesson,
   sanitizeLessons,
-  toastText,
   unreadCount,
 } from './lessons'
 import { MODELS } from './routes'
@@ -171,13 +170,6 @@ test('pickLesson: costliest fresh lesson, not one shown 3 times, not within the 
   const shownLongAgo = [lesson({ kind: 'cold-rewrite', at: T0 - HOUR, isToasted: true })]
   expect(pickLesson([ctx, cold], shownLongAgo, T0)).toBe(cold)
   expect(pickLesson([], [], T0)).toBeUndefined()
-})
-
-test('toastText leads with the concept title until the kind has toasted once', () => {
-  const cold = lesson({ fact: 'X.' })
-  expect(toastText(cold, [])).toBe('Cache went cold: X. · /route learn')
-  expect(toastText(cold, [lesson({})])).toBe('Cache went cold: X. · /route learn')
-  expect(toastText(cold, [lesson({ isToasted: true })])).toBe('▸ X. · /route learn')
 })
 
 test('cardOf: the concept until the kind has been shown once, and how many others fired', () => {

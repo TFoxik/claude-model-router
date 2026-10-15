@@ -123,6 +123,7 @@ declare module 'claude-code' {
       statsScope: Scope
       costTab: CostTab
       lessons: Lesson[]
+      learnCard: LearnCard | null
       lessonsReadAt: number
       learnOpen: LessonKind[]
       learnRows: string[]

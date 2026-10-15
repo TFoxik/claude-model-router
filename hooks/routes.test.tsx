@@ -933,14 +933,12 @@ test('an agent no list names is left on its model, even while a workflow spawn i
 const complete = ($: Engine, turnId: string, agentId?: string) =>
   $.turn.complete({ turnId, answer: '', durationMs: 1, isAborted: false, reason: 'answer', ...(agentId ? { agentId } : {}) } as unknown as Args<'turn.complete'>)
 
-/** Learn-mode toasts the session shows; the router's own `Route …` switch toasts are left out. */
-function collectToasts(on: On): string[] {
-  const toasts: string[] = []
-  on('ui.toast', (_$, e) => {
-    if (!e.text.startsWith('Route ')) toasts.push(e.text)
-    return { value: undefined } as never
-  })
-  return toasts
+/** The learn card the band draws, or undefined with none. */
+async function shownCard($: Engine, surface: 'desktop' | 'mobile' = 'desktop') {
+  const band = await $.ui.mount({ plugin: 'model-router', surface, component: 'AbovePrompt', props: {} as never })
+  const [title, more, fact, body] = await Promise.all(['learn-card-title', 'learn-card-more', 'learn-card-fact', 'learn-card-body'].map(key => band.find({ key })))
+  await band.unmount()
+  return title === undefined ? undefined : { title: title.text, more: more?.text, fact: fact?.text, hasBody: body !== undefined }
 }
 
 /** A session with learn mode set as given, two prompts apart by more than the cache TTL, the second rebuilding the cache. */
@@ -949,7 +947,11 @@ async function coldPrompts($: Engine, on: On, isLearning: boolean) {
   const clock = mock.clock(on, { now: T0 })
   const facts = { context: 100_000, usage: usageOf(100_000) }
   guardSession(on, facts)
-  const toasts = collectToasts(on)
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined } as never
+  })
   on('ui.open', () => ({ value: undefined }) as never)
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   const prompt = async (id: string, usage: StepUsage) => {
@@ -961,66 +963,56 @@ async function coldPrompts($: Engine, on: On, isLearning: boolean) {
   }
   await prompt('a', usageOf(100_000))
   await clock.advance(61 * 60_000)
-  return { toasts, prompt, clock, facts }
+  return { prompt, clock, facts, toasts }
 }
 
-test('learn mode: a cold rewrite toasts once per turn, lands in the pane, and the band counts it until opened', async ($, on) => {
-  const { toasts, prompt } = await coldPrompts($, on, true)
+test('learn mode: the expiry card shows while idle, and the cold rewrite takes its place when the turn ends', async ($, on) => {
+  const { prompt } = await coldPrompts($, on, true)
+  expect(await shownCard($)).toEqual({
+    title: '📚 Cache about to go cold',
+    more: undefined,
+    fact: 'The prompt cache goes cold in 5m. A send before then reads the 100k tokens for $0.02; after, it re-writes them on Opus 5.5 for $0.80. Leaving for longer? /route away',
+    hasBody: true,
+  })
   await prompt('cold', usageOf(0, 100_000))
-  expect(toasts).toEqual([
-    'Cache about to go cold: The prompt cache goes cold in 5m. A send before then reads the 100k tokens for $0.02; after, it re-writes them on Opus 5.5 for $0.80. Leaving for longer? /route away · /route learn',
-    'Cache went cold: The cache had expired after 1h01m idle, so this send re-wrote 100k tokens on Opus 5.5 for $0.80; read warm they would have cost $0.02. · /route learn',
-  ])
-  const band = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
-  expect(await band.find({ type: 'Button', text: 'Learn ●3' })).toBeDefined()
-  await band.press({ key: 'band-learn' })
-  await band.unmount()
-  const after = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
-  expect(await after.find({ type: 'Button', text: /^Learn/ })).toBeUndefined()
-  await after.unmount()
-  const pane = await mountPane($, 'learn')
-  expect(await pane.find({ type: 'Text', text: /re-wrote 100k tokens on Opus 5\.5 for \$0\.80/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /The same tokens on Sonnet 5\.5 would cost about \$0\.40/ })).toBeDefined()
-  await pane.unmount()
+  expect(await shownCard($)).toEqual({
+    title: '📚 Cache went cold',
+    more: '+1 more',
+    fact: 'The cache had expired after 1h01m idle, so this send re-wrote 100k tokens on Opus 5.5 for $0.80; read warm they would have cost $0.02.',
+    hasBody: true,
+  })
 })
 
-test('learn mode off: no lessons, no toast, and switching off drops pending ones', async ($, on) => {
-  const { toasts, prompt, clock } = await coldPrompts($, on, false)
+test('learn mode off: no card, and a turn running when it is switched off shows none', async ($, on) => {
+  const { prompt, clock } = await coldPrompts($, on, false)
   await prompt('cold', usageOf(0, 100_000))
-  expect(toasts).toEqual([])
+  expect(await shownCard($)).toBeUndefined()
   await route($, 'learn on')
   await clock.advance(61 * 60_000)
   await submit($, 'x')
   await $.turn.start({ text: 'x', turnId: 'x' })
   await step($, 'x')
-  const before = toasts.length
   await route($, 'learn off')
   await complete($, 'x')
-  expect(toasts.length).toBe(before)
-  const pane = await mountPane($, 'learn')
-  expect(await pane.find({ type: 'Text', text: /The cache had expired/ })).toBeUndefined()
-  await pane.unmount()
+  await route($, 'learn on')
+  expect(await shownCard($)).toBeUndefined()
 })
 
-test('muted learn topics are not kept, toasted or counted, and the Learn pane mutes and unmutes them', async ($, on) => {
-  const { toasts, prompt } = await coldPrompts($, on, true)
+test('switching learn mode off takes the card down', async ($, on) => {
+  const { clock } = await learningSession($, on)
+  await clock.advance(55 * 60_000)
+  expect(await shownCard($)).toMatchObject({ title: '📚 Cache about to go cold' })
+  await route($, 'learn off')
+  await route($, 'learn on')
+  expect(await shownCard($)).toBeUndefined()
+})
+
+test('a muted topic gets no card; the next costliest lesson does', async ($, on) => {
+  const { prompt } = await coldPrompts($, on, true)
   expect((await route($, 'learn mute nope')).text).toMatch(/^Usage: \/route learn mute\|unmute <topic>, topics: cold-rewrite, /)
   expect((await route($, 'learn mute cold-rewrite')).text).toBe('Learn mode stays quiet about "Cache went cold" now. /route learn unmute cold-rewrite brings it back.')
-  const before = toasts.length
   await prompt('cold', usageOf(0, 100_000))
-  expect(toasts.slice(before)).toEqual([expect.stringMatching(/^An expensive model did most of the work: /)])
-  const band = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
-  expect(await band.find({ type: 'Button', text: 'Learn ●2' })).toBeDefined()
-  await band.unmount()
-  const pane = await mountPane($, 'learn', 'desktop')
-  expect(await pane.find({ type: 'Text', text: /The cache had expired/ })).toBeUndefined()
-  expect(await pane.find({ type: 'Text', text: /would cost about/ })).toBeDefined()
-  await pane.press({ key: 'mute:pricey-model' })
-  expect(await pane.find({ type: 'Text', text: /would cost about/ })).toBeUndefined()
-  expect(await pane.find({ type: 'Button', text: 'An expensive model did most of the work' })).toBeDefined()
-  await pane.press({ key: 'unmute:cold-rewrite' })
-  expect(await pane.find({ type: 'Button', text: 'Cache went cold' })).toBeUndefined()
-  await pane.unmount()
+  expect(await shownCard($)).toMatchObject({ title: '📚 An expensive model did most of the work', more: undefined })
   expect((await route($, 'learn unmute pricey-model')).text).toBe('Learn mode explains "An expensive model did most of the work" again.')
 })
 
@@ -1033,16 +1025,84 @@ test('a muted cold-rewrite topic drops the why from the cold-send guard', async 
 })
 
 test('a subagent turn ending does not flush the main loop lessons', async ($, on) => {
-  const { toasts, facts } = await coldPrompts($, on, true)
+  const { facts } = await coldPrompts($, on, true)
   facts.usage = usageOf(0, 100_000)
   await submit($, 'c')
   await $.turn.start({ text: 'c', turnId: 'c' })
   await step($, 'c')
-  const before = toasts.length
   await complete($, 's1', 'sub-1')
-  expect(toasts.length).toBe(before)
+  expect(await shownCard($)).toBeUndefined()
   await complete($, 'c')
-  expect(toasts.length).toBe(before + 1)
+  expect(await shownCard($)).toMatchObject({ title: '📚 Cache went cold' })
+})
+
+test('the card explains a topic the first time and shows only the fact after', async ($, on) => {
+  const { prompt, clock } = await coldPrompts($, on, true)
+  await prompt('cold', usageOf(0, 100_000))
+  expect(await shownCard($)).toMatchObject({ title: '📚 Cache went cold', hasBody: true })
+  await clock.advance(61 * 60_000)
+  await prompt('cold2', usageOf(0, 100_000))
+  expect(await shownCard($)).toMatchObject({ title: '📚 Cache went cold', hasBody: false })
+})
+
+test('the next prompt you send takes the card down, and so does Got it', async ($, on) => {
+  const { prompt } = await coldPrompts($, on, true)
+  expect(await shownCard($)).toMatchObject({ title: '📚 Cache about to go cold' })
+  await submit($, 'go on')
+  expect(await shownCard($)).toBeUndefined()
+  await prompt('cold', usageOf(0, 100_000))
+  expect(await shownCard($)).toMatchObject({ title: '📚 Cache went cold' })
+  const band = await bandOf($)
+  await band.press({ key: 'learn-got' })
+  await band.unmount()
+  expect(await shownCard($)).toBeUndefined()
+})
+
+test('Mute topic mutes the card topic, takes the card down and says how to undo it', async ($, on) => {
+  const { prompt, clock, toasts } = await coldPrompts($, on, true)
+  await prompt('cold', usageOf(0, 100_000))
+  const band = await bandOf($)
+  await band.press({ key: 'learn-mute' })
+  await band.unmount()
+  expect(await shownCard($)).toBeUndefined()
+  expect(toasts.at(-1)).toBe('Learn mode stays quiet about "Cache went cold" now. /route learn unmute cold-rewrite brings it back.')
+  await clock.advance(61 * 60_000)
+  await prompt('cold2', usageOf(0, 100_000))
+  expect((await shownCard($))?.title).not.toBe('📚 Cache went cold')
+})
+
+test('the card goes away when its topic is muted by command', async ($, on) => {
+  const { prompt } = await coldPrompts($, on, true)
+  await prompt('cold', usageOf(0, 100_000))
+  expect(await shownCard($)).toMatchObject({ title: '📚 Cache went cold' })
+  await route($, 'learn mute cold-rewrite')
+  expect(await shownCard($)).toBeUndefined()
+})
+
+test('/clear takes the card down', async ($, on) => {
+  const { prompt } = await coldPrompts($, on, true)
+  await prompt('cold', usageOf(0, 100_000))
+  expect(await shownCard($)).toMatchObject({ title: '📚 Cache went cold' })
+  await $.command.run({ command: 'clear', args: '', origin: { kind: 'user' } } as unknown as Args<'command.run'>)
+  expect(await shownCard($)).toBeUndefined()
+})
+
+test('with the band hidden the card still shows, above what else sits over the prompt', async ($, on) => {
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => { const { Text } = $.ui.resolve(e); return <Text key="engine-band">engine</Text> })
+  const { prompt } = await coldPrompts($, on, true)
+  await route($, 'band off')
+  await prompt('cold', usageOf(0, 100_000))
+  const band = await bandOf($)
+  expect(await band.find({ key: 'learn-card-title' })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: 'engine' })).toBeDefined()
+  expect(await band.find({ key: 'band-open' })).toBeUndefined()
+  await band.unmount()
+})
+
+test('on a phone the card leaves the concept out', async ($, on) => {
+  const { prompt } = await coldPrompts($, on, true)
+  await prompt('cold', usageOf(0, 100_000))
+  expect(await shownCard($, 'mobile')).toMatchObject({ title: '📚 Cache went cold', hasBody: false })
 })
 
 test('/route learn opens the pane from anywhere; on and off only when typed', async ($, on) => {
@@ -1098,12 +1158,12 @@ test('the learn pane explains a kind until seen enough, toggles why, and offers 
   await pane.unmount()
 })
 
-/** A learning session over a 200k context on the mine preset, one warm prompt in, toasts collected. */
+/** A learning session over a 200k context on the mine preset, one warm prompt in. */
 async function learningSession($: Engine, on: On, coldGuard: 'refuse' | 'off' = 'off') {
   mock.store(on, { config: { ...MINE, coldGuard, isLearning: true } })
   const clock = mock.clock(on, { now: T0 })
   guardSession(on, { context: 200_000, usage: usageOf(200_000) })
-  const toasts = collectToasts(on)
+  on('ui.toast', () => ({ value: undefined }) as never)
   on('prompt.attachment', (_$, e) => ({ text: e.text }))
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   const prompt = async (id: string, before?: () => Promise<void>) => {
@@ -1114,17 +1174,20 @@ async function learningSession($: Engine, on: On, coldGuard: 'refuse' | 'off' = 
     await complete($, id)
   }
   await prompt('a')
-  return { toasts, clock, prompt }
+  return { clock, prompt }
 }
 
 test('learn mode warns while idle, before the cache goes cold', async ($, on) => {
-  const { toasts, clock } = await learningSession($, on)
+  const { clock } = await learningSession($, on)
   await clock.advance(54 * 60_000)
-  expect(toasts).toEqual([])
+  expect(await shownCard($)).toBeUndefined()
   await clock.advance(60_000)
-  expect(toasts).toEqual([
-    'Cache about to go cold: The prompt cache goes cold in 5m. A send before then reads the 200k tokens for $0.04; after, it re-writes them on Opus 5.5 for $1.60. Leaving for longer? /route away · /route learn',
-  ])
+  expect(await shownCard($)).toEqual({
+    title: '📚 Cache about to go cold',
+    more: undefined,
+    fact: 'The prompt cache goes cold in 5m. A send before then reads the 200k tokens for $0.04; after, it re-writes them on Opus 5.5 for $1.60. Leaving for longer? /route away',
+    hasBody: true,
+  })
 })
 
 test('learn mode explains why the cold-send guard held a message', async ($, on) => {
@@ -1135,13 +1198,14 @@ test('learn mode explains why the cold-send guard held a message', async ($, on)
 })
 
 test('learn mode warns that leaving plan mode will rewrite the cache too', async ($, on) => {
-  const { toasts, prompt } = await learningSession($, on)
+  const { prompt } = await learningSession($, on)
   await prompt('p', () => attach($, 'plan_mode'))
-  expect(toasts).toEqual([
-    'Plan mode switches rewrite the cache: Plan mode runs on Opus 5.5 high and normal work on Opus 5.5 medium, so each switch re-writes the cache: at 200k tokens, entering cost about $1.60 and leaving will cost about $1.60. Routing both the same avoids it; so does switching while the context is small. · /route learn',
-  ])
+  expect(await shownCard($)).toMatchObject({
+    title: '📚 Plan mode switches rewrite the cache',
+    fact: 'Plan mode runs on Opus 5.5 high and normal work on Opus 5.5 medium, so each switch re-writes the cache: at 200k tokens, entering cost about $1.60 and leaving will cost about $1.60. Routing both the same avoids it; so does switching while the context is small.',
+  })
   await prompt('p2', () => attach($, 'plan_mode'))
-  expect(toasts.length).toBe(1)
+  expect(await shownCard($)).toBeUndefined()
 })
 
 test('/route away prices stepping away for this session, from anywhere', async ($, on) => {
@@ -1283,18 +1347,22 @@ const okTool = (on: On) => on('tool.call', () => ({ result: '', text: 'ok' }) as
 
 test('a commit over a big context turns the band to next /clear until the next prompt, and learn mode says why', async ($, on) => {
   okTool(on)
-  const { toasts, prompt } = await learningSession($, on)
+  const { prompt } = await learningSession($, on)
   await prompt('c', async () => {
     await $.tool.call({ tool: 'Bash', command: 'git commit -m "done"', tool_use_id: 'tu1' } as never)
   })
+  expect(await shownCard($)).toMatchObject({
+    title: '📚 Clear after committing',
+    fact: 'Work was committed. Each further request re-reads the 200k tokens of finished work ($0.04 warm): /clear and start the next task fresh, or /compact to carry a summary.',
+  })
+  const card = await bandOf($)
+  await card.press({ key: 'learn-got' })
+  await card.unmount()
   const band = await bandOf($)
   expect((await band.find({ key: 'advice' }))?.text).toBe('next /clear')
   expect(await band.find({ type: 'Text', text: /next \/clear/ })).toBeUndefined()
   expect(await buttonKeys(band)).toEqual(['band-learn', 'advice', 'ctx', 'band-cost', 'band-open'])
   await band.unmount()
-  expect(toasts).toEqual([
-    'Clear after committing: Work was committed. Each further request re-reads the 200k tokens of finished work ($0.04 warm): /clear and start the next task fresh, or /compact to carry a summary. · /route learn',
-  ])
   await prompt('d')
   const after = await bandOf($)
   expect(await after.find({ key: 'advice' })).toBeUndefined()
