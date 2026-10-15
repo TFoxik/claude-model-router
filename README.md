@@ -28,11 +28,11 @@ The **[field guide](https://tfoxik.github.io/claude-model-router/)** walks throu
   - A claude.ai connector counts once, whether the CLI (`claude.ai Figma`) or the desktop app (an id) loaded it. Connectors you never signed in to, and claude.ai's own Visualize, aren't counted. A plugin's hooks can't be seen, so plugins with only hooks are never listed.
 - **Shows where the money went, in one Cost pane.** Its tabs are **Last prompt** (each request and subagent, with tips), **Session** (spend per route) and **History**, kept across sessions: which commands cost most on average and your most expensive prompts, with the models each one used, for this repo or all repos. **Cost** in the band opens it on Last prompt; the footer's `▤ today $12.30` opens History.
 - **Guards cold sends.** When the cache has expired over a big context, your next message is held once with its price: `This send re-writes ~200k tokens on Opus 5.5 = $1.60 (warm would be $0.04)`. Send it again to pay, or `/clear`.
-- **Teaches, if you want it to.** Learn mode (off by default) explains each cache miss, model switch, growing context and expensive prompt with the real numbers, warns before the cache goes cold, and says why a commit is a good moment to `/clear`. The Learn pane also lists three habits no hook can spot: `/clear` between unrelated tasks, `/btw` for side questions, and Esc Esc to rewind. `/route away`, and the Context pane's **Before a break** box once the context is big, compare the cheapest ways to step away from a session.
+- **Teaches, if you want it to.** Learn mode (off by default) explains each cache miss, model switch, growing context and expensive prompt with the real numbers, warns before the cache goes cold, and says why a commit is a good moment to `/clear`. The lesson shows as a card above the band right when it applies, and goes away when you send your next prompt. **Mute topic** on the card silences that kind of lesson. Three habits no hook can spot are worth keeping anyway: `/clear` between unrelated tasks, `/btw` for side questions, and Esc Esc to rewind. `/route away`, and the Context pane's **Before a break** box once the context is big, compare the cheapest ways to step away from a session.
 
 ![The /route pane: routing on, the live route, the preset and the route table, then every setting grouped at the bottom](docs/routes-pane.svg)
 
-![A learn mode toast warning that the cache goes cold in 5 minutes, and the Learn pane explaining a cold cache rewrite with its cost](docs/learn.svg)
+![A learn mode card above the band explaining a cold cache rewrite with its cost](docs/learn.svg)
 
 ## Install
 
@@ -76,7 +76,7 @@ Then restart or run `/reload-plugins`. Saved settings carry over. See [CHANGELOG
 | `/route last` / `stats` / `context` | Open Cost on Last prompt, Cost on History, or the Context pane |
 | `/route stats clear` | Delete the saved prompt history |
 | `/route stats text on\|off` | Keep the first 120 characters of each prompt in Cost › History (default on); off also removes text already kept |
-| `/route learn` / `learn on\|off` | Open the Learn pane / turn learn mode on or off (default off) |
+| `/route learn` / `learn on\|off` | Show whether learn mode is on and which topics are muted / turn learn mode on or off (default off) |
 | `/route learn mute\|unmute <topic>` | Silence a topic: `cold-rewrite`, `switch-rewrite`, `pricey-model`, `context-high`, `compacted`, `subagents`, `cache-expiring`, `plan-toggle`, `strategy`, `handoff`, `plan-ready`, `corrections`, `exploration`, `auto-handoff` |
 | `/route next on\|off` | Show or hide the band's `next /clear`, `/compact` or `/handoff` and the Context pane's advice tip (default on) |
 | `/route handoffs` / `handoffs on\|off` | Open the Handoffs pane: open handoffs to resume, mark done or not relevant / turn handoffs on or off: the band's count and auto-handoff (default on) |
@@ -102,7 +102,7 @@ Routes: `main`, `plan`, `sub:*`, `sub:<agent-type>` (such as `sub:Explore`), `wo
 - **Two optional model calls**, both off unless you pick them:
   - `auto` effort (presets `balanced` and `frugal`) sends the first 4,000 characters of each prompt you type to Haiku to classify it, about $0.0001 and a few hundred milliseconds. Fixed efforts make no call.
   - Auto-handoff (`/route handoffs auto on`) sends one prompt asking for a handoff, at most once per prompt, when the cache is about to go cold with work open. It is a normal turn: it reads the context at the warm cache price and pays for the handoff it writes.
-- **Stored locally** in the plugin store, across repos: prompt history for Cost › History (the first 120 characters of each prompt, repo name, cost, models; last 2,000 prompts), learn mode lessons (numbers and model names, never prompt text; last 20 per topic), handoff records (path, title, a line or two of what it is about, status), per repo which MCP servers, plugins, personal skills and claude.ai skills were loaded and used (names, counts and dates, never tool arguments), and the name behind each connector id the desktop app uses.
+- **Stored locally** in the plugin store, across repos: prompt history for Cost › History (the first 120 characters of each prompt, repo name, cost, models; last 2,000 prompts), learn mode lessons (numbers and model names, never prompt text; last 20 per topic, kept to count how often each topic was shown), handoff records (path, title, a line or two of what it is about, status), per repo which MCP servers, plugins, personal skills and claude.ai skills were loaded and used (names, counts and dates, never tool arguments), and the name behind each connector id the desktop app uses.
 - **Files: it writes only under `~/.claude/handoffs/`.** It lists and reads the handoffs there and, with auto-handoff on, writes new ones. It also reads the `.md.closed` markers other tools may leave beside a handoff, to show it as done. It never writes, edits or deletes a file it didn't write.
 - **Other reads.** It lists `~/.claude/skills` and `~/.claude/commands` and reads `~/.agents/.skill-lock.json`, to know your personal skills and where the `skills` CLI installed them from. It never reads your transcripts.
 - **No network or process access of its own.** Nothing leaves your machine except the model calls above, which go through Claude Code.

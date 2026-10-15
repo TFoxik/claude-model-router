@@ -236,9 +236,8 @@ td .ex { color: var(--muted); font-size: 13.5px; }
           </div>
           <div class="btns">
             <span class="zone inl" data-z="b8"><span class="pin">8</span><span class="main">Handoffs ●1</span></span>
-            <span class="zone inl" data-z="b9"><span class="pin">9</span><span class="main">Learn ●2</span></span>
-            <span class="zone inl" data-z="b10"><span class="pin">10</span><span class="primary">next /clear</span></span>
-            <span class="zone inl" data-z="b11"><span class="pin">11</span><span class="dim">Context</span> &nbsp;<span class="dim">Cost</span> &nbsp;<span>Routes</span></span>
+            <span class="zone inl" data-z="b10"><span class="pin">9</span><span class="primary">next /clear</span></span>
+            <span class="zone inl" data-z="b11"><span class="pin">10</span><span class="dim">Context</span> &nbsp;<span class="dim">Cost</span> &nbsp;<span>Routes</span></span>
           </div>
         </div>
       </div>
@@ -251,9 +250,8 @@ td .ex { color: var(--muted); font-size: 13.5px; }
         <div class="note" data-z="b6"><span class="n">6</span><h3>Last prompt and session cost</h3><div class="body"><p><b>last</b> is what your whole last prompt cost, including every subagent it started. It grows live while the prompt runs. <b>session</b> is the estimated spend in this session so far, across all routes. <b>Cost</b> on the last line opens the <a href="#cost">Cost pane</a> on its Last prompt tab.</p></div></div>
         <div class="note" data-z="b7"><span class="n">7</span><h3>Usage limits</h3><div class="body"><p>How much of your 5-hour and 7-day plan limits is used. Yellow from 70%, red from 90%.</p></div></div>
         <div class="note" data-z="b8"><span class="n">8</span><h3>Handoffs</h3><div class="body"><p>Only while other sessions' handoffs are open in this repo; resume each, or mark it Done or Not relevant, in the <a href="#handoffs">Handoffs pane</a>. Never shown while handoffs are off (<code>/route handoffs off</code>).</p></div></div>
-        <div class="note" data-z="b9"><span class="n">9</span><h3>Learn</h3><div class="body"><p>Only while <a href="#learn">learn mode</a> is on and there are lessons you haven't opened: the number is how many, counted in the Learn pane's scope (this repo, or all repos). Click it for the Learn pane.</p></div></div>
-        <div class="note" data-z="b10"><span class="n">10</span><h3>Next step</h3><div class="body"><p>Only when carrying on is not the best move. <b>next /clear</b> after a <code>git commit</code> or a pull request over 50k tokens or more, until your next prompt; once a plan is written to disk (implement it in a fresh context); after two corrections in a row; once the cache has gone cold over a big context; or after an auto-handoff was saved. <b>next /handoff</b> (or <b>next handoff</b> without the skill) instead of clearing after a commit or compacting, when two or more todos or tasks are still open. <b>next /compact</b> within 15% of auto-compact, or when the conversation is most of a context that is 60% of the way there. A highlighted button on the last line; click it for the reason, priced, at the top of the <a href="#context">Context pane</a>'s tips. It shows with learn mode on or off; <code>/route next off</code> hides it and the Context pane's advice tip.</p></div></div>
-        <div class="note" data-z="b11"><span class="n">11</span><h3>Context / Cost / Routes</h3><div class="body"><p>Open the <a href="#context">Context pane</a>, the <a href="#cost">Cost pane</a> and the <a href="#routes">Routes pane</a>. To hide the band, use the <b>Band</b> row in Routes or <code>/route band off</code>; it is kept off the band so a stray click can't hide it.</p></div></div>
+        <div class="note" data-z="b10"><span class="n">9</span><h3>Next step</h3><div class="body"><p>Only when carrying on is not the best move. <b>next /clear</b> after a <code>git commit</code> or a pull request over 50k tokens or more, until your next prompt; once a plan is written to disk (implement it in a fresh context); after two corrections in a row; once the cache has gone cold over a big context; or after an auto-handoff was saved. <b>next /handoff</b> (or <b>next handoff</b> without the skill) instead of clearing after a commit or compacting, when two or more todos or tasks are still open. <b>next /compact</b> within 15% of auto-compact, or when the conversation is most of a context that is 60% of the way there. A highlighted button on the last line; click it for the reason, priced, at the top of the <a href="#context">Context pane</a>'s tips. It shows with learn mode on or off; <code>/route next off</code> hides it and the Context pane's advice tip.</p></div></div>
+        <div class="note" data-z="b11"><span class="n">10</span><h3>Context / Cost / Routes</h3><div class="body"><p>Open the <a href="#context">Context pane</a>, the <a href="#cost">Cost pane</a> and the <a href="#routes">Routes pane</a>. To hide the band, use the <b>Band</b> row in Routes or <code>/route band off</code>; it is kept off the band so a stray click can't hide it.</p></div></div>
       </div>
     </div>
   </section>
@@ -327,7 +325,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
             <div class="label">SETTINGS</div>
             <div style="display:grid; gap:8px">
               <div class="main b">Coaching</div>
-              <div class="zone row" data-z="r8"><span class="pin">8</span><span style="min-width:0">Learn mode <span class="dim">○ off</span><br><span class="dim">explains cache misses and model costs with your own numbers, when they happen</span></span><span style="display:flex; gap:6px"><span class="btn">Turn on</span><span class="btn">Open</span></span></div>
+              <div class="zone row" data-z="r8"><span class="pin">8</span><span style="min-width:0">Learn mode <span class="dim">○ off</span><br><span class="dim">explains cache misses and model costs with your own numbers, when they happen</span></span><span class="btn">Turn on</span></div>
               <div class="zone row" data-z="r9"><span class="pin">9</span><span>Next-step advice <span class="ok">● on</span></span><span class="btn">Turn off</span></div>
             </div>
             <div style="display:grid; gap:8px">
@@ -367,7 +365,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
         </dl><p>Other agent types use Default. Give one its own route with <code>/route set sub:&lt;agent-type&gt; haiku low</code>.</p></div></div>
         <div class="note" data-z="r6"><span class="n">6</span><h3>How inherit works</h3><div class="body"><p><code>inherit</code> means “use the row above”. Model and effort are looked up separately, walking up until a real value is found, then falling back to the session.</p><div class="chain">Plan mode → Normal work → session</div><div class="chain">Explore / Plan agent / General / Workflow / Teammates → Default → session</div><p><b>Forks</b>, background copies of the current conversation, always use the parent's model.</p></div></div>
         <div class="note" data-z="r7"><span class="n">7</span><h3>Draft notice</h3><div class="body"><p>Changing a drop-down above doesn't take effect yet. Once you change something, this line becomes the Draft box shown <a href="#draft">below</a>. The settings under it don't use the draft: each one applies at once.</p></div></div>
-        <div class="note" data-z="r8"><span class="n">8</span><h3>Learn mode</h3><div class="body"><p>Settings › Coaching. Off by default. <b>Turn on</b> starts the lessons described in <a href="#learn">Learn mode</a>; the line under it disappears and the button becomes <b>Turn off</b>. <b>Open</b> shows the Learn pane. Same as <code>/route learn on</code> / <code>off</code>.</p></div></div>
+        <div class="note" data-z="r8"><span class="n">8</span><h3>Learn mode</h3><div class="body"><p>Settings › Coaching. Off by default. <b>Turn on</b> starts the lessons described in <a href="#learn">Learn mode</a>; the line under it disappears and the button becomes <b>Turn off</b>. Same as <code>/route learn on</code> / <code>off</code>.</p></div></div>
         <div class="note" data-z="r9"><span class="n">9</span><h3>Next-step advice</h3><div class="body"><p>Settings › Coaching. On by default. Shows <b>next /clear</b>, <b>next /compact</b> or <b>next /handoff</b> in the band when carrying on is not the best move, with the reason at the top of the Context pane's tips. <b>Turn off</b> hides both, and learn mode stops teaching from that advice. Same as <code>/route next on</code> / <code>off</code>.</p></div></div>
         <div class="note" data-z="r10"><span class="n">10</span><h3>Handoffs</h3><div class="body"><p>Settings › Handoffs. On by default. <b>Turn off</b> switches the whole feature off: no <b>Handoffs ●N</b> in the band and no auto-handoff, while handoffs you save with <code>/handoff</code> stay listed. <b>Open</b> shows the <a href="#handoffs">Handoffs pane</a>. Same as <code>/route handoffs on</code> / <code>off</code>.</p></div></div>
         <div class="note" data-z="r11"><span class="n">11</span><h3>Auto-handoff</h3><div class="body"><p>Indented under Handoffs, and shown only while Handoffs is on. Off by default. When on, and the cache is in its last minutes with two or more steps open or a plan not yet started, model-router asks Claude for a handoff while the cache is still warm and saves the reply under <code>~/.claude/handoffs/&lt;repo&gt;/</code>. The handoff ends with its open steps under <code>## Open steps</code>, each tagged <code>(you)</code> or <code>(claude)</code> for who does it. It waits while you type or anything runs, goes once per prompt, and never clears the session. Same as <code>/route handoffs auto on</code> / <code>off</code>.</p></div></div>
@@ -650,39 +648,31 @@ td .ex { color: var(--muted); font-size: 13.5px; }
     <div class="part-head">
       <div class="where">/route learn on · or Turn on in the Routes pane</div>
       <h2>Learn mode</h2>
-      <p>Off until you turn it on. While it's on, the mod turns what it measures into short lessons: a toast when something costs you, or is about to, and a Learn pane that keeps them. Every lesson quotes the real numbers from your session; nothing is a generic tip.</p>
+      <p>Off until you turn it on. While it's on, the mod turns what it measures into short lessons, shown as a card above the band at the moment they apply: when a turn that cost you ends, or just before the cache goes cold. The card stays until you send your next prompt, because a lesson about a turn you've moved on from is noise. Every lesson quotes the real numbers from your session; nothing is a generic tip.</p>
     </div>
     <div class="grid">
       <div class="stick">
-        <div class="pane">
-          <div class="zone" data-z="n1" style="display:grid"><span class="pin">1</span>
-            <div class="toast"><span class="dim">model-router</span><span>Cache about to go cold: The prompt cache goes cold in 5m. A send before then reads the 200k tokens for $0.04; after, it re-writes them on Opus 5.5 for $1.60. Leaving for longer? /route away · /route learn</span></div>
+        <div class="pane mono">
+          <div class="zone lesson box" data-z="n1" style="border-color: var(--p-sub); margin-bottom: 10px"><span class="pin">1</span>
+            <div class="t"><span class="b sub">📚 Cache went cold</span><span class="dim">+1 more</span></div>
+            <div class="zone" data-z="n2"><span class="pin">2</span><span>The cache had expired after 1h12m idle, so this send re-wrote 200k tokens on Opus 5.5 for $1.60; read warm they would have cost $0.04.</span></div>
+            <div class="zone dim" data-z="n3" style="font-style:italic"><span class="pin">3</span>Each request re-sends the whole conversation. A warm prompt cache lets the API read it back cheaply, at a tenth of the input price or less. The cache expires after the TTL (1 hour in Claude Code, 5 minutes on some setups)…</div>
+            <div class="zone" data-z="n4" style="display:flex; justify-content:flex-end; gap:16px"><span class="pin">4</span><span class="b">Got it</span><span>Mute topic</span></div>
           </div>
-          <div class="titlebar"><span>Learn</span><span>⤢ ✕</span></div>
-          <div class="row"><span class="main b">Learn · my-app</span><span><span>This repo</span> &nbsp;<span class="dim">All</span></span></div>
-          <div class="zone lesson box" data-z="n2"><span class="pin">2</span>
-            <div class="t"><span class="b">Cache went cold</span><span><span class="why">hide why</span> &nbsp;<span class="why">mute</span></span></div>
-            <div class="zone fact" data-z="n4"><span class="pin">4</span><span class="dim">9.10. 14:32</span><span>The cache had expired after 1h12m idle, so this send re-wrote 200k tokens on Opus 5.5 for $1.60; read warm they would have cost $0.04.</span></div>
-            <div class="dim" style="margin-top:6px">Earlier</div>
-            <div class="fact dim"><span>8.10. 18:05</span><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">The cache had expired after 2h05m idle, so this send re-wrote 140k tokens…</span></div>
-            <div class="zone dim" data-z="n3" style="margin-top:6px; font-style:italic"><span class="pin">3</span>Each request re-sends the whole conversation. A warm prompt cache lets the API read it back cheaply, at a tenth of the input price or less. The cache expires after the TTL (1 hour in Claude Code, 5 minutes on some setups)…</div>
+          <div class="band">
+            <div class="lines">
+              <div><span class="main b">▸ main · Opus 5.5 medium</span> <span class="dim">│</span> <span class="plan">plan</span><span class="dim"> Opus high · </span><span class="main">main</span><span class="dim"> Opus medium · </span><span class="sub">sub</span><span class="dim"> Sonnet high</span></div>
+              <div><span class="dim">cache </span><span class="ok">100%</span><span class="dim"> 60m · context </span><span class="ok">31%</span><span class="dim"> · last $1.72 · session $3.68</span></div>
+            </div>
+            <div class="btns"><span class="dim">Context</span><span class="dim">Cost</span><span>Routes</span></div>
           </div>
-          <div class="lesson box">
-            <div class="t"><span class="b">Subagents did most of the spending</span><span><span class="why">why?</span> &nbsp;<span class="why">mute</span></span></div>
-            <div class="fact"><span class="dim">9.10. 11:20</span><span>3 subagents made up 72% of this prompt ($1.30), most of it sub:Explore on Opus 5.5. Subagents start with a fresh context, so moving sub:Explore to a cheaper model costs no cache rewrite: /route set sub:Explore sonnet</span></div>
-            <div class="dim" style="margin-top:6px">Earlier</div>
-            <div class="fact dim"><span>8.10. 16:47</span><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">2 subagents made up 64% of this prompt ($0.58)…</span></div>
-            <div class="fact dim"><span>7.10. 09:12</span><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">4 subagents made up 81% of this prompt ($2.10)…</span></div>
-          </div>
-          <div class="zone row" data-z="n5"><span class="pin">5</span><span class="dim">learn mode on · prices as of 2026-10-06, estimates</span><span class="dim" style="text-decoration:underline">Turn off</span></div>
         </div>
       </div>
       <div class="notes">
-        <div class="note" data-z="n1"><span class="n">1</span><h3>The toast</h3><div class="body"><p>Appears when a lesson is worth your attention right now. The first time a topic comes up it starts with the topic's name; after that with ▸.</p><p>To stay out of the way: at most one toast per turn (the costliest lesson wins), each topic at most once an hour, and a topic stops toasting after three times. Lessons that don't toast still land in the pane. The band's <b>Learn ●N</b> button counts this session's lessons that toasted and the first of each topic, not quiet repeats; older lessons and other sessions' stay in the pane.</p></div></div>
-        <div class="note" data-z="n2"><span class="n">2</span><h3>One card per topic</h3><div class="body"><p>The pane shows lessons from <b>This repo</b> first; <b>All</b> shows every repo's, each fact starting with its repo. Mutes and learn mode itself are shared by all your sessions. Topics are ordered by their newest lesson. <b>why?</b> shows or hides the explanation. <b>mute</b> stops a topic you already know, such as the expensive-model lesson when you route Opus on purpose: no lessons, toasts or count for it. Muted topics are listed at the bottom; press one to unmute it.</p></div></div>
-        <div class="note" data-z="n3"><span class="n">3</span><h3>The explanation</h3><div class="body"><p>What the concept is, why it costs, and what to do about it. It is shown open until a topic has come up three times, then folded behind <b>why?</b>, so newcomers get the full story and regulars just the numbers.</p></div></div>
-        <div class="note" data-z="n4"><span class="n">4</span><h3>The facts</h3><div class="body"><p>The newest lesson with its date and time, then up to two older ones dimmed under <b>Earlier</b>, one line each; <b>show N more</b> lists the rest. Click an earlier one to read it whole; click its time to fold it. Prices come from the same table as the rest of the mod, so they match the band and Cost. The last 20 lessons of each topic are kept.</p></div></div>
-        <div class="note" data-z="n5"><span class="n">5</span><h3>Turn off</h3><div class="body"><p>Stops new lessons and drops any the current turn had drafted. Lessons already kept stay. While learn mode is off, the pane offers <b>Turn on</b> instead.</p></div></div>
+        <div class="note" data-z="n1"><span class="n">1</span><h3>The card</h3><div class="body"><p>Appears above the band when a turn ends with something worth knowing, or while you're idle just before the cache goes cold. It shows the one lesson most worth it: the costliest that turn. <b>+1 more</b> says other lessons fired too; they're kept, not shown. It goes away when you send your next prompt or <code>/clear</code>, and still shows when the band is hidden. Only the terminal and the desktop app draw above the prompt; a session shown only elsewhere, such as VS Code, gets the lesson as a toast instead.</p><p>To stay out of the way: each topic shows at most once an hour, and stops showing after three times.</p></div></div>
+        <div class="note" data-z="n2"><span class="n">2</span><h3>The fact</h3><div class="body"><p>This turn's numbers. Prices come from the same table as the rest of the mod, so they match the band and Cost.</p></div></div>
+        <div class="note" data-z="n3"><span class="n">3</span><h3>The explanation</h3><div class="body"><p>What the concept is, why it costs, and what to do about it. Only the first time a topic shows; after that the card is the title and the fact.</p></div></div>
+        <div class="note" data-z="n4"><span class="n">4</span><h3>Got it / Mute topic</h3><div class="body"><p><b>Got it</b> takes the card down. <b>Mute topic</b> stops that kind of lesson, such as the expensive-model one when you route Opus on purpose, and a toast names the command that brings it back. <code>/route learn</code> lists the muted topics. Mutes and learn mode itself are shared by all your sessions.</p></div></div>
       </div>
     </div>
     <div class="tablewrap" style="margin-top:28px">
@@ -706,7 +696,7 @@ td .ex { color: var(--muted); font-size: 13.5px; }
           <tr><td><b>Handoff saved before the cache went cold</b> <span class="chip">after</span></td><td>After an <a href="#routes">auto-handoff</a> was saved.</td><td class="ex">Saved a handoff to ~/.claude/handoffs/r/2026-10-11-1432-ab12cd34.md for $0.04 before the cache went cold. Resending 140k tokens cold would have cost $0.52.</td></tr>
         </tbody>
       </table>
-      <p><b>Habits.</b> The Learn pane also lists, in a box of their own, three habits no hook can spot, whether learn mode is on or off: <code>/clear</code> between unrelated tasks, since a new topic on top of an old one pays to re-read it; <code>/btw</code> for side questions, whose answer never enters the conversation; and Esc Esc to rewind to before a bad turn instead of correcting on top of it.</p>
+      <p><b>Habits.</b> Three habits no hook can spot are worth keeping anyway: <code>/clear</code> between unrelated tasks, since a new topic on top of an old one pays to re-read it; <code>/btw</code> for side questions, whose answer never enters the conversation; and Esc Esc to rewind to before a bad turn instead of correcting on top of it.</p>
     </div>
   </section>
 
@@ -810,9 +800,9 @@ td .ex { color: var(--muted); font-size: 13.5px; }
             <tr><td><code>/route cost [last|session|history]</code></td><td>Open the Cost pane, on a tab if you name one</td></tr>
             <tr><td><code>/route last</code> · <code>stats</code></td><td>Open Cost on Last prompt, or on History</td></tr>
             <tr><td><code>/route context</code></td><td>Open the Context pane</td></tr>
-            <tr><td><code>/route learn</code></td><td>Open the Learn pane</td></tr>
+            <tr><td><code>/route learn</code></td><td>Show whether learn mode is on and which topics are muted</td></tr>
             <tr><td><code>/route learn on|off</code></td><td>Turn learn mode on or off (default off); also in the Routes pane</td></tr>
-            <tr><td><code>/route learn mute|unmute &lt;topic&gt;</code></td><td>Silence or bring back one topic, such as <code>pricey-model</code>; also in the Learn pane</td></tr>
+            <tr><td><code>/route learn mute|unmute &lt;topic&gt;</code></td><td>Silence or bring back one topic, such as <code>pricey-model</code>; muting also from the card</td></tr>
             <tr><td><code>/route handoffs</code></td><td>Open the Handoffs pane</td></tr>
             <tr><td><code>/route handoffs on|off</code></td><td>Turn the whole Handoffs feature on or off (default on); also in the Routes pane</td></tr>
             <tr><td><code>/route handoffs auto on|off</code></td><td>Turn auto-handoff on or off (default off); also in the Routes pane</td></tr>

@@ -1,20 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="820" height="312" viewBox="0 0 820 312" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12">
-  <rect width="820" height="312" rx="12" fill="#1f1e1d"/>
-  <rect x="300" y="12" width="508" height="105" rx="10" fill="#2a2927" stroke="#4a4946"/>
-  <text x="314" y="32" fill="#8b8a86">model-router</text>
-  <text x="314" y="52" fill="#e9e7e2">Cache about to go cold: The prompt cache goes cold in 5m. A send</text>
-  <text x="314" y="69" fill="#e9e7e2">before then reads the 200k tokens for $0.04; after, it re-writes</text>
-  <text x="314" y="86" fill="#e9e7e2">them on Opus 5.5 for $1.60. Leaving for longer?</text>
-  <text x="314" y="103" fill="#e9e7e2">/route away · /route learn</text>
-  <text x="28" y="134" fill="#d97757" font-weight="700" font-size="14">Learn · my-app</text>
-  <text x="792" y="134" text-anchor="end"><tspan fill="#e9e7e2" text-decoration="underline">This repo</tspan><tspan fill="#8b8a86" text-decoration="underline" dx="8">All</tspan></text>
-  <text x="28" y="164" fill="#e9e7e2" font-weight="700">Cache went cold</text>
-  <text x="792" y="164" text-anchor="end"><tspan fill="#8b8a86" text-decoration="underline">hide why</tspan><tspan fill="#8b8a86" text-decoration="underline" dx="16">mute</tspan></text>
-  <text x="28" y="188"><tspan fill="#8b8a86">9.10. 14:32</tspan><tspan x="122" fill="#e9e7e2">The cache had expired after 1h12m idle, so this send re-wrote 200k tokens</tspan></text>
-  <text x="122" y="204" fill="#e9e7e2">on Opus 5.5 for $1.60; read warm they would have cost $0.04.</text>
-  <text x="28" y="230" fill="#8b8a86" font-style="italic">Each request re-sends the whole conversation. A warm prompt cache lets the API read it back cheaply,</text>
-  <text x="28" y="246" fill="#8b8a86" font-style="italic">at a tenth of the input price or less. The cache expires after the TTL; the first send after that</text>
-  <text x="28" y="262" fill="#8b8a86" font-style="italic">writes everything again, at 1.25-2× input. /clear and start from a short note, or come back in time.</text>
-  <text x="28" y="292" fill="#8b8a86">learn mode on · prices as of 2026-10-06, estimates</text>
-  <text x="792" y="292" fill="#8b8a86" text-anchor="end" text-decoration="underline">Turn off</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="262" viewBox="0 0 820 262" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12">
+  <rect width="820" height="262" rx="12" fill="#1f1e1d"/>
+  <rect x="16" y="14" width="788" height="140" rx="10" fill="none" stroke="#6ea8e0"/>
+  <text x="32" y="38" fill="#6ea8e0" font-weight="700">📚 Cache went cold</text>
+  <text x="788" y="38" fill="#8b8a86" text-anchor="end">+1 more</text>
+  <text x="32" y="60" fill="#e9e7e2">The cache had expired after 1h12m idle, so this send re-wrote 200k tokens on Opus 5.5</text>
+  <text x="32" y="77" fill="#e9e7e2">for $1.60; read warm they would have cost $0.04.</text>
+  <text x="32" y="99" fill="#8b8a86">Each request re-sends the whole conversation. A warm prompt cache lets the API read it back</text>
+  <text x="32" y="116" fill="#8b8a86">cheaply, at a tenth of the input price or less. The cache expires after the TTL…</text>
+  <rect x="620" y="126" width="64" height="20" rx="4" fill="#d97757"/>
+  <text x="652" y="140" fill="#1f1e1d" text-anchor="middle" font-weight="700">Got it</text>
+  <text x="788" y="140" fill="#e9e7e2" text-anchor="end">Mute topic</text>
+  <text x="28" y="186"><tspan fill="#d97757" font-weight="700">▸ main · Opus 5.5 medium</tspan><tspan fill="#8b8a86"> │ </tspan><tspan fill="#5fb36b">plan</tspan><tspan fill="#8b8a86"> Opus high · </tspan><tspan fill="#d97757">main</tspan><tspan fill="#8b8a86"> Opus medium · </tspan><tspan fill="#6ea8e0">sub</tspan><tspan fill="#8b8a86"> Sonnet high</tspan></text>
+  <text x="28" y="208"><tspan fill="#8b8a86">cache </tspan><tspan fill="#5fb36b">100%</tspan><tspan fill="#8b8a86"> 60m · context </tspan><tspan fill="#5fb36b">31%</tspan><tspan fill="#8b8a86"> · last $1.72 · session $3.68</tspan></text>
+  <text x="792" y="236" text-anchor="end"><tspan fill="#8b8a86">Context</tspan><tspan fill="#8b8a86" dx="16">Cost</tspan><tspan fill="#e9e7e2" dx="16">Routes</tspan></text>
 </svg>

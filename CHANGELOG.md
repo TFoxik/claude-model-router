@@ -1,5 +1,15 @@
 # Release notes
 
+## 1.6.0 — 2026-10-15
+
+### Changed
+
+- **Lessons show as a card above the band, right when they apply.** When a turn ends, or the cache is about to go cold, learn mode shows the lesson most worth it as a card above the band: the concept the first time, this turn's numbers every time, and how many other lessons fired. It goes away when you send your next prompt, press **Got it**, or press **Mute topic**, which silences that kind of lesson. It shows even with the band hidden. In VS Code, which has no band, the lesson shows as a toast instead. Before, a lesson was an 8-second toast and waited in the Learn pane, which you opened after you had moved on.
+
+### Removed
+
+- **The Learn pane, the band's `Learn ●N` button and the unread count.** A lesson now only means something next to the turn it is about. `/route learn` prints whether learn mode is on and which topics are muted, with the command to unmute each. The three habits moved to the README.
+
 ## 1.5.0 — 2026-10-15
 
 ### Added
