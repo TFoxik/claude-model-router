@@ -6,7 +6,7 @@ export type LessonDraft = Pick<Lesson, 'kind' | 'fact' | 'usd'>
 type Level = Health['ctxLevel']
 
 const SEEN_ENOUGH = 3
-const TOAST_COOLDOWN_MS = 3_600_000
+const COOLDOWN_MS = 3_600_000
 const PER_KIND = 20
 export const MIN_REWRITE_USD = 0.05
 const MIN_PROMPT_USD = 0.25
@@ -249,9 +249,9 @@ export function lessonFromCompact(beforeTokens: number): LessonDraft {
 export function pickLesson(fresh: readonly Lesson[], earlier: readonly Lesson[], now: number): Lesson | undefined {
   const due = fresh.filter(one => {
     const before = earlier.filter(e => e.kind === one.kind)
-    const toasted = before.filter(e => e.isToasted)
-    const lastToast = Math.max(-Infinity, ...toasted.map(e => e.at))
-    return toasted.length < SEEN_ENOUGH && now - lastToast >= TOAST_COOLDOWN_MS
+    const shown = before.filter(e => e.isToasted)
+    const lastShown = Math.max(-Infinity, ...shown.map(e => e.at))
+    return shown.length < SEEN_ENOUGH && now - lastShown >= COOLDOWN_MS
   })
   return [...due].sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0))[0]
 }

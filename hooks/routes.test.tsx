@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { CostTab, Lesson } from '../types'
 import { HANDOFF_PROMPT } from './handoff'
-import { paneOf, stamp } from './ui/kit'
+import { paneOf } from './ui/kit'
 
 import {
   DEFAULT_CONFIG,
@@ -934,8 +934,8 @@ const complete = ($: Engine, turnId: string, agentId?: string) =>
   $.turn.complete({ turnId, answer: '', durationMs: 1, isAborted: false, reason: 'answer', ...(agentId ? { agentId } : {}) } as unknown as Args<'turn.complete'>)
 
 /** The learn card the band draws, or undefined with none. */
-async function shownCard($: Engine, surface: 'desktop' | 'mobile' = 'desktop') {
-  const band = await $.ui.mount({ plugin: 'model-router', surface, component: 'AbovePrompt', props: {} as never })
+async function shownCard($: Engine) {
+  const band = await bandOf($)
   const [title, more, fact, body] = await Promise.all(['learn-card-title', 'learn-card-more', 'learn-card-fact', 'learn-card-body'].map(key => band.find({ key })))
   await band.unmount()
   return title === undefined ? undefined : { title: title.text, more: more?.text, fact: fact?.text, hasBody: body !== undefined }
@@ -1093,16 +1093,71 @@ test('with the band hidden the card still shows, above what else sits over the p
   await route($, 'band off')
   await prompt('cold', usageOf(0, 100_000))
   const band = await bandOf($)
-  expect(await band.find({ key: 'learn-card-title' })).toBeDefined()
-  expect(await band.find({ type: 'Text', text: 'engine' })).toBeDefined()
+  const tree = (await band.drawn()) as { children?: Array<{ type?: string; props?: { key?: string }; children?: unknown[] }> }
+  expect(tree.children?.map(one => one.props?.key ?? one.children?.[0])).toEqual(['learn-card', 'engine'])
   expect(await band.find({ key: 'band-open' })).toBeUndefined()
   await band.unmount()
 })
 
-test('on a phone the card leaves the concept out', async ($, on) => {
+test('a session drawn only where nothing sits above the prompt gets the lesson as a toast', async ($, on) => {
+  on('session.surfaces', () => ({ value: ['vscode'] }) as never)
+  const { prompt, toasts } = await coldPrompts($, on, true)
+  await prompt('cold', usageOf(0, 100_000))
+  expect(toasts.at(-1)).toBe('Cache went cold: The cache had expired after 1h01m idle, so this send re-wrote 100k tokens on Opus 5.5 for $0.80; read warm they would have cost $0.02.')
+})
+
+test('on the desktop the lesson is a card and no toast', async ($, on) => {
+  on('session.surfaces', () => ({ value: ['desktop', 'mobile'] }) as never)
+  const { prompt, toasts } = await coldPrompts($, on, true)
+  await prompt('cold', usageOf(0, 100_000))
+  expect(toasts.filter(one => one.startsWith('Cache went cold'))).toEqual([])
+  expect(await shownCard($)).toMatchObject({ title: '📚 Cache went cold' })
+})
+
+test('a slash command you run takes the card down, but /route does not', async ($, on) => {
   const { prompt } = await coldPrompts($, on, true)
   await prompt('cold', usageOf(0, 100_000))
-  expect(await shownCard($, 'mobile')).toMatchObject({ title: '📚 Cache went cold', hasBody: false })
+  await submit($, '/route learn')
+  expect(await shownCard($)).toMatchObject({ title: '📚 Cache went cold' })
+  await submit($, '/compact')
+  expect(await shownCard($)).toBeUndefined()
+})
+
+test('a prompt nobody typed, such as a task notification, leaves the card up', async ($, on) => {
+  const { prompt } = await coldPrompts($, on, true)
+  await prompt('cold', usageOf(0, 100_000))
+  await $.prompt.submit({ text: 'task done', origin: { kind: 'task-notification' } } as Args<'prompt.submit'>)
+  expect(await shownCard($)).toMatchObject({ title: '📚 Cache went cold' })
+})
+
+test('a new session without /clear, such as approving a plan with a fresh context, takes the card down', async ($, on) => {
+  const id = { current: 'a' }
+  on('session.id', () => ({ value: id.current }) as never)
+  const { prompt } = await coldPrompts($, on, true)
+  await prompt('cold', usageOf(0, 100_000))
+  id.current = 'b'
+  await $.prompt.submit({ text: 'implement the plan', origin: { kind: 'task-notification' } } as Args<'prompt.submit'>)
+  await $.turn.start({ text: 'implement the plan', turnId: 'n' })
+  expect(await shownCard($)).toBeUndefined()
+})
+
+test('a held cold send keeps the card; it was never sent', async ($, on) => {
+  const { clock } = await learningSession($, on, 'refuse')
+  await clock.advance(61 * 60_000)
+  expect(await shownCard($)).toMatchObject({ title: '📚 Cache about to go cold' })
+  const held = await submit($, 'recap')
+  expect(held.drop).toBeDefined()
+  expect(await shownCard($)).toMatchObject({ title: '📚 Cache about to go cold' })
+})
+
+test('a survey above the prompt wins over the card', async ($, on) => {
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => { const { Text } = $.ui.resolve(e); return <Text>survey</Text> })
+  const { prompt } = await coldPrompts($, on, true)
+  await prompt('cold', usageOf(0, 100_000))
+  const ui = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: true } as never })
+  expect(await ui.find({ key: 'learn-card' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'survey' })).toBeDefined()
+  await ui.unmount()
 })
 
 test('/route learn prints learn mode and the muted topics from anywhere; on, off and mute only when typed', async ($, on) => {

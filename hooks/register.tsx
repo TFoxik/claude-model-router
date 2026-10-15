@@ -268,7 +268,7 @@ async function renderHandoffsPane($: $, e: Args<'ui.render'>) {
   })
 }
 
-/** Keeps what the finished main-loop turn taught, and toasts the one most worth it. */
+/** Keeps what the finished main-loop turn taught, and puts the one most worth it on the card. */
 async function flushLessons($: $) {
   const drafts = mem.pendingLessons
   mem.pendingLessons = []
@@ -314,10 +314,18 @@ async function teach($: $, drafts: readonly LessonDraft[], now: number) {
     return capLessons([...earlier, ...fresh.map(one => (one === pick ? { ...one, isToasted: true } : one))])
   })
   const shown = card
-  if (shown !== undefined) await update($, learnCard, () => shown)
+  if (shown === undefined) return
+  const [, isDrawn] = await Promise.all([update($, learnCard, () => shown), isCardDrawn($)])
+  if (!isDrawn) $.ui.toast(`${CONCEPTS[shown.kind].title}: ${shown.fact}`)
 }
 
 const clearCard = ($: $) => update($, learnCard, () => null)
+
+/** Only the terminal and the desktop draw above the prompt; a session drawn elsewhere alone gets the lesson as a toast. */
+async function isCardDrawn($: $) {
+  const surfaces = await $.session.surfaces().catch(() => [])
+  return surfaces.length === 0 || surfaces.some(one => one === 'terminal' || one === 'desktop')
+}
 
 /** Learn mode on or off; off drops what the running turn had drafted and the card, so nothing is kept or shown from it. */
 async function setLearning($: $, isOn: boolean) {
@@ -351,13 +359,13 @@ async function setKeepText($: $, keep: boolean) {
 
 async function setMuted($: $, kind: LessonKind, isMuted: boolean) {
   await setConfig($, c => ({ ...c, learnMuted: isMuted ? [...new Set([...c.learnMuted, kind])] : c.learnMuted.filter(one => one !== kind) }))
+  if (isMuted && (await read($, learnCard))?.kind === kind) await clearCard($)
 }
 
 const muteText = (kind: LessonKind) => `Learn mode stays quiet about "${CONCEPTS[kind].title}" now. /route learn unmute ${kind} brings it back.`
 
 async function muteFromCard($: $, kind: LessonKind) {
   await setMuted($, kind, true)
-  await clearCard($)
   $.ui.toast(muteText(kind))
 }
 
@@ -424,13 +432,17 @@ async function awayFacts($: $, cfg: RouterConfig, tokens?: number): Promise<Away
   return { tokens, model: await routedMainModel($, cfg, last.model), ttlMinutes: cfg.cacheTtlMinutes, warmMinutes }
 }
 
-/** `/route away`: the ways to step away, priced for this session as it stands. */
+async function closeOldLearnPane($: $) {
+  if ((await $.ui.panes().catch(() => [])).some(one => one.id === OLD_LEARN_ID)) await $.ui.close({ id: OLD_LEARN_ID }).catch(() => undefined)
+}
+
 async function learnStatus($: $): Promise<string> {
   const cfg = await read($, config)
   const muted = cfg.learnMuted.length === 0 ? ['No topics muted.'] : cfg.learnMuted.map(kind => `Muted: ${kind} (/route learn unmute ${kind})`)
   return [`Learn mode is ${cfg.isLearning ? 'on' : 'off'}.`, ...muted].join('\n')
 }
 
+/** `/route away`: the ways to step away, priced for this session as it stands. */
 async function awayReport($: $): Promise<string> {
   const facts = await awayFacts($, await read($, config))
   return facts === undefined ? 'Nothing is cached in this session yet.' : awayText(facts)
@@ -859,10 +871,10 @@ async function renderCostPane($: $, e: Args<'ui.render'>) {
 const setBand = async ($: $, isShown: boolean) => save($, STORE.bandShown, await update($, isBandShown, () => isShown))
 
 async function renderCard($: $, e: Args<'ui.render'>) {
-  const [card, cfg] = await Promise.all([read($, learnCard), read($, config)])
-  if (card === null || !cfg.isLearning || cfg.learnMuted.includes(card.kind)) return null
+  const card = await read($, learnCard)
+  if (card === null) return null
   const actions = { dismiss: () => void clearCard($), mute: () => void muteFromCard($, card.kind) }
-  return learnCardView($.ui.resolve(e), card, actions, { isCompact: e.surface === 'mobile' })
+  return learnCardView($.ui.resolve(e), card, actions)
 }
 
 async function renderBand($: $, e: Args<'ui.render'>) {
@@ -1175,13 +1187,12 @@ export const register: Register = on => {
     mem.repo = printable(repo?.name ?? (root.split('/').pop() || 'unknown'))
     mem.root = root === '' ? undefined : root
     // The same session starting again, after a hot reload of this code or a /login, keeps its running prompt, count and unsaved calls.
-    const [sessionId, before, idleDev, home, commands, startedAt] = await Promise.all([
+    const [sessionId, before, idleDev, home, commands] = await Promise.all([
       $.session.id().catch(() => undefined),
       read($, carried),
       $.env.get('MODEL_ROUTER_IDLE_DEV').catch(() => undefined),
       $.env.get('HOME').catch(() => undefined),
       listCommands($),
-      nowOf($),
     ])
     mem.home = home
     // The band only needs this repo's; the pane lists every repo when it opens under All.
@@ -1189,7 +1200,7 @@ export const register: Register = on => {
     mem.hasHandoffSkill = hasHandoffCommand(commands.map(one => one.name))
     const isSame = sessionId !== undefined && before?.sessionId === sessionId
     // A copy: noteUse writes into `used`, and the atom's own value is not ours to change in place.
-    mem.kept = isSame ? { ...before, used: { ...before.used } } : { sessionId, used: {}, isUncounted: true, since: startedAt }
+    mem.kept = isSame ? { ...before, used: { ...before.used } } : { sessionId, used: {}, isUncounted: true }
     if (!isSame) await carry($)
     mem.loaded = undefined
     mem.savedUsage = undefined
@@ -1199,7 +1210,7 @@ export const register: Register = on => {
     await refreshStatus($).catch(() => undefined)
     mem.tick?.cancel()
     mem.tick = $.clock.every(60_000, () => void refreshStatus($).catch(() => undefined))
-    if ((await $.ui.panes().catch(() => [])).some(one => one.id === OLD_LEARN_ID)) await $.ui.close({ id: OLD_LEARN_ID }).catch(() => undefined)
+    void closeOldLearnPane($)
     await $.command.register({ name: 'route', description: 'Model router: open the pane, or one of the verbs', argumentHint: USAGE })
     return next(e)
   })
@@ -1277,10 +1288,8 @@ export const register: Register = on => {
       mem.pendingPrompt = commandLabel(e.text)
       if (!e.text.trimStart().startsWith('/')) mem.lastCommand = undefined
     }
-    if (USER_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) {
-      mem.corrections = isCorrection(e.text) ? mem.corrections + 1 : 0
-      await clearCard($)
-    }
+    if (USER_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) mem.corrections = isCorrection(e.text) ? mem.corrections + 1 : 0
+    if (USER_ORIGINS.has(e.origin.kind) && commandLabel(e.text) !== '/route') await clearCard($)
     const out = await next(e)
     // Marked once the prompt is through: a hook further down may still drop it.
     if (resumeText !== undefined && out.drop === undefined) {
@@ -1309,7 +1318,6 @@ export const register: Register = on => {
     const done = await next(e)
     if (e.command === 'clear') {
       mem.boundary = undefined
-      mem.kept = { ...mem.kept, since: await nowOf($) }
       await carry($)
       resetSignals(true)
       await clearCard($)
@@ -1346,9 +1354,12 @@ export const register: Register = on => {
       // A /clear starts a new session without a session.start: count it, and let a reload recognise it.
       const isNew = sessionId !== mem.kept.sessionId
       const current = { label, text: cfg.keepPromptText ? printable(typedText(e.text).slice(0, 120)) : '', at }
-      mem.kept = { ...mem.kept, current, ...(isNew ? { sessionId, isUncounted: true, since: at } : {}) }
+      mem.kept = { ...mem.kept, current, ...(isNew ? { sessionId, isUncounted: true } : {}) }
       // Plan approval's "clear context" and /resume change the session without a /clear.
-      if (isNew) resetSignals(true)
+      if (isNew) {
+        resetSignals(true)
+        await clearCard($)
+      }
       await carry($)
       await update($, promptCost, () => EMPTY_PROMPT)
     }
