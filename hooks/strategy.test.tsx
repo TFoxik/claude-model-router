@@ -1,7 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
 import { MODELS, money, rewritePrice } from './routes'
-import { adviseSession, boundaryOf } from './strategy'
+import { boundaryOf } from './signals'
+import { adviseSession } from './strategy'
 import type { StrategyFacts } from './strategy'
 
 const opus = MODELS.opus.id

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { NO_STEPS, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
+import { NO_STEPS, editsAfter, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
 
 const todo = (status: string) => ({ content: 'x', status, activeForm: 'x' })
 
@@ -41,6 +41,25 @@ test('a plan is saved by ExitPlanMode or by writing a spec or plan file; other e
   expect(planEventOf('Write', { file_path: '/r/specs/x.txt' }, {})).toEqual({ kind: 'work' })
   expect(planEventOf('NotebookEdit', { notebook_path: '/r/a.ipynb' }, {})).toEqual({ kind: 'work' })
   expect(planEventOf('Read', { file_path: '/r/SPEC.md' }, {})).toBeUndefined()
+})
+
+test('each file edit counts until a git commit, which starts the count over', () => {
+  let edits = editsAfter(0, 'Write', { file_path: '/r/a.md', content: 'x' }, '/Users/x')
+  edits = editsAfter(edits, 'Edit', { file_path: '/r/a.md' }, '/Users/x')
+  edits = editsAfter(edits, 'NotebookEdit', { notebook_path: '/r/b.ipynb' }, '/Users/x')
+  expect(edits).toBe(3)
+  expect(editsAfter(edits, 'Read', { file_path: '/r/a.md' }, '/Users/x')).toBe(3)
+  expect(editsAfter(edits, 'Bash', { command: 'git status' }, '/Users/x')).toBe(3)
+  expect(editsAfter(edits, 'Bash', { command: 'git commit --dry-run' }, '/Users/x')).toBe(3)
+  expect(editsAfter(edits, 'Bash', { command: 'echo "git commit later"' }, '/Users/x')).toBe(3)
+  expect(editsAfter(edits, 'Bash', { command: 'git add -A && git commit -m "Docs"' }, '/Users/x')).toBe(0)
+})
+
+test('edits to Claude Code\'s own files under the home folder are not work to commit', () => {
+  expect(editsAfter(0, 'Write', { file_path: '/Users/x/.claude/handoffs/r/2026-10-16-0900-ab12cd34.md' }, '/Users/x')).toBe(0)
+  expect(editsAfter(0, 'Write', { file_path: '/Users/x/.claude/projects/-r/memory/a.md' }, '/Users/x')).toBe(0)
+  expect(editsAfter(0, 'Edit', { file_path: '/r/.claude/skills/a/SKILL.md' }, '/Users/x')).toBe(1)
+  expect(editsAfter(0, 'Edit', { file_path: '/Users/x/.claude/a.md' }, undefined)).toBe(1)
 })
 
 test('correcting prompts are recognised; ordinary follow-ups are not', () => {

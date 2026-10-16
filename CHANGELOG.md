@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.8.0 — 2026-10-16
+
+### Changed
+
+- **Auto-handoff also counts edits you haven't committed as open work.** Three or more file edits since the last `git commit` run in the session now make work open, as two open todos or tasks or an unstarted plan already did, so a long change left uncommitted without a todo list gets its handoff before the cache goes cold. The handoff then asks Claude to mark those files as uncommitted and to make committing them an open step. Edits by subagents count; edits under `~/.claude/`, such as handoffs and memory, don't. A commit made outside the session, in your own terminal, isn't seen.
+
 ## 1.7.1 — 2026-10-15
 
 ### Fixed

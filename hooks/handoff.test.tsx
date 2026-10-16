@@ -1,14 +1,21 @@
 import { expect, test } from 'claude-code/testing'
 
-import { HANDOFF_PROMPT, handoffPath, handoffWindow, isAgentBusy, pendingAfter, shouldAutoHandoff, tildePath } from './handoff'
+import { HANDOFF_PROMPT, handoffPath, handoffPrompt, handoffWindow, isAgentBusy, pendingAfter, shouldAutoHandoff, tildePath } from './handoff'
 import type { HandoffFacts } from './handoff'
 
-const due: HandoffFacts = { isOn: true, isArmed: true, isIdle: true, isPromptEmpty: true, canSave: true, warmMinutes: 2, ttlMinutes: 60, tokens: 140_000, openSteps: 3, hasPlan: false }
+const due: HandoffFacts = { isOn: true, isArmed: true, isIdle: true, isPromptEmpty: true, canSave: true, warmMinutes: 2, ttlMinutes: 60, tokens: 140_000, openSteps: 3, hasPlan: false, editsSinceCommit: 0 }
 
 test('auto-handoff fires in the last minutes of a warm cache with work open', () => {
   expect(shouldAutoHandoff(due)).toBe(true)
   expect(shouldAutoHandoff({ ...due, openSteps: 0, hasPlan: true })).toBe(true)
   expect(shouldAutoHandoff({ ...due, warmMinutes: 3 })).toBe(true)
+})
+
+test('edits left uncommitted count as open work without a todo list or plan', () => {
+  const noList = { ...due, openSteps: 0, hasPlan: false }
+  expect(shouldAutoHandoff({ ...noList, editsSinceCommit: 3 })).toBe(true)
+  expect(shouldAutoHandoff({ ...noList, editsSinceCommit: 2 })).toBe(false)
+  expect(shouldAutoHandoff({ ...noList, editsSinceCommit: 0 })).toBe(false)
 })
 
 test('each condition alone holds it back', () => {
@@ -76,4 +83,11 @@ test('the handoff prompt asks for open steps under a heading, each tagged with w
   expect(HANDOFF_PROMPT).toContain('## Open steps')
   expect(HANDOFF_PROMPT).toContain('(you)')
   expect(HANDOFF_PROMPT).toContain('(claude)')
+})
+
+test('with edits left uncommitted, the handoff prompt asks to say so and keeps the text its turn is told by', () => {
+  expect(handoffPrompt(2)).toBe(HANDOFF_PROMPT)
+  const uncommitted = handoffPrompt(3)
+  expect(uncommitted.startsWith(HANDOFF_PROMPT)).toBe(true)
+  expect(uncommitted).toContain('not committed')
 })

@@ -72,14 +72,13 @@ import {
   withPreset,
   withRoute,
 } from './routes'
-import { HANDOFF_DIR, HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, isAgentBusy, pendingAfter, segment, shouldAutoHandoff, tildePath } from './handoff'
+import { HANDOFF_DIR, HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, handoffPrompt, isAgentBusy, pendingAfter, segment, shouldAutoHandoff, tildePath } from './handoff'
 import type { PendingHandoff } from './handoff'
 import { bandCount, closeMarked, handoffDir, handoffRows, handoffsRoot, mergeListing, recordWritten, reopen, repoOfHandoff, resumeIn, sanitizeHandoffs, setStatus, detailsOf, withDetails } from './handoffs'
 import type { HandoffStatus, Handoffs } from './handoffs'
-import { EXPLORE_MIN, NO_STEPS, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
-import type { Steps } from './signals'
-import { adviseSession, boundaryOf } from './strategy'
-import type { Boundary } from './strategy'
+import { EXPLORE_MIN, NO_STEPS, boundaryOf, editsAfter, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
+import type { Boundary, Steps } from './signals'
+import { adviseSession } from './strategy'
 import { messagesOf, tokensByServer } from './tips'
 import type { TipAction } from './tips'
 import { DEV_PATIENCE, PATIENCE, applyUsage, claudeAiKey, claudeAiReport, claudeAiTips, connectedServers, connectorAliases, idleItems, idleReport, idleTips, itemOfCommand, itemOfToolCall, listingTokens, mcpKey, mergeAliases, onlyHere, patienceText, pluginKey, pluginName, pluginOfMcpTool, pluginServer, sanitizeAliases, sanitizeUsage, skillKey, skillReport, skillTips, sourcesOfLock, syncedSkillNames } from './usage'
@@ -519,6 +518,7 @@ async function maybeAutoHandoff($: $, cfg: RouterConfig, warm: { warmMinutes: nu
     tokens: warm.tokens,
     openSteps: openSteps(mem.steps),
     hasPlan: mem.planPath !== undefined,
+    editsSinceCommit: mem.editsSinceCommit,
   }
   if (!shouldAutoHandoff(facts)) return
   // Claimed before the awaits, so a refresh running alongside cannot submit a second one.
@@ -530,7 +530,7 @@ async function maybeAutoHandoff($: $, cfg: RouterConfig, warm: { warmMinutes: nu
     return
   }
   mem.handoff = { tokens: warm.tokens, model: warm.model }
-  const sent = await $.prompt.submit({ text: HANDOFF_PROMPT }).catch(() => undefined)
+  const sent = await $.prompt.submit({ text: handoffPrompt(facts.editsSinceCommit) }).catch(() => undefined)
   mem.handoff = pendingAfter(mem.handoff, { kind: 'submitted', isDropped: sent === undefined || sent.drop !== undefined })
 }
 
@@ -679,9 +679,11 @@ async function itemsOfToolUse($: $, tool: string, input: Record<string, unknown>
   return owner === undefined ? [direct] : [direct, owner]
 }
 
-/** Counts a finished tool call toward the MCP server or plugin behind it, and notes work being wrapped up, planned, tracked or explored. */
+/** Counts a finished tool call toward the MCP server or plugin behind it, and notes work being wrapped up, planned, tracked, edited or explored. */
 async function noteToolCall($: $, e: Args<'tool.call'>, result: unknown) {
   const input = e as unknown as Record<string, unknown>
+  // A subagent's edits and commits change the same working tree, so they count too.
+  mem.editsSinceCommit = editsAfter(mem.editsSinceCommit, e.tool, input, mem.home)
   if (e.agentId === undefined) {
     if (e.tool === 'Bash' && typeof input.command === 'string') mem.boundary = boundaryOf(input.command) ?? mem.boundary
     mem.steps = stepsAfter(mem.steps, e.tool, input, result)
@@ -714,10 +716,11 @@ async function noteExploration($: $) {
   mem.pendingLessons.push(lessonFromExploration(mem.explored, total))
 }
 
-/** What a fresh context forgets; open steps and a saved handoff outlive a compaction, as Claude Code's own todo list does. */
+/** What a fresh context forgets; open steps, uncommitted edits and a saved handoff outlive a compaction, as Claude Code's own todo list does. */
 function resetSignals(isClear: boolean) {
   if (isClear) {
     mem.steps = NO_STEPS
+    mem.editsSinceCommit = 0
     mem.handoffPath = undefined
     mem.handoff = pendingAfter(mem.handoff, { kind: 'fresh-context' })
   }
@@ -1041,6 +1044,8 @@ const mem = {
   boundary: undefined as Boundary | undefined,
   // Todos and tasks open, a plan on disk with no other edit since, correcting prompts in a row, and read/search tokens since the last fresh context.
   steps: NO_STEPS as Steps,
+  // File edits since the last git commit, by any agent; outlives a compaction like the steps.
+  editsSinceCommit: 0,
   planPath: undefined as string | undefined,
   corrections: 0,
   explored: 0,

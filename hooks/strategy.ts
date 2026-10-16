@@ -1,10 +1,10 @@
 import type { AdviceReason } from '../types'
 import { CONTEXT_CRITICAL, CONTEXT_WARN, GUARD_MIN_TOKENS, SMALL_CONTEXT, contextFill, kTokens, modelKeyOf, money, plural, printable, rewritePrice } from './routes'
 import { CORRECTIONS_MIN, OPEN_MIN } from './signals'
+import type { Boundary } from './signals'
 
 const CONVERSATION_SHARE = 0.6
 
-export type Boundary = 'commit' | 'pr'
 export type Verdict = 'continue' | 'compact' | 'clear' | 'handoff'
 
 export type StrategyFacts = {
@@ -33,15 +33,6 @@ type Priced = { text: string; perRequestUsd: number }
 export type Advice =
   | (Priced & { verdict: 'continue'; reason: 'small' | 'fine' })
   | (Priced & { verdict: 'compact' | 'clear' | 'handoff'; reason: AdviceReason; command: string })
-
-/** Whether a shell command wraps up work: a commit, or a pull request opened or merged. */
-export function boundaryOf(command: string): Boundary | undefined {
-  // Quoted text is an argument, such as a commit message or an echo, never the command itself.
-  const bare = command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''")
-  if (/\bgh\s+pr\s+(create|merge)\b/.test(bare)) return 'pr'
-  if (/\bgit(?:\s+--?[\w-]+(?:=\S+|\s+[^\s-]\S*)?)*\s+commit(?![\w-])/.test(bare) && !/--dry-run/.test(bare)) return 'commit'
-  return undefined
-}
 
 const BOUNDARY_TEXT: Record<Boundary, string> = { commit: 'Work was committed', pr: 'A pull request went up' }
 

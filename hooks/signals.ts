@@ -1,9 +1,11 @@
 export type StepStatus = 'pending' | 'in_progress' | 'completed'
 export type Steps = { todos: number; tasks: Record<string, StepStatus> }
+export type Boundary = 'commit' | 'pr'
 export type PlanEvent = { kind: 'saved'; path: string } | { kind: 'work' } | undefined
 
 export const NO_STEPS: Steps = { todos: 0, tasks: {} }
 export const OPEN_MIN = 2
+export const EDITS_MIN = 3
 export const CORRECTIONS_MIN = 2
 export const EXPLORE_MIN = 30_000
 export const EXPLORE_SHARE = 0.3
@@ -35,16 +37,36 @@ export const openSteps = (steps: Steps) => steps.todos + Object.values(steps.tas
 const PLAN_FILE = /(^|\/)(specs|plans)\/[^/]+\.md$|(^|\/)(SPEC|PLAN)\.md$/
 const EDIT_TOOLS: ReadonlySet<string> = new Set(['Write', 'Edit', 'NotebookEdit'])
 
+const editedPath = (tool: string, input: Record<string, unknown>) =>
+  !EDIT_TOOLS.has(tool) ? undefined : typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : undefined
+
 /** A plan written to disk, or work started on something else, from one finished tool call. */
 export function planEventOf(tool: string, input: Record<string, unknown>, result: unknown): PlanEvent {
   if (tool === 'ExitPlanMode') {
     const path = (result as { filePath?: unknown } | null | undefined)?.filePath
     return typeof path === 'string' && path !== '' ? { kind: 'saved', path } : undefined
   }
-  if (!EDIT_TOOLS.has(tool)) return undefined
-  const path = typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : undefined
+  const path = editedPath(tool, input)
   if (path === undefined) return undefined
   return PLAN_FILE.test(path) ? { kind: 'saved', path } : { kind: 'work' }
+}
+
+/** Whether a shell command wraps up work: a commit, or a pull request opened or merged. */
+export function boundaryOf(command: string): Boundary | undefined {
+  // Quoted text is an argument, such as a commit message or an echo, never the command itself.
+  const bare = command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''")
+  if (/\bgh\s+pr\s+(create|merge)\b/.test(bare)) return 'pr'
+  if (/\bgit(?:\s+--?[\w-]+(?:=\S+|\s+[^\s-]\S*)?)*\s+commit(?![\w-])/.test(bare) && !/--dry-run/.test(bare)) return 'commit'
+  return undefined
+}
+
+/** File edits since the last commit; Claude Code's own files under the home folder, such as handoffs and memory, are not work to commit. */
+export function editsAfter(edits: number, tool: string, input: Record<string, unknown>, home: string | undefined): number {
+  if (tool === 'Bash') return typeof input.command === 'string' && boundaryOf(input.command) === 'commit' ? 0 : edits
+  const path = editedPath(tool, input)
+  if (path === undefined) return edits
+  const own = home === undefined || home === '' ? undefined : `${home.replace(/\/+$/, '')}/.claude/`
+  return own !== undefined && path.startsWith(own) ? edits : edits + 1
 }
 
 const CORRECTION = [

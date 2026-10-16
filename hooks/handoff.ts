@@ -1,11 +1,16 @@
 import { GUARD_MIN_TOKENS } from './routes'
-import { OPEN_MIN } from './signals'
+import { EDITS_MIN, OPEN_MIN } from './signals'
 
 export const HANDOFF_LABEL = 'auto-handoff'
 export const HANDOFF_DIR = '.claude/handoffs'
 
 export const HANDOFF_PROMPT =
   'The prompt cache expires in a few minutes and work is still open. Reply with a handoff document in Markdown and nothing else: the goal, what is done, files touched, decisions and their reasons, and the exact next step, then last the open steps in order under an "## Open steps" heading, as a numbered list, each step starting with (you) or (claude) for who does it. Do not call any tools.'
+
+const UNCOMMITTED = ' Files were edited since the last commit and are not committed yet: mark them under files touched, and make committing them an open step unless they should stay uncommitted.'
+
+/** The handoff prompt, which names uncommitted edits when there are enough to count; it always starts with HANDOFF_PROMPT, by which its turn is told. */
+export const handoffPrompt = (editsSinceCommit: number) => (editsSinceCommit >= EDITS_MIN ? HANDOFF_PROMPT + UNCOMMITTED : HANDOFF_PROMPT)
 
 export type HandoffFacts = {
   isOn: boolean
@@ -21,6 +26,8 @@ export type HandoffFacts = {
   tokens: number
   openSteps: number
   hasPlan: boolean
+  /** File edits since the last commit: open work even without a todo list or plan. */
+  editsSinceCommit: number
 }
 
 // The status tick runs once a minute, so a 5-minute cache needs a window it cannot step over.
@@ -37,7 +44,7 @@ export function shouldAutoHandoff(f: HandoffFacts): boolean {
     f.warmMinutes > 0 &&
     f.warmMinutes <= handoffWindow(f.ttlMinutes) &&
     f.tokens >= GUARD_MIN_TOKENS &&
-    (f.openSteps >= OPEN_MIN || f.hasPlan)
+    (f.openSteps >= OPEN_MIN || f.hasPlan || f.editsSinceCommit >= EDITS_MIN)
   )
 }
 
