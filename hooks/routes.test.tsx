@@ -2691,7 +2691,8 @@ test('the fork\'s step under an agent no list names is not counted', async ($, o
   await clock.advance(54 * 60_000)
   const cost = await mountCost($, 'session')
   expect(await cost.find({ type: 'Text', text: /Engine \(forks/ })).toBeUndefined()
-  expect(await cost.find({ type: 'Text', text: /keep-warm/ })).toBeDefined()
+  expect(await cost.find({ type: 'Text', text: 'Keep warm (cache pings while away)' })).toBeDefined()
+  expect(await cost.find({ type: 'Text', text: /keep-warm/ })).toBeUndefined()
   await cost.unmount()
 })
 

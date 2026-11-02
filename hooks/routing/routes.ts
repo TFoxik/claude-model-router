@@ -22,7 +22,12 @@ export const isLoopRoute = (route: string) => route === 'main' || route === 'pla
 /** Where the steps of agents the router can't place are counted: a workflow's before its spawn settles, the engine's own forks. */
 export const ENGINE = 'engine'
 
-export const routeLabel = (route: string) => ROUTES.find(one => one.key === route)?.label ?? (route === ENGINE ? 'Engine (forks, workflows)' : route)
+/** Where keep-warm's pings are counted: not a route anything runs on, but spend the person should see apart. */
+export const KEEP_WARM = 'keep-warm'
+
+const OWN_LABELS: Record<string, string> = { [ENGINE]: 'Engine (forks, workflows)', [KEEP_WARM]: 'Keep warm (cache pings while away)' }
+
+export const routeLabel = (route: string) => ROUTES.find(one => one.key === route)?.label ?? OWN_LABELS[route] ?? route
 
 /** A route `/route set` may write: a known one, or `sub:<agent-type>`. */
 export const isRouteKey = (route: string) => ROUTES.some(one => one.key === route) || /^sub:[\w.:-]{1,64}$/.test(route)

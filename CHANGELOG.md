@@ -1,10 +1,18 @@
 # Release notes
 
-## Unreleased
+## 1.9.0 — 2026-11-02
 
-### Added
+Keep the prompt cache warm while you step away, so you come back without paying to rebuild it.
 
-- **Keep the cache warm while you step away.** **Keep warm** in the Context pane's Before a break box, or `/route warm`, sends one tiny ping about six minutes before each expiry, so you come back to a warm cache instead of paying to re-write the whole context. It re-sends the session's last request from the cache with `Reply with OK.`, adds nothing to the conversation and can't run a tool. It stops when you send anything, after 4 hours (set 1, 2, 4 or 6 in Routes › Keep warm, which also turns it on and off, or `/route warm 2h` once), with **Stop warm** in the band, or if the cache goes cold anyway. While it runs the band shows `warm ●` with the time left and what the pings have cost, and auto-handoff waits. On the 60-minute cache only; on the 5-minute cache a ping every few minutes costs more than the rewrite.
+### ✨ What's new
+
+- **Keep the cache warm while you're away.** Click **Keep warm** in the Context pane's Before a break box, or type `/route warm`. About six minutes before each cache expiry, the router sends one tiny ping, which adds nothing to the conversation and can't run a tool. [Docs](https://tfoxik.github.io/claude-model-router/#away)
+- **It stops on its own.** A run ends when you send anything, at its time limit, with **Stop warm** in the band, or if the cache goes cold anyway. The limit is 4 h by default; set 1, 2, 4 or 6 h in Routes › Keep warm, or use `/route warm 2h` for one run.
+- **You see what it costs.** While it runs, the band shows `warm ●` with the time left and what the pings have cost so far, and Cost › Session lists the total as **Keep warm (cache pings while away)**. Auto-handoff waits while a run is active.
+
+### ⬆️ Upgrade notes
+
+- Keep warm works on the 60-minute cache only (`/route ttl 60`). On the 5-minute cache, a ping every few minutes would cost more than rebuilding the cache.
 
 ## 1.8.0 — 2026-11-02
 

@@ -5,7 +5,7 @@ import { tildePath } from '../handoffs/handoff'
 import { pushLesson, pushUrgent } from '../learn/drafts'
 import { lessonFromAdvice, lessonFromContext, lessonFromExpiry, lessonFromExploration, lessonFromPlanToggle, lessonFromRewrite } from '../learn/lessons'
 import type { AwayFacts } from '../learn/lessons'
-import { FORK, resolve } from '../routing/routes'
+import { FORK, KEEP_WARM, resolve } from '../routing/routes'
 import { fmtAge, kTokens, money, printable } from './format'
 import { itemsOfToolUse, noteUse } from './items'
 import { EMPTY_PROMPT, EMPTY_SPEND, HISTORY_LIMIT, addLateStep, addSpend, addStep, modelsOf, subagentCount } from './ledger'
@@ -312,7 +312,7 @@ export async function noteWarmPing($: $, usage: Usage): Promise<'warm' | 'cold'>
   if (last === null) return 'cold'
   const ttl = cfg.cacheTtlMinutes
   const usd = costOf(usage, last.model, ttl)
-  await updateSpend($, all => ({ ...all, 'keep-warm': addSpend(all['keep-warm'] ?? EMPTY_SPEND, usage, last.model, ttl) }))
+  await updateSpend($, all => ({ ...all, [KEEP_WARM]: addSpend(all[KEEP_WARM] ?? EMPTY_SPEND, usage, last.model, ttl) }))
   await setWarmRun($, run => (run === null ? null : { ...run, usd: run.usd + usd, pings: run.pings + 1 }))
   const read = pingRead(usage, promptTokens(last))
   if (read === 'warm') {
