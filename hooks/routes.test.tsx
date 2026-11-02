@@ -1,5 +1,5 @@
-import type { Args, On } from 'claude-code'
-import { expect, mock, test } from 'claude-code/testing'
+import type { Args, EngineInterface, On } from 'claude-code'
+import { expect, mock, test as engineTest } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { CostTab, Lesson } from '../types'
 import { HANDOFF_PROMPT } from './handoffs/handoff'
@@ -47,6 +47,17 @@ import {
   shouldSwitch,
 } from './routing/routes'
 
+/** The engine always answers AbovePrompt, with nothing when no plugin draws there; this stands for that below a test's own hook. */
+const test: typeof engineTest = ((name: string, fn: (...args: never[]) => unknown) =>
+  engineTest(name, ((...args: unknown[]) => {
+    const on = args[1] as On | undefined
+    on?.('ui.render', { component: 'AbovePrompt' }, (async ($: EngineInterface, e: Args<'ui.render'>, next: (e: Args<'ui.render'>) => Promise<unknown>) => {
+      const { Text } = $.ui.resolve(e)
+      return next(e).catch(() => <Text key="engine-base">{''}</Text>)
+    }) as never)
+    return fn(...(args as never[]))
+  }) as never)) as never
+
 const opus = MODELS.opus.id
 const sonnet = MODELS.sonnet.id
 const haiku = MODELS.haiku.id
@@ -59,7 +70,9 @@ const mountCost = async ($: Engine, tab: CostTab) => {
   await $.command.run({ command: 'route', args: `cost ${tab}`, origin: { kind: 'composer' } } as unknown as Args<'command.run'>)
   return mountPane($, 'cost')
 }
-const bandOf = ($: Engine) => $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
+const mountBand = ($: Engine, surface: 'terminal' | 'desktop' = 'desktop', props: Record<string, unknown> = {}) =>
+  $.ui.mount({ plugin: 'model-router', surface, component: 'AbovePrompt', props: props as never })
+const bandOf = ($: Engine) => mountBand($)
 const buttonKeys = async (band: Awaited<ReturnType<typeof bandOf>>) => (await band.findAll({ type: 'Button' })).map(one => one.key)
 const useMine = ($: Engine) => $.command.run({ command: 'route', args: 'preset mine', origin: { kind: 'composer' } } as unknown as Args<'command.run'>)
 
@@ -267,7 +280,7 @@ test('the band is three rows with the route line alone on top, and has no Hide t
     await ui.unmount()
   }
   await route($, 'band off')
-  const ui = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'AbovePrompt', props: {} as never })
+  const ui = await mountBand($, 'terminal')
   expect(await ui.find({ key: 'band-open' })).toBeUndefined()
   await ui.unmount()
 })
@@ -282,11 +295,11 @@ test('the Routes pane shows and hides the band', async ($, on) => {
   expect((await pane.find({ key: 'band-toggle' }))?.text).toBe('Hide')
   await pane.press({ key: 'band-toggle' })
   expect((await pane.find({ key: 'band-toggle' }))?.text).toBe('Show')
-  const band = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'AbovePrompt', props: {} as never })
+  const band = await mountBand($, 'terminal')
   expect(await band.find({ key: 'band-open' })).toBeUndefined()
   await band.unmount()
   await pane.press({ key: 'band-toggle' })
-  const back = await $.ui.mount({ plugin: 'model-router', surface: 'terminal', component: 'AbovePrompt', props: {} as never })
+  const back = await mountBand($, 'terminal')
   expect(await back.find({ key: 'band-open' })).toBeDefined()
   await back.unmount()
   await pane.unmount()
@@ -362,7 +375,7 @@ test('footer shows cache, context and the 5h window', async ($, on) => {
   expect(await buttonKeys(band)).toEqual(['ctx', 'band-cost', 'band-open'])
   await band.unmount()
   await clock.advance(61 * 60_000)
-  const band2 = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
+  const band2 = await mountBand($, 'desktop')
   expect(await band2.find({ type: 'Text', text: /^cache cold/ })).toBeDefined()
   await band2.unmount()
   await ui.unmount()
@@ -382,7 +395,7 @@ test('last is the whole prompt: main steps and its subagents, reset on the next 
   on('turn.step', async function* (_$, e) {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage }
   })
-  const ui = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
+  const ui = await mountBand($, 'desktop')
 
   await $.prompt.submit({ text: '/simplify', origin: { kind: 'composer' } } as Args<'prompt.submit'>)
   await $.turn.start({ text: 'simplify', turnId: 'p1' })
@@ -558,7 +571,7 @@ test('a cold send over a big context is dropped once, priced on the routed model
   await step($, 'a')
   expect((await submit($, 'warm')).drop).toBeUndefined()
   await clock.advance(61 * 60_000)
-  const band = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: {} as never })
+  const band = await mountBand($, 'desktop')
   expect(await band.find({ type: 'Text', text: /^cache cold \$0\.80/ })).toBeDefined()
   await band.unmount()
   expect((await submit($, '/simplify')).drop).toBeUndefined()
@@ -882,6 +895,24 @@ test('slash commands that reach the model are guarded once learned or from a pro
   expect((await command('simplify')).text).toBe('engine')
 })
 
+test('with context off a slash command that reaches the model is not held on a cold cache', async ($, on) => {
+  sharedStore(on, { config: MINE })
+  const clock = mock.clock(on, { now: T0 })
+  guardSession(on, { context: 200_000, usage: usageOf(200_000) })
+  on('command.list', () => ({ value: [{ name: 'simplify', description: '', source: 'builtin' }] }) as never)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const command = (name: string) => $.command.run({ command: name, args: '', origin: { kind: 'composer' } } as unknown as Args<'command.run'>)
+  await command('simplify')
+  await $.turn.start({ text: 'simplify', turnId: 'warm' })
+  await step($, 'warm')
+  await clock.advance(61 * 60_000)
+  expect((await command('simplify')).text).toMatch(/^model-router: the prompt cache went cold/)
+  await step($, 'again')
+  await clock.advance(61 * 60_000)
+  await route($, 'context off')
+  expect((await command('simplify')).text).toBe('engine')
+})
+
 test('a prompt-only command is guarded on its first cold run', async ($, on) => {
   mock.store(on, { config: MINE })
   const clock = mock.clock(on, { now: T0 })
@@ -1186,7 +1217,7 @@ test('a survey above the prompt wins over the card', async ($, on) => {
   on('ui.render', { component: 'AbovePrompt' }, ($, e) => { const { Text } = $.ui.resolve(e); return <Text>survey</Text> })
   const { prompt } = await coldPrompts($, on, true)
   await prompt('cold', usageOf(0, 100_000))
-  const ui = await $.ui.mount({ plugin: 'model-router', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: true } as never })
+  const ui = await mountBand($, 'desktop', { hasSurvey: true })
   expect(await ui.find({ key: 'learn-card' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'survey' })).toBeDefined()
   await ui.unmount()
@@ -1392,6 +1423,28 @@ test('a commit over a big context turns the band to next /clear until the next p
   const after = await bandOf($)
   expect(await after.find({ key: 'advice' })).toBeUndefined()
   await after.unmount()
+})
+
+test('with context off the band shows no next-step advice, and it comes back with context on', async ($, on) => {
+  okTool(on)
+  const { prompt } = await learningSession($, on)
+  await prompt('c', async () => {
+    await $.tool.call({ tool: 'Bash', command: 'git commit -m "done"', tool_use_id: 'tu1' } as never)
+  })
+  const card = await bandOf($)
+  await card.press({ key: 'learn-got' })
+  await card.unmount()
+  const shown = await bandOf($)
+  expect(await buttonKeys(shown)).toEqual(['advice', 'ctx', 'band-cost', 'band-open'])
+  await shown.unmount()
+  await route($, 'context off')
+  const off = await bandOf($)
+  expect(await buttonKeys(off)).toEqual(['band-cost', 'band-open'])
+  await off.unmount()
+  await route($, 'context on')
+  const back = await bandOf($)
+  expect((await back.find({ key: 'advice' }))?.text).toBe('next /clear')
+  await back.unmount()
 })
 
 test('MCP servers and plugins are counted per repo, and long-idle ones are listed by /route unused', async ($, on) => {
@@ -2220,7 +2273,7 @@ test('stats clear works with cost off', async ($, on) => {
 
 const rowKeys = async (band: Awaited<ReturnType<typeof bandOf>>) => {
   const tree = (await band.drawn()) as { children?: Array<{ props?: { key?: string }; children?: unknown[] }> }
-  return (tree.children ?? []).map(one => one.props?.key ?? one.children?.[0])
+  return (tree.children ?? []).map(one => one.props?.key ?? one.children?.[0]).filter(key => key !== '')
 }
 
 test('another plugin\'s band stays below ours while the band is shown', async ($, on) => {

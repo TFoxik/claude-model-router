@@ -402,8 +402,7 @@ export const register: Register = on => {
     const [card, isShown] = await Promise.all([learnBandCard($, e), isBandShownOf($)])
     if (card === null && !isShown) return next(e)
     const band = isShown ? await renderBand($, e) : null
-    // What other plugins draw there stays below ours; a failure of theirs does not take ours down.
-    const others = await next(e).catch(() => undefined)
+    const others = await next(e)
     const { Box } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
