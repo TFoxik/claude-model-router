@@ -11,7 +11,7 @@ import { hasHandoffCommand, isCorrection } from './core/signals'
 import { raisePane } from './core/panes'
 import { session } from './core/session'
 import { STORE, UNREADABLE, carriedOf, carry, configOf, healthOf, initBand, initConfig, initHistory, isBandShownOf, lastUsageOf, load, nowOf, save, setBand, setHistory, spendOf, updatePromptCost, writeConfig } from './core/state'
-import { pushLesson } from './learn/drafts'
+import { pushLesson, takeUrgent } from './learn/drafts'
 import { closeOldLearnPane, guardWhy, learnBandCard, learnOnSessionStart, learnVerb, flushLessons, clearCard, setLearning, teach } from './learn/feature'
 import { lessonFromCompact } from './learn/lessons'
 import { ENGINE, asEffort, routeForSpawn } from './routing/routes'
@@ -59,7 +59,8 @@ async function refresh($: $) {
   const tick = await refreshStatus($)
   if (tick === undefined) return
   void handoffsOnTick($, tick).catch(() => undefined)
-  if (tick.expiring !== undefined) await teach($, [tick.expiring], await nowOf($)).catch(() => undefined)
+  const urgent = takeUrgent()
+  if (tick.cfg.isLearning && urgent.length > 0) await teach($, urgent, await nowOf($)).catch(() => undefined)
 }
 
 /** What opening a pane does besides showing it. */

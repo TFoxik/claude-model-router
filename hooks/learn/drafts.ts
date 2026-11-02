@@ -17,3 +17,16 @@ export function takeLessons(): LessonDraft[] {
 export function dropLessons(): void {
   pending = []
 }
+
+// Lessons that can't wait for a turn to end, kept until a status refresh that teaches them runs, whichever refresh measured them.
+let urgent: LessonDraft[] = []
+
+export function pushUrgent(draft: LessonDraft): void {
+  urgent.push(draft)
+}
+
+export function takeUrgent(): LessonDraft[] {
+  const drafts = urgent
+  urgent = []
+  return drafts
+}

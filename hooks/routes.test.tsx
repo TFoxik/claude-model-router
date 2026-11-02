@@ -1362,6 +1362,25 @@ test('learn mode warns while idle, before the cache goes cold', async ($, on) =>
   })
 })
 
+test('the expiry card still shows when a setting changed between the cache crossing the line and the next tick', async ($, on) => {
+  mock.store(on, { config: { ...MINE, coldGuard: 'off', isLearning: true } })
+  const clock = mock.clock(on, { now: T0 })
+  guardSession(on, { context: 200_000, usage: usageOf(200_000) })
+  on('ui.toast', () => ({ value: undefined }) as never)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await clock.advance(30_000)
+  await submit($, 'a')
+  await $.turn.start({ text: 'a', turnId: 'a' })
+  await step($, 'a')
+  await complete($, 'a')
+  await clock.advance(55 * 60_000 + 10_000)
+  expect(await shownCard($)).toBeUndefined()
+  expect((await route($, 'next off')).text).toMatch(/^Next-step advice off/)
+  expect(await shownCard($)).toBeUndefined()
+  await clock.advance(20_000)
+  expect(await shownCard($)).toMatchObject({ title: '📚 Cache about to go cold' })
+})
+
 test('learn mode explains why the cold-send guard held a message', async ($, on) => {
   const { clock } = await learningSession($, on, 'refuse')
   await clock.advance(61 * 60_000)
@@ -1426,6 +1445,16 @@ test('a commit over a big context turns the band to next /clear until the next p
   const after = await bandOf($)
   expect(await after.find({ key: 'advice' })).toBeUndefined()
   await after.unmount()
+})
+
+test('with context off learn mode teaches no next-step advice', async ($, on) => {
+  okTool(on)
+  const { prompt } = await learningSession($, on)
+  await route($, 'context off')
+  await prompt('c', async () => {
+    await $.tool.call({ tool: 'Bash', command: 'git commit -m "done"', tool_use_id: 'tu1' } as never)
+  })
+  expect(await shownCard($)).toBeUndefined()
 })
 
 test('with context off the band shows no next-step advice, and it comes back with context on', async ($, on) => {

@@ -2,9 +2,9 @@ import type { Args, EngineInterface } from 'claude-code'
 import type { Effort, Health, LastUsage, PromptCost, PromptRecord, RouterConfig } from '../../types'
 import { repoOfHandoff } from '../handoffs/records'
 import { tildePath } from '../handoffs/handoff'
-import { pushLesson } from '../learn/drafts'
+import { pushLesson, pushUrgent } from '../learn/drafts'
 import { lessonFromAdvice, lessonFromContext, lessonFromExpiry, lessonFromExploration, lessonFromPlanToggle, lessonFromRewrite } from '../learn/lessons'
-import type { AwayFacts, LessonDraft } from '../learn/lessons'
+import type { AwayFacts } from '../learn/lessons'
 import { FORK, resolve } from '../routing/routes'
 import { fmtAge, kTokens, money, printable } from './format'
 import { itemsOfToolUse, noteUse } from './items'
@@ -22,7 +22,7 @@ type $ = EngineInterface
 export const USER_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
 
 /** What a status refresh measured, for the features that act on it once the band is up to date. */
-export type HealthTick = { cfg: RouterConfig; warmMinutes: number; tokens: number; model: string; expiring?: LessonDraft }
+export type HealthTick = { cfg: RouterConfig; warmMinutes: number; tokens: number; model: string }
 
 export async function setConfig($: $, fn: (c: RouterConfig) => RouterConfig): Promise<RouterConfig> {
   const next = await writeConfig($, fn)
@@ -122,12 +122,14 @@ export async function refreshStatus($: $): Promise<HealthTick | undefined> {
   await setHealth($, next)
   const tick: HealthTick = { cfg, warmMinutes, tokens, model }
   if (!cfg.isLearning) return tick
-  for (const draft of [lessonFromContext(prev?.ctxLevel, next.ctxLevel, tokens, model, ttl, session.compactAt !== undefined), ...(cfg.showNext ? [lessonFromAdvice(prev?.advice, advice)] : [])]) {
+  for (const draft of [lessonFromContext(prev?.ctxLevel, next.ctxLevel, tokens, model, ttl, session.compactAt !== undefined), ...(cfg.showNext && cfg.isContext ? [lessonFromAdvice(prev?.advice, advice)] : [])]) {
     pushLesson(draft)
   }
-  // The one lesson that can't wait for a turn to end: by then the cache has gone cold.
+  // The one lesson that can't wait for a turn to end: by then the cache has gone cold. Queued, because a refresh that
+  // only measures (a setting changed) may be the one that sees the cache cross the line, and would otherwise use it up.
   const expiring = lessonFromExpiry(prev?.warmMinutes, warmMinutes, ttl, tokens, model)
-  return expiring === undefined ? tick : { ...tick, expiring }
+  if (expiring !== undefined) pushUrgent(expiring)
+  return tick
 }
 
 /** What a fresh context forgets; open steps, uncommitted edits and a saved handoff outlive a compaction, as Claude Code's own todo list does. */
