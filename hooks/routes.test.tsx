@@ -47,13 +47,16 @@ import {
   shouldSwitch,
 } from './routing/routes'
 
-/** The engine always answers AbovePrompt, with nothing when no plugin draws there; this stands for that below a test's own hook. */
+/** The engine always answers AbovePrompt, with nothing when no plugin draws there; this stands for that, and lets any other failure below through. */
 const test: typeof engineTest = ((name: string, fn: (...args: never[]) => unknown) =>
   engineTest(name, ((...args: unknown[]) => {
     const on = args[1] as On | undefined
     on?.('ui.render', { component: 'AbovePrompt' }, (async ($: EngineInterface, e: Args<'ui.render'>, next: (e: Args<'ui.render'>) => Promise<unknown>) => {
       const { Text } = $.ui.resolve(e)
-      return next(e).catch(() => <Text key="engine-base">{''}</Text>)
+      return next(e).catch(error => {
+        if (!String(error).includes('no implementation for ui.render')) throw error
+        return <Text key="engine-base">{''}</Text>
+      })
     }) as never)
     return fn(...(args as never[]))
   }) as never)) as never
@@ -2319,4 +2322,14 @@ test('with cost off the health row keeps cache and context only', async ($, on) 
   expect(await back.find({ type: 'Text', text: /cache/ })).toBeUndefined()
   await band.unmount()
   await back.unmount()
+})
+
+test('a failure of a plugin below the band reaches the engine; the band is not drawn over it', async ($, on) => {
+  mock.store(on, { bandShown: true, config: MINE })
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  on('ui.render', { component: 'AbovePrompt' }, () => {
+    throw new Error('below boom')
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await expect(bandOf($)).rejects.toThrow()
 })
