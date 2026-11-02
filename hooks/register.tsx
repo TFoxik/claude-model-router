@@ -19,7 +19,7 @@ import { ENGINE, asEffort, routeForSpawn } from './routing/routes'
 import { registerRouting, renderRoutesPane, routingBandHead, routingDecide, routingNoteApplied, routingOnSpawn, routingOnTurnStart, routingVerb } from './routing/feature'
 import { handoffsAfterPrompt, handoffsBand, handoffsOnFreshContext, handoffsOnOpen, handoffsOnSessionStart, handoffsOnTick, handoffsOnTurnComplete, handoffsOnTurnStart, handoffsOnUserPrompt, handoffsOnWrite, handoffsVerb, registerHandoffs, setAutoHandoff } from './handoffs/feature'
 import { bandView, warmLineView } from './ui/band'
-import { closeContextPane, contextBand, contextNoteCommand, contextOnSessionStart, contextOnTick, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext, stopWarm, warmBand } from './context/feature'
+import { closeContextPane, startWarm, contextBand, contextNoteCommand, contextOnSessionStart, contextOnTick, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext, stopWarm, warmBand } from './context/feature'
 import { COST_TABS, COST_TAB_LABEL, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
 import { closeCostPanes, costBand, costOnSessionStart, registerCost, registerCostFooter, setCostTab } from './cost/feature'
@@ -83,6 +83,12 @@ async function renderBand($: $, e: Args<'ui.render'>) {
   const stop = () => void stopWarm($, 'stop')
   const parts = [handoffs, contextBand(head.cfg, health), warmBand(head.cfg, run, now, stop), costBand(head.cfg, health, sumUsd(Object.values(costs)))]
   return bandView($.ui.resolve(e), { head, parts: parts.filter(one => one !== undefined) }, { open: openPane($) })
+}
+
+/** A pane button has nowhere to answer, so a start that can't help says why in a toast. */
+async function startWarmFromPane($: $) {
+  const { isStarted, text } = await startWarm($, (await configOf($)).warmHours)
+  if (!isStarted) $.ui.toast(text)
 }
 
 /** A keep-warm run spends while it runs, so with the band hidden it still gets a line of its own. */
@@ -395,6 +401,7 @@ export const register: Register = on => {
       setGuard: (mode: ColdGuard) => void setConfigAndRefresh($, c => ({ ...c, coldGuard: mode })),
       setTtl: minutes => void setConfigAndRefresh($, c => ({ ...c, cacheTtlMinutes: minutes })),
       setWarmHours: hours => void setConfigAndRefresh($, c => ({ ...c, warmHours: hours })),
+      setWarm: isOn => void (isOn ? startWarmFromPane($) : stopWarm($, 'stop')).catch(() => undefined),
       setKeepText: keep => void setKeepText($, keep),
       openHandoffs: () => openPane($)('handoffs'),
     }),

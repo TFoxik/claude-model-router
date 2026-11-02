@@ -85,7 +85,7 @@ Then restart or run `/reload-plugins`. Saved settings carry over. See [CHANGELOG
 | `/route handoffs` / `handoffs on\|off` | Open the Handoffs pane: open handoffs to resume, mark done or not relevant / turn handoffs on or off: the band's count and auto-handoff (default on) |
 | `/route handoffs auto on\|off` | Save a handoff while the cache is still warm, before it goes cold with work open (default off) |
 | `/route away` | Before a break: the ways to step away, priced for this session; also in the Context pane |
-| `/route warm [<n>h]` / `warm stop` | Keep the prompt cache warm while you are away: one tiny ping before each expiry, until you send anything or after `<n>` hours (default 4, at most 6; the Routes pane's **Keep warm for at most**); 60-minute cache only. Also the **Keep warm** button in the Context pane's Before a break box |
+| `/route warm [<n>h]` / `warm stop` | Keep the prompt cache warm while you are away: one tiny ping before each expiry, until you send anything or after `<n>` hours (default 4, at most 6; the Routes pane's **Keep warm** row, which also turns it on and off); 60-minute cache only. Also the **Keep warm** button in the Context pane's Before a break box |
 | `/route unused` | MCP servers, plugins and skills this repo has long left unused, and the command that turns each off |
 | `/route guard refuse\|warn\|off` | What a send onto a cold cache does (default `refuse`: held once with its price); also the Routes pane's **Cold-cache guard** row |
 | `/route ttl 5\|60` | Prompt-cache lifetime for the warm/cold timer (default 60); also the Routes pane's **Cache lifetime** row |

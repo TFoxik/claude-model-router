@@ -220,17 +220,17 @@ async function warmVerb($: $, rest: string[]): Promise<string> {
   }
   if (rest.length > 1) return WARM_USAGE
   const hours = parseWarmHours(rest[0], (await configOf($)).warmHours)
-  return hours === 'invalid' ? WARM_USAGE : startWarm($, hours)
+  return hours === 'invalid' ? WARM_USAGE : (await startWarm($, hours)).text
 }
 
 /** Starts a run, or says why it can't help: Context off, the 5-minute cache, or a cache already cold. */
-export async function startWarm($: $, hours: number): Promise<string> {
+export async function startWarm($: $, hours: number): Promise<{ isStarted: boolean; text: string }> {
   const [cfg, last, now] = await Promise.all([configOf($), lastUsageOf($), nowOf($)])
-  if (!cfg.isContext) return offText('context')
-  if (cfg.cacheTtlMinutes !== 60) return 'Keep warm needs the 60-minute cache: /route ttl 60.'
-  if (last === null || warmMinutesLeft(last.at, now, cfg.cacheTtlMinutes) === 0) return "Keep warm can't help: the cache is already cold."
+  if (!cfg.isContext) return { isStarted: false, text: offText('context') }
+  if (cfg.cacheTtlMinutes !== 60) return { isStarted: false, text: 'Keep warm needs the 60-minute cache: /route ttl 60.' }
+  if (last === null || warmMinutesLeft(last.at, now, cfg.cacheTtlMinutes) === 0) return { isStarted: false, text: "Keep warm can't help: the cache is already cold." }
   await setWarmRun($, () => ({ startedAt: now, until: now + hours * 3_600_000, usd: 0, pings: 0 }))
-  return `Keeping the cache warm for up to ${hours} h; it stops when you send anything.`
+  return { isStarted: true, text: `Keeping the cache warm for up to ${hours} h; it stops when you send anything.` }
 }
 
 const STOP_WHY = { ceiling: 'it reached its limit', cold: 'the cache went cold anyway', ttl: 'the cache lifetime is 5 minutes now' } as const

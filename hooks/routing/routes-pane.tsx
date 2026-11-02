@@ -64,6 +64,8 @@ const signed = (usd: number) => `${usd >= 0 ? '+' : '−'}${money(Math.abs(usd))
 
 type PaneData = {
   cfg: RouterConfig
+  /** Minutes a keep-warm run may still ping; absent with no run. */
+  warmLeftMinutes?: number
   /** This session's spend, every route. */
   total: number
   now: ActiveRoute | null
@@ -90,6 +92,7 @@ type PaneActions = {
   setGuard: (mode: ColdGuard) => void
   setTtl: (minutes: number) => void
   setWarmHours: (hours: WarmHours) => void
+  setWarm: (isOn: boolean) => void
   setKeepText: (keep: boolean) => void
   apply: (next: RouterConfig) => void
   discard: () => void
@@ -132,7 +135,7 @@ function settingRow({ Box, Text }: InputEls, { key, name, state, note, controls,
 }
 
 /** Every setting in one place, below the routing it serves; each applies at once, not through the draft. */
-function settingsSection(els: InputEls, { cfg, isBand }: PaneData, a: PaneActions) {
+function settingsSection(els: InputEls, { cfg, isBand, warmLeftMinutes }: PaneData, a: PaneActions) {
   const { Box, Text, Button, Select } = els
   const group = (title: string) => <Text key={`sg:${title}`} bold color="claude">{title}</Text>
   const turn = (key: string, isOn: boolean, set: (isOn: boolean) => void) => <Button key={key} label={isOn ? 'Turn off' : 'Turn on'} onPress={() => set(!isOn)} />
@@ -180,9 +183,13 @@ function settingsSection(els: InputEls, { cfg, isBand }: PaneData, a: PaneAction
         })}
         {settingRow(els, {
           key: 'set-warm',
-          name: 'Keep warm for at most',
-          note: 'pings stop after this, or when you send anything; 60-minute cache only',
-          controls: select('warm-hours', WARM_OPTIONS, String(cfg.warmHours), value => a.setWarmHours(Number(value) as WarmHours)),
+          name: 'Keep warm',
+          state: { isOn: warmLeftMinutes !== undefined, on: warmLeftMinutes === undefined ? 'on' : `on · ${Math.floor(warmLeftMinutes / 60)}h ${warmLeftMinutes % 60}m left` },
+          note: 'pings the cache before it expires, for at most the hours set; stops when you send anything; 60-minute cache only',
+          controls: [
+            select('warm-hours', WARM_OPTIONS, String(cfg.warmHours), value => a.setWarmHours(Number(value) as WarmHours)),
+            turn('warm-toggle', warmLeftMinutes !== undefined, a.setWarm),
+          ],
           needs: unless(cfg.isContext, 'context'),
         })}
         {settingRow(els, {

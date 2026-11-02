@@ -5,7 +5,7 @@ import type { ActiveRoute, ColdGuard, Effort, RouterConfig, WarmHours } from '..
 import { sumUsd } from '../core/ledger'
 import { mainRoute, routeKeyOfAgent, setConfig, setPlan } from '../core/measure'
 import { session } from '../core/session'
-import { configOf, isBandShownOf, isPlanOf, promptCostOf, setBand, spendOf } from '../core/state'
+import { configOf, isBandShownOf, isPlanOf, nowOf, promptCostOf, setBand, spendOf, warmRunOf } from '../core/state'
 import { AUTO_LABELS, FORK, PRESETS, ROUTES, asEffort, effortForLabel, parseSetting, presetOf, resolve, routeForSpawn, routeText, shouldSwitch, withPreset, withRoute } from './routes'
 import { routesMobileView, routesPaneView } from './routes-pane'
 
@@ -35,6 +35,7 @@ type RoutesPaneLinks = {
   setGuard: (mode: ColdGuard) => void
   setTtl: (minutes: number) => void
   setWarmHours: (hours: WarmHours) => void
+  setWarm: (isOn: boolean) => void
   setKeepText: (keep: boolean) => void
   openHandoffs: () => void
 }
@@ -77,7 +78,7 @@ export async function renderRoutesPane($: $, e: Args<'ui.render'>, links: Routes
   const now = await read($, active)
   if (e.surface === 'mobile') return routesMobileView($.ui.resolve(e), now)
   const els = $.ui.resolve(e)
-  const [cfg, costs, isPlanning, pending, lastPrompt, usage, isBand] = await Promise.all([
+  const [cfg, costs, isPlanning, pending, lastPrompt, usage, isBand, run, at] = await Promise.all([
     configOf($),
     spendOf($),
     isPlanOf($),
@@ -85,9 +86,11 @@ export async function renderRoutesPane($: $, e: Args<'ui.render'>, links: Routes
     promptCostOf($),
     $.session.usage(),
     isBandShownOf($),
+    warmRunOf($),
+    nowOf($),
   ])
   const sessionModel = now?.model ?? (await $.session.model())
-  const data = { cfg, total: sumUsd(Object.values(costs)), now, isPlanning, pending, lastPrompt, contextTokens: usage.context.tokens ?? 0, sessionModel, isBand }
+  const data = { cfg, total: sumUsd(Object.values(costs)), now, isPlanning, pending, lastPrompt, contextTokens: usage.context.tokens ?? 0, sessionModel, isBand, warmLeftMinutes: run === null ? undefined : Math.max(0, Math.ceil((run.until - at) / 60_000)) }
   return routesPaneView(els, data, {
     editDraft: fn =>
       void update($, draft, d => {
