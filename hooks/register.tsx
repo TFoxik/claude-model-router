@@ -1,17 +1,18 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, Register } from 'claude-code'
 
-import type { ActiveRoute, ColdGuard, CostTab, Effort, RouterConfig } from '../types'
+import type { ActiveRoute, ColdGuard, Effort, RouterConfig } from '../types'
 import { commandLabel, plural, printable, typedText, versionOf } from './core/format'
 import { GUARD_MIN_TOKENS } from './core/pricing'
-import { EMPTY_PROMPT, sanitizeHistory, sumUsd, todayUsd, withoutText } from './core/ledger'
+import { EMPTY_PROMPT, sanitizeHistory, sumUsd, withoutText } from './core/ledger'
 import { CACHE_TTLS, startingConfig } from './core/config'
 import { DEV_PATIENCE, claudeAiReport, claudeAiTips, idleReport, idleTips, listingTokens, mcpKey, patienceText, skillReport, skillTips } from './core/usage'
 import type { ItemKey } from './core/usage'
 import { backfillUsage, flushUsage, idleHere, listCommands, noteCommand, startItems } from './core/items'
-import { USER_ORIGINS, allRecords, awayFacts, coldSend, mainRoute, noteSpawn, noteToolCall, promptTokens, recordPrompt, recordStep, refreshStatus, resetSignals, routeKeyOfAgent, routedMainModel, setPlan, signalFacts } from './core/measure'
+import { USER_ORIGINS, awayFacts, coldSend, mainRoute, noteSpawn, noteToolCall, promptTokens, recordPrompt, recordStep, refreshStatus, resetSignals, routeKeyOfAgent, routedMainModel, setPlan, signalFacts } from './core/measure'
 import type { StepOutcome } from './core/measure'
 import { hasHandoffCommand, isCorrection } from './core/signals'
+import { raisePane } from './core/panes'
 import { session } from './core/session'
 import { STORE, UNREADABLE, carriedOf, carry, configOf, healthOf, initBand, initConfig, initHistory, isBandShownOf, isPlanOf, lastUsageOf, load, nowOf, promptCostOf, save, setBand, setHistory, spendOf, updatePromptCost, writeConfig } from './core/state'
 import { adviseSession } from './core/strategy'
@@ -24,18 +25,15 @@ import { AUTO_LABELS, ENGINE, FORK, PRESETS, ROUTES, effortForLabel, parseSettin
 import { handoffsAfterPrompt, handoffsBandCount, handoffsOnFreshContext, handoffsOnOpen, handoffsOnSessionStart, handoffsOnTick, handoffsOnTurnComplete, handoffsOnTurnStart, handoffsOnUserPrompt, handoffsOnWrite, handoffsVerb, registerHandoffs, setAutoHandoff, setHandoffsOn } from './handoffs/feature'
 import { bandView } from './ui/band'
 import { contextMobileView, contextPaneView } from './context/context-pane'
-import { COST_TAB_LABEL, OLD_COST_IDS, PANES, isTarget, paneOf } from './ui/kit'
+import { COST_TAB_LABEL, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
-import { costPaneView } from './cost/cost-pane'
+import { costOnSessionStart, registerCost, registerCostFooter, setCostTab } from './cost/feature'
 import { routesMobileView, routesPaneView } from './routing/routes-pane'
-import { statsFooterView } from './cost/stats'
 
 // The engine's scan accepts an atom only in the file that declares it, and follows `$` across an import
 // only into function declarations. The views in the feature folders are plain functions of the data they're given.
 const active = atom({ plugin: 'model-router', key: 'active' } as const, null as ActiveRoute | null)
 const draft = atom({ plugin: 'model-router', key: 'draft' } as const, null as RouterConfig | null)
-const statsScope = atom({ plugin: 'model-router', key: 'statsScope' } as const, 'repo' as 'repo' | 'all')
-const costTab = atom({ plugin: 'model-router', key: 'costTab' } as const, 'last' as CostTab)
 
 type $ = EngineInterface
 
@@ -132,13 +130,6 @@ async function unusedReport($: $): Promise<string> {
   return [`Unused in ${here} (${plural(repo.sessions, 'session')} recorded):`, ...lines.map(line => `  ${line}`)].join('\n')
 }
 
-/** Opening an open pane only retitles it, so one open behind another is reopened to come to the front. */
-async function raisePane($: $, pane: keyof typeof PANES) {
-  const open = (await $.ui.panes().catch(() => [])).find(one => one.id === PANES[pane].id)
-  if (open !== undefined && !open.isShown) await $.ui.close({ id: PANES[pane].id })
-  await $.ui.open(PANES[pane])
-}
-
 /** What opening a pane does besides showing it. */
 async function onOpen($: $, pane: keyof typeof PANES) {
   if (pane === 'handoffs') await handoffsOnOpen($)
@@ -146,26 +137,11 @@ async function onOpen($: $, pane: keyof typeof PANES) {
 
 async function showPane($: $, target: Target) {
   const { pane, tab } = paneOf(target)
-  if (tab !== undefined) await update($, costTab, () => tab)
+  if (tab !== undefined) await setCostTab($, tab)
   await Promise.all([onOpen($, pane).catch(() => undefined), raisePane($, pane).catch(() => undefined)])
 }
 
 const openPane = ($: $): Open => target => void showPane($, target)
-
-async function renderStatsFooter($: $, e: Args<'ui.render'>, modes: readonly string[]) {
-  const { records, now } = await allRecords($)
-  return statsFooterView($.ui.resolve(e), { modes, today: todayUsd(records, now) }, { open: openPane($) })
-}
-
-async function renderCostPane($: $, e: Args<'ui.render'>) {
-  const [tab, scope, lastPrompt, costs, cfg] = await Promise.all([read($, costTab), read($, statsScope), promptCostOf($), spendOf($), configOf($)])
-  const { records: all, now } = tab === 'history' ? await allRecords($) : { records: [], now: 0 }
-  const records = scope === 'repo' ? all.filter(r => r.repo === session.repo) : all
-  return costPaneView($.ui.resolve(e), { tab, lastPrompt, costs, records, scope, repo: session.repo, now, ttlMinutes: cfg.cacheTtlMinutes }, {
-    setTab: next => void update($, costTab, () => next),
-    setScope: async next => void save($, STORE.statsScope, await update($, statsScope, () => next)),
-  })
-}
 
 async function renderBand($: $, e: Args<'ui.render'>) {
   const [cfg, now, pending, costs, hp] = await Promise.all([
@@ -356,7 +332,7 @@ export const register: Register = on => {
     }
     await initHistory($, kept)
     await learnOnSessionStart($, storedLessons)
-    if (scope === 'repo' || scope === 'all') await update($, statsScope, () => scope)
+    await costOnSessionStart($, scope)
     if (typeof band === 'boolean') await initBand($, band)
     const root = repo?.root ?? (await $.session.root().catch(() => ''))
     session.repo = printable(repo?.name ?? (root.split('/').pop() || 'unknown'))
@@ -664,16 +640,11 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANES.context.id }, ($, e) => renderCtxPane($, e))
 
-  on('ui.render', { component: 'Pane', requestId: PANES.cost.id }, ($, e) => renderCostPane($, e))
-
-  for (const id of OLD_COST_IDS) on('ui.render', { component: 'Pane', requestId: id }, ($, e) => renderCostPane($, e))
+  registerCost(on)
 
   registerHandoffs(on)
 
-  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
-    if (e.component !== 'SessionMode') return next(e)
-    return renderStatsFooter($, e, e.props.modes)
-  })
+  registerCostFooter(on)
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
