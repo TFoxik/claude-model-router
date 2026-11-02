@@ -895,6 +895,29 @@ test('a prompt-only command is guarded on its first cold run', async ($, on) => 
   expect((await command('composer')).text).toMatch(/Run \/mcp-prompt again/)
 })
 
+test('a hot reload mid-prompt keeps the running prompt and its cost', async ($, on) => {
+  const data: Record<string, unknown> = { config: MINE }
+  sharedStore(on, data)
+  mock.clock(on, { now: T0 })
+  on('session.id', () => ({ value: 'session-1' }) as never)
+  guardSession(on, { context: 1000, usage: usageOf(10_000) })
+  const start = () => $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await start()
+  await submit($, 'work')
+  await $.turn.start({ text: 'work', turnId: 'p1' })
+  await step($, 'p1')
+  await start()
+  await step($, 'p1')
+
+  const last = await mountCost($, 'last')
+  expect(await last.find({ type: 'Text', text: '2 requests · main $0.0040 · 0 subagents $0.0000' })).toBeDefined()
+  await last.unmount()
+  await submit($, 'next')
+  await $.turn.start({ text: 'next', turnId: 'p2' })
+  const [saved] = data.history as Array<{ text: string; usd: number; requests: number }>
+  expect([saved!.text, saved!.usd, saved!.requests]).toEqual(['work', 0.004, 2])
+})
+
 test('a background agent that outlives its prompt is charged to that prompt', async ($, on) => {
   const data: Record<string, unknown> = { config: MINE }
   sharedStore(on, data)
