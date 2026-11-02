@@ -73,7 +73,7 @@ Then restart or run `/reload-plugins`. Saved settings carry over. See [CHANGELOG
 | `/route set <route> <model> [effort]` | Set one route, for example `/route set sub:Explore haiku low` |
 | `/route features` | List the five features (routing, context, cost, handoffs, learn), each on or off, with a line on what it does |
 | `/route on` / `off` | Enable or disable routing (`/route routing on\|off` does the same) |
-| `/route cost on\|off` | Turn the Cost feature on or off (default on): off hides the Cost pane, the footer's `▤ today` and the band's money, while history keeps recording; also the Routes pane's **Cost** row |
+| `/route cost on\|off` | Turn the Cost feature on or off (default on): off hides the Cost pane, the footer's `▤ today` and the band's money and 5h / 7d limits, while history keeps recording; also the Routes pane's **Cost** row |
 | `/route context on\|off` | Turn the Context feature on or off (default on): off hides the Context pane and the band's cache and context, and stops the cold-send guard and next-step advice, while measuring keeps running; also the Routes pane's **Context** row |
 | `/route cost [last\|session\|history]` | Open the Cost pane, on a tab |
 | `/route last` / `stats` / `context` | Open Cost on Last prompt, Cost on History, or the Context pane |
@@ -109,7 +109,7 @@ Routes: `main`, `plan`, `sub:*`, `sub:<agent-type>` (such as `sub:Explore`), `wo
 - **Files: it writes only under `~/.claude/handoffs/`.** It lists and reads the handoffs there and, with auto-handoff on, writes new ones. It also reads the `.md.closed` markers other tools may leave beside a handoff, to show it as done. It never writes, edits or deletes a file it didn't write.
 - **Other reads.** It lists `~/.claude/skills` and `~/.claude/commands` and reads `~/.agents/.skill-lock.json`, to know your personal skills and where the `skills` CLI installed them from. It never reads your transcripts.
 - **No network or process access of its own.** Nothing leaves your machine except the model calls above, which go through Claude Code.
-- **Turning a feature off** hides it and stops what it does: it draws nothing, opens no pane and changes no setting of its own. Measuring and the local prompt history keep running, so the other features keep working and nothing is lost when you turn it back on. Prompt text is kept only while `/route stats text` is on, and `/route stats clear` deletes the history. Nothing leaves the machine.
+- **Turning a feature off** hides what it shows and stops what it does. Cost and Context draw nothing and open no pane while off, and Context's cold-send guard and next-step advice stop; routing off keeps the band's `router off` head and the Routes pane, and handoffs off keeps its pane, records and resume, losing only the band count and auto-handoff. Measuring and the local prompt history keep running, so the other features keep working and nothing is lost when you turn one back on. Prompt text is kept only while `/route stats text` is on, and `/route stats clear` deletes the history. The history never leaves the machine.
 - **Settings change only when you type a command or use a pane control**, never from a peer session, channel or trigger. Opening a pane works from anywhere.
 
 ## Develop

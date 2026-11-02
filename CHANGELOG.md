@@ -4,7 +4,7 @@
 
 ### Added
 
-- **Cost and Context can be switched off, and `/route features` lists every feature.** `/route cost off` hides the Cost pane, the footer's `▤ today` and the band's money; `/route context off` hides the Context pane and the band's cache and context, and stops the cold-send guard and the next-step advice. Both are also rows in the Routes pane, and both default to on, so nothing changes until you turn one off. Measuring and the local prompt history keep running either way, so turning one back on loses nothing, and `/route stats clear` always deletes the history. `/route features` shows each feature, routing, context, cost, handoffs and learn, as on or off with a line on what it does.
+- **Cost and Context can be switched off, and `/route features` lists every feature.** `/route cost off` hides the Cost pane, the footer's `▤ today` and the band's money and 5h / 7d limits; `/route context off` hides the Context pane and the band's cache and context, and stops the cold-send guard and the next-step advice. Both are also rows in the Routes pane, and both default to on, so nothing changes until you turn one off. Measuring and the local prompt history keep running either way, so turning one back on loses nothing, and `/route stats clear` always deletes the history. `/route features` shows each feature, routing, context, cost, handoffs and learn, as on or off with a line on what it does.
 
 ### Fixed
 
