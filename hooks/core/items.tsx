@@ -14,7 +14,6 @@ const memory = {
   patience: PATIENCE as Patience,
 }
 
-/** A new session start forgets what was loaded and saved, and sets how long an item may sit idle. */
 export function startItems(idleDev: string | undefined): void {
   memory.loaded = undefined
   memory.savedUsage = undefined

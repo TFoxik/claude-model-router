@@ -7,7 +7,6 @@ export function pushLesson(draft: LessonDraft | undefined): void {
   if (draft !== undefined) pending.push(draft)
 }
 
-/** What the turn taught so far, which it then forgets. */
 export function takeLessons(): LessonDraft[] {
   const drafts = pending
   pending = []

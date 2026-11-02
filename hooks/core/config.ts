@@ -30,19 +30,57 @@ export function startingConfig(stored: unknown, hasHistory: boolean): RouterConf
 
 export type Feature = 'routing' | 'context' | 'cost' | 'handoffs' | 'learn'
 
-/** What `/route features` lists, in this order: each feature's switch in the config and what it does. */
-export const FEATURES: readonly { key: Feature; field: 'isEnabled' | 'isContext' | 'isCost' | 'isHandoffs' | 'isLearning'; title: string; line: string }[] = [
-  { key: 'routing', field: 'isEnabled', title: 'Routing', line: 'models and effort per kind of work' },
-  { key: 'context', field: 'isContext', title: 'Context', line: 'cache and context in the band, cold-send guard, next-step advice' },
-  { key: 'cost', field: 'isCost', title: 'Cost', line: 'what each prompt costs: the Cost pane, the footer and the band' },
-  { key: 'handoffs', field: 'isHandoffs', title: 'Handoffs', line: 'notes to resume work in a fresh session' },
-  { key: 'learn', field: 'isLearning', title: 'Learn', line: 'cards that explain what a cache miss or a model cost you' },
+type FeatureRow = {
+  key: Feature
+  field: 'isEnabled' | 'isContext' | 'isCost' | 'isHandoffs' | 'isLearning'
+  title: string
+  line: string
+  on: string
+  off: string
+}
+
+/** Every switchable feature, in the order `/route features` lists them: its switch in the config, what it does, and what switching it says. */
+export const FEATURES: readonly FeatureRow[] = [
+  { key: 'routing', field: 'isEnabled', title: 'Routing', line: 'models and effort per kind of work', on: 'Model router enabled.', off: 'Model router disabled.' },
+  {
+    key: 'context',
+    field: 'isContext',
+    title: 'Context',
+    line: 'cache and context in the band, cold-send guard, next-step advice',
+    on: 'Context on.',
+    off: 'Context off: no Context pane, cold-send guard, next-step advice or band cache and context; measuring keeps running.',
+  },
+  {
+    key: 'cost',
+    field: 'isCost',
+    title: 'Cost',
+    line: 'what each prompt costs: the Cost pane, the footer and the band',
+    on: 'Cost on.',
+    off: 'Cost off: no Cost pane, footer or band money; history keeps recording (/route stats clear deletes it).',
+  },
+  {
+    key: 'handoffs',
+    field: 'isHandoffs',
+    title: 'Handoffs',
+    line: 'notes to resume work in a fresh session',
+    on: 'Handoffs on: the band counts handoffs other sessions left open, and auto-handoff runs when it is on (/route handoffs auto on|off).',
+    off: 'Handoffs off: no count in the band and no auto-handoff. Handoffs you save with /handoff are still listed in /route handoffs.',
+  },
+  {
+    key: 'learn',
+    field: 'isLearning',
+    title: 'Learn',
+    line: 'cards that explain what a cache miss or a model cost you',
+    on: 'Learn mode on: when a cache rewrite, a pricey model, a growing context or busy subagents cost you, a card above the band explains it with the numbers, until your next prompt.',
+    off: 'Learn mode off.',
+  },
 ]
 
-/** What a verb of a feature that is off answers. */
-export const offText = (f: Feature): string => `${FEATURES.find(one => one.key === f)!.title} is off. /route ${f} on turns it on.`
+export const featureOf = (key: string): FeatureRow | undefined => FEATURES.find(one => one.key === key)
 
-export const isFeatureOn = (cfg: RouterConfig, f: Feature): boolean => cfg[FEATURES.find(one => one.key === f)!.field]
+export const offText = (f: Feature): string => `${featureOf(f)!.title} is off. /route ${f} on turns it on.`
+
+export const isFeatureOn = (cfg: RouterConfig, f: Feature): boolean => cfg[featureOf(f)!.field]
 
 export const GUARDS: readonly ColdGuard[] = ['refuse', 'warn', 'off']
 

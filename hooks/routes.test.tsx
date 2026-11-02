@@ -1459,7 +1459,8 @@ test('learn mode is switched from the /route pane, which no longer opens a Learn
   expect(await routes.find({ type: 'Text', text: /explains cache misses and model costs/ })).toBeDefined()
   expect(await routes.find({ key: 'learn-open' })).toBeUndefined()
   await routes.press({ key: 'learn-toggle' })
-  expect(await routes.find({ type: 'Text', text: /explains cache misses and model costs/ })).toBeUndefined()
+  expect(await routes.find({ type: 'Text', text: /explains cache misses and model costs/ })).toBeDefined()
+  expect(await routes.find({ type: 'Text', text: / ● on/ })).toBeDefined()
   await routes.unmount()
 })
 
@@ -2332,6 +2333,27 @@ test('/route features lists the five features and their state', async ($, on) =>
   expect((await route($, 'routing on')).text).toBe('Model router enabled.')
 })
 
+test('every feature switches through /route <feature> on|off with its own answer, and only for a person', async ($, on) => {
+  mock.store(on)
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const stateOf = async () => (await route($, 'features')).text!.split('\n').slice(0, 5).map(one => one.split(/\s+/).slice(0, 2).join(' '))
+  for (const feature of ['routing', 'context', 'cost', 'handoffs', 'learn']) {
+    const off = (await route($, `${feature} off`)).text!
+    expect(off).not.toMatch(/^Usage/)
+    expect(await stateOf()).toContain(`${feature} off`)
+    expect((await route($, `${feature} on`)).text).not.toBe(off)
+    expect(await stateOf()).toContain(`${feature} on`)
+  }
+  expect((await route($, 'handoffs off')).text).toBe('Handoffs off: no count in the band and no auto-handoff. Handoffs you save with /handoff are still listed in /route handoffs.')
+  expect((await route($, 'off')).text).toBe('Model router disabled.')
+  expect((await route($, 'on')).text).toBe('Model router enabled.')
+  const peer = await $.command.run({ command: 'route', args: 'learn off', origin: { kind: 'peer' } } as unknown as Args<'command.run'>)
+  expect(peer.text).toBe('model-router: /route learn only runs when you type it.')
+  expect(await stateOf()).toContain('learn on')
+  expect((await route($, 'handoffs auto on')).text).toMatch(/^Auto-handoff on/)
+})
+
 test('stats clear works with cost off', async ($, on) => {
   const data: Record<string, unknown> = { history: [record('x')] }
   sharedStore(on, data)
@@ -2405,8 +2427,8 @@ test('a failure of a plugin below the band reaches the engine; the band is not d
   await expect(bandOf($)).rejects.toThrow()
 })
 
-test('with context off the Routes pane hides the cold-cache guard and next-step advice rows; a stale Cost or Context pane is closed at start', async ($, on) => {
-  mock.store(on, { config: { ...MINE, isCost: false, isContext: false } })
+test('with context or handoffs off their sub-settings stay greyed with no control; a stale Cost or Context pane is closed at start', async ($, on) => {
+  mock.store(on, { config: { ...MINE, isCost: false, isContext: false, isHandoffs: false } })
   guardSession(on, { context: 1000, usage: usageOf(1000) })
   on('session.model', () => ({ value: opus }))
   const closed = openPanes(on, ['model-router-cost', 'model-router-ctx', 'model-router-handoffs'])
@@ -2415,9 +2437,16 @@ test('with context off the Routes pane hides the cold-cache guard and next-step 
   const pane = await mountPane($, 'route')
   expect(await pane.find({ key: 'guard' })).toBeUndefined()
   expect(await pane.find({ key: 'next-toggle' })).toBeUndefined()
+  expect(await pane.find({ key: 'handoff-toggle' })).toBeUndefined()
+  expect(await pane.findAll({ type: 'Text', text: 'needs Context' })).toHaveLength(2)
+  expect(await pane.findAll({ type: 'Text', text: 'needs Handoffs' })).toHaveLength(1)
+  expect(await pane.find({ type: 'Text', text: /saves a handoff while the cache is warm/ })).toBeDefined()
   expect(await pane.find({ key: 'ttl' })).toBeDefined()
   await pane.press({ key: 'context-toggle' })
+  await pane.press({ key: 'handoffs-toggle' })
   expect(await pane.find({ key: 'guard' })).toBeDefined()
   expect(await pane.find({ key: 'next-toggle' })).toBeDefined()
+  expect(await pane.find({ key: 'handoff-toggle' })).toBeDefined()
+  expect(await pane.findAll({ type: 'Text', text: /^needs / })).toHaveLength(0)
   await pane.unmount()
 })

@@ -10,6 +10,7 @@ import { openSteps } from '../core/signals'
 import { rewritePrice } from '../core/pricing'
 import { pushLesson } from '../learn/drafts'
 import { lessonFromAutoHandoff } from '../learn/lessons'
+import type { BandPart } from '../ui/band'
 import { PANES } from '../ui/kit'
 import { HANDOFF_DIR, HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, handoffPrompt, isAgentBusy, pendingAfter, segment, shouldAutoHandoff, tildePath } from './handoff'
 import type { PendingHandoff } from './handoff'
@@ -33,8 +34,6 @@ const mem = {
   handoffsChain: Promise.resolve() as Promise<unknown>,
 }
 
-const HANDOFFS_ON_TEXT = 'Handoffs on: the band counts handoffs other sessions left open, and auto-handoff runs when it is on (/route handoffs auto on|off).'
-const HANDOFFS_OFF_TEXT = 'Handoffs off: no count in the band and no auto-handoff. Handoffs you save with /handoff are still listed in /route handoffs.'
 
 const handoffOnText = (repo: string) =>
   `Auto-handoff on: when the cache is about to go cold with steps open or a plan not yet started, model-router asks Claude for a handoff while the cache is still warm and saves it under ~/${HANDOFF_DIR}/${segment(repo)}/. It runs once per prompt and never clears the session itself.`
@@ -131,7 +130,6 @@ export async function handoffsOnSessionStart($: $, stored: unknown, scope: unkno
   void refreshHandoffs($, 'repo').catch(() => undefined)
 }
 
-/** What opening the Handoffs pane does besides showing it. */
 export async function handoffsOnOpen($: $): Promise<void> {
   await refreshHandoffs($)
 }
@@ -170,7 +168,6 @@ export async function handoffsOnTick($: $, tick: HealthTick): Promise<void> {
   mem.handoff = pendingAfter(mem.handoff, { kind: 'submitted', isDropped: sent === undefined || sent.drop !== undefined })
 }
 
-/** A person's prompt re-arms the auto-handoff and drops the handoff path. */
 export function handoffsOnUserPrompt(): void {
   mem.handoff = pendingAfter(mem.handoff, { kind: 'user-prompt' })
   mem.handoffArmed = true
@@ -212,18 +209,18 @@ export async function handoffsOnTurnComplete($: $, e: Args<'turn.complete'>): Pr
   return true
 }
 
-/** A fresh context leaves no handoff to resume from, and an auto-handoff asked for before it is no longer wanted. */
 export function handoffsOnFreshContext(): void {
   session.handoffPath = undefined
   mem.handoff = pendingAfter(mem.handoff, { kind: 'fresh-context' })
 }
 
-export async function handoffsBandCount($: $): Promise<number> {
+export async function handoffsBand($: $): Promise<BandPart | undefined> {
   const [records, cfg, now] = await Promise.all([read($, handoffs), configOf($), nowOf($)])
-  return !cfg.isHandoffs ? 0 : bandCount(records, segment(session.repo), session.kept.sessionId, now)
+  const open = cfg.isHandoffs ? bandCount(records, segment(session.repo), session.kept.sessionId, now) : 0
+  return open === 0 ? undefined : { buttons: [{ key: 'band-handoffs', label: `Handoffs ●${open}`, target: 'handoffs', look: 'plain' }] }
 }
 
-export async function setHandoffsOn($: $, isOn: boolean): Promise<void> {
+async function setHandoffsOn($: $, isOn: boolean): Promise<void> {
   await setConfig($, c => ({ ...c, isHandoffs: isOn }))
 }
 
@@ -240,8 +237,5 @@ export async function handoffsVerb($: $, verb: string, rest: string[], isPerson:
     await setAutoHandoff($, isOn)
     return { text: isOn ? handoffOnText(session.repo) : 'Auto-handoff off.' }
   }
-  if (rest[0] !== 'on' && rest[0] !== 'off') return { text: 'Usage: /route handoffs on|off (the Handoffs pane, the band\'s count and auto-handoff), /route handoffs auto on|off, or /route handoffs to open the pane' }
-  const isOn = rest[0] === 'on'
-  await setHandoffsOn($, isOn)
-  return { text: isOn ? HANDOFFS_ON_TEXT : HANDOFFS_OFF_TEXT }
+  return { text: 'Usage: /route handoffs on|off (the Handoffs pane, the band\'s count and auto-handoff), /route handoffs auto on|off, or /route handoffs to open the pane' }
 }

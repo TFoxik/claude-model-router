@@ -15,7 +15,8 @@ import { adviseSession } from '../core/strategy'
 import { messagesOf, tokensByServer } from '../core/tips'
 import type { TipAction } from '../core/tips'
 import { awayOptions, awayText } from '../learn/lessons'
-import type { ContextPart } from '../ui/band'
+import type { BandPart } from '../ui/band'
+import { contextBandPart } from './band-part'
 import { PANES } from '../ui/kit'
 import { contextMobileView, contextPaneView } from './context-pane'
 
@@ -129,12 +130,8 @@ export async function closeContextPane($: $): Promise<void> {
   await closePanes($, [PANES.context.id])
 }
 
-/** The band's cache and context, and the advice button; `undefined` while this feature is off. */
-export function contextBandPart(cfg: RouterConfig, health: Health | null): ContextPart | null | undefined {
-  if (!cfg.isContext) return undefined
-  if (health === null) return null
-  const { cache, warmMinutes, coldUsd, ctx, ctxLevel, advice } = health
-  return { cache, warmMinutes, coldUsd, ctx, ctxLevel, advice }
+export function contextBand(cfg: RouterConfig, health: Health | null): BandPart | undefined {
+  return cfg.isContext ? contextBandPart(health) : undefined
 }
 
 export function contextOnSessionStart(learned: unknown): void {

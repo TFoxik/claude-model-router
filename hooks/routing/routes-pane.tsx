@@ -31,22 +31,31 @@ import {
   withPreset,
   withRoute,
 } from './routes'
+import { featureOf } from '../core/config'
+import type { Feature } from '../core/config'
 import { colorOf } from '../ui/kit'
 import type { Els } from '../ui/kit'
 
-const MODEL_OPTIONS = [
+/** The desktop draws a Select as a native control as wide as its label, so a column's labels are padded to its longest; `inherit` is in every list. */
+const padded = (options: Array<{ value: string; label: string }>) => {
+  const length = Math.max(...options.map(one => one.label.length))
+  return options.map(one => ({ ...one, label: one.label.padEnd(length, '\u00a0') }))
+}
+
+const MODEL_OPTIONS = padded([
   { value: 'inherit', label: 'inherit' },
   ...Object.entries(MODELS).map(([value, m]) => ({ value, label: shortLabel(m.label) })),
-]
+])
 
 const MODEL_W = 11
-const EFFORT_W = 10
+const EFFORT_W = 12
 
-const effortOptions = (canAuto: boolean) => [
-  { value: 'inherit', label: 'inherit' },
-  ...(canAuto ? [{ value: 'auto', label: 'auto' }] : []),
-  ...EFFORTS.map(value => ({ value, label: value })),
-]
+const effortList = (canAuto: boolean) =>
+  padded([{ value: 'inherit', label: 'inherit' }, ...(canAuto ? [{ value: 'auto', label: 'auto' }] : []), ...EFFORTS.map(value => ({ value, label: value }))])
+
+const EFFORT_OPTIONS = { loop: effortList(true), sub: effortList(false) }
+
+const effortOptions = (canAuto: boolean) => (canAuto ? EFFORT_OPTIONS.loop : EFFORT_OPTIONS.sub)
 
 const GROUPS = [
   { title: 'Main loop', rows: ROUTES.filter(one => isLoopRoute(one.key)) },
@@ -101,21 +110,23 @@ type Setting = {
   note?: string
   controls: RenderChildren
   isChild?: boolean
+  /** The feature a sub-setting depends on, while it is off: the row stays, greyed, so the pane doesn't jump. */
+  needs?: Feature
 }
 
 /** A setting: its name and state, a dim line saying what it does, and its controls on the right. */
-function settingRow({ Box, Text }: InputEls, { key, name, state, note, controls, isChild }: Setting) {
+function settingRow({ Box, Text }: InputEls, { key, name, state, note, controls, isChild, needs }: Setting) {
   return (
     <Box key={key} flexDirection="row" justifyContent="space-between" alignItems="center" gap={1} paddingLeft={isChild ? 2 : 0}>
       <Box flexDirection="column" flexShrink={1} minWidth={0}>
-        <Text>
+        <Text dimColor={needs !== undefined}>
           {name}
-          {state ? <Text color={state.isOn ? 'success' : 'subtle'}>{state.isOn ? ` ● ${state.on ?? 'on'}` : ` ○ ${state.off ?? 'off'}`}</Text> : null}
+          {state ? <Text color={needs === undefined && state.isOn ? 'success' : 'subtle'}>{state.isOn ? ` ● ${state.on ?? 'on'}` : ` ○ ${state.off ?? 'off'}`}</Text> : null}
         </Text>
         {note ? <Text dimColor>{note}</Text> : null}
       </Box>
       <Box flexDirection="row" gap={1} flexShrink={0}>
-        {controls}
+        {needs === undefined ? controls : <Text key={`${key}-needs`} dimColor>needs {featureOf(needs)!.title}</Text>}
       </Box>
     </Box>
   )
@@ -126,9 +137,10 @@ function settingsSection(els: InputEls, { cfg, isBand }: PaneData, a: PaneAction
   const { Box, Text, Button, Select } = els
   const group = (title: string) => <Text key={`sg:${title}`} bold color="claude">{title}</Text>
   const turn = (key: string, isOn: boolean, set: (isOn: boolean) => void) => <Button key={key} label={isOn ? 'Turn off' : 'Turn on'} onPress={() => set(!isOn)} />
-  /** An on/off setting whose note says what turning it on would do. */
-  const toggle = (key: string, name: string, isOn: boolean, set: (isOn: boolean) => void, offNote: string, extra?: RenderChildren, isChild?: boolean) =>
-    settingRow(els, { key: `set-${key}`, name, state: { isOn }, note: isOn ? undefined : offNote, controls: [turn(`${key}-toggle`, isOn, set), extra], isChild })
+  /** An on/off setting whose note, shown either way so the row keeps its height, says what it does. */
+  const toggle = (key: string, name: string, isOn: boolean, set: (isOn: boolean) => void, note: string, more: { extra?: RenderChildren; isChild?: boolean; needs?: Feature } = {}) =>
+    settingRow(els, { key: `set-${key}`, name, state: { isOn }, note, controls: [more.extra, turn(`${key}-toggle`, isOn, set)], isChild: more.isChild, needs: more.needs })
+  const unless = (isOn: boolean, f: Feature) => (isOn ? undefined : f)
   const select = (key: string, options: Array<{ value: string; label: string }>, value: string, onSelect: (value: string) => void) => (
     <Box width={SELECT_W}>
       <Select key={key} options={options} value={value} onSelect={onSelect} />
@@ -140,12 +152,12 @@ function settingsSection(els: InputEls, { cfg, isBand }: PaneData, a: PaneAction
       <Box flexDirection="column" gap={1}>
         {group('Coaching')}
         {toggle('learn', 'Learn mode', cfg.isLearning, a.setLearning, 'explains cache misses and model costs with your own numbers, when they happen')}
-        {cfg.isContext ? toggle('next', 'Next-step advice', cfg.showNext, a.setShowNext, 'shows next /clear, /compact or /handoff in the band when carrying on is not the best move') : null}
+        {toggle('next', 'Next-step advice', cfg.showNext, a.setShowNext, 'shows next /clear, /compact or /handoff in the band when carrying on is not the best move', { needs: unless(cfg.isContext, 'context') })}
       </Box>
       <Box flexDirection="column" gap={1}>
         {group('Handoffs')}
-        {toggle('handoffs', 'Handoffs', cfg.isHandoffs, a.setHandoffs, 'counts open handoffs in the band and lets auto-handoff run', <Button key="handoffs-open" label="Open" onPress={a.openHandoffs} />)}
-        {cfg.isHandoffs ? toggle('handoff', 'Auto-handoff', cfg.autoHandoff, a.setAutoHandoff, 'saves a handoff while the cache is warm, before it goes cold with work open', undefined, true) : null}
+        {toggle('handoffs', 'Handoffs', cfg.isHandoffs, a.setHandoffs, 'counts open handoffs in the band and lets auto-handoff run', { extra: <Button key="handoffs-open" label="Open" onPress={a.openHandoffs} /> })}
+        {toggle('handoff', 'Auto-handoff', cfg.autoHandoff, a.setAutoHandoff, 'saves a handoff while the cache is warm, before it goes cold with work open', { isChild: true, needs: unless(cfg.isHandoffs, 'handoffs') })}
       </Box>
       <Box flexDirection="column" gap={1}>
         {group('Cost and context')}
@@ -154,14 +166,13 @@ function settingsSection(els: InputEls, { cfg, isBand }: PaneData, a: PaneAction
       </Box>
       <Box flexDirection="column" gap={1}>
         {group('Cache and display')}
-        {cfg.isContext
-          ? settingRow(els, {
-              key: 'set-guard',
-              name: 'Cold-cache guard',
-              note: 'a send onto a cold cache: held once with its price, sent with it, or not checked',
-              controls: select('guard', GUARD_OPTIONS, cfg.coldGuard, value => a.setGuard(value as ColdGuard)),
-            })
-          : null}
+        {settingRow(els, {
+          key: 'set-guard',
+          name: 'Cold-cache guard',
+          note: 'a send onto a cold cache: held once with its price, sent with it, or not checked',
+          controls: select('guard', GUARD_OPTIONS, cfg.coldGuard, value => a.setGuard(value as ColdGuard)),
+          needs: unless(cfg.isContext, 'context'),
+        })}
         {settingRow(els, {
           key: 'set-ttl',
           name: 'Cache lifetime',

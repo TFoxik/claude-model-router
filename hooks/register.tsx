@@ -3,7 +3,8 @@ import type { Args, EngineInterface, Register } from 'claude-code'
 import type { ColdGuard, RouterConfig } from '../types'
 import { commandLabel, printable, typedText, versionOf } from './core/format'
 import { EMPTY_PROMPT, sanitizeHistory, sumUsd, withoutText } from './core/ledger'
-import { CACHE_TTLS, FEATURES, isFeatureOn, offText, startingConfig } from './core/config'
+import { CACHE_TTLS, FEATURES, featureOf, isFeatureOn, offText, startingConfig } from './core/config'
+import type { Feature } from './core/config'
 import { backfillUsage, flushUsage, listCommands, noteCommand, startItems } from './core/items'
 import { USER_ORIGINS, noteSpawn, noteToolCall, promptTokens, recordPrompt, recordStep, refreshStatus, resetSignals } from './core/measure'
 import type { StepOutcome } from './core/measure'
@@ -12,16 +13,16 @@ import { raisePane } from './core/panes'
 import { session } from './core/session'
 import { STORE, UNREADABLE, carriedOf, carry, configOf, healthOf, initBand, initConfig, initHistory, isBandShownOf, lastUsageOf, load, nowOf, save, setBand, setHistory, spendOf, updatePromptCost, writeConfig } from './core/state'
 import { pushLesson, takeUrgent } from './learn/drafts'
-import { closeOldLearnPane, guardWhy, learnBandCard, learnOnSessionStart, learnVerb, flushLessons, clearCard, setLearning, teach } from './learn/feature'
+import { closeOldLearnPane, guardWhy, learnBandCard, learnOnSessionStart, learnSwitchedOff, learnVerb, flushLessons, clearCard, teach } from './learn/feature'
 import { lessonFromCompact } from './learn/lessons'
 import { ENGINE, asEffort, routeForSpawn } from './routing/routes'
 import { registerRouting, renderRoutesPane, routingBandHead, routingDecide, routingNoteApplied, routingOnSpawn, routingOnTurnStart, routingVerb } from './routing/feature'
-import { handoffsAfterPrompt, handoffsBandCount, handoffsOnFreshContext, handoffsOnOpen, handoffsOnSessionStart, handoffsOnTick, handoffsOnTurnComplete, handoffsOnTurnStart, handoffsOnUserPrompt, handoffsOnWrite, handoffsVerb, registerHandoffs, setAutoHandoff, setHandoffsOn } from './handoffs/feature'
+import { handoffsAfterPrompt, handoffsBand, handoffsOnFreshContext, handoffsOnOpen, handoffsOnSessionStart, handoffsOnTick, handoffsOnTurnComplete, handoffsOnTurnStart, handoffsOnUserPrompt, handoffsOnWrite, handoffsVerb, registerHandoffs, setAutoHandoff } from './handoffs/feature'
 import { bandView } from './ui/band'
-import { closeContextPane, contextNoteCommand, contextOnSessionStart, contextOnTurnStart, contextVerb, contextBandPart, holdColdCommand, holdColdPrompt, registerContext, setShowNext } from './context/feature'
-import { COST_TAB_LABEL, PANES, isTarget, paneOf } from './ui/kit'
+import { closeContextPane, contextBand, contextNoteCommand, contextOnSessionStart, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext } from './context/feature'
+import { COST_TABS, COST_TAB_LABEL, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
-import { closeCostPanes, costBandPart, costOnSessionStart, registerCost, registerCostFooter, setCostTab } from './cost/feature'
+import { closeCostPanes, costBand, costOnSessionStart, registerCost, registerCostFooter, setCostTab } from './cost/feature'
 
 type $ = EngineInterface
 
@@ -77,17 +78,11 @@ async function showPane($: $, target: Target) {
 const openPane = ($: $): Open => target => void showPane($, target)
 
 async function renderBand($: $, e: Args<'ui.render'>) {
-  const [head, costs, health, handoffsOpen] = await Promise.all([routingBandHead($), spendOf($), healthOf($), handoffsBandCount($)])
-  const parts = {
-    head,
-    context: contextBandPart(head.cfg, health),
-    cost: costBandPart(head.cfg, health, sumUsd(Object.values(costs))),
-    handoffsOpen,
-  }
-  return bandView($.ui.resolve(e), parts, { open: openPane($) })
+  const [head, costs, health, handoffs] = await Promise.all([routingBandHead($), spendOf($), healthOf($), handoffsBand($)])
+  const parts = [handoffs, contextBand(head.cfg, health), costBand(head.cfg, health, sumUsd(Object.values(costs)))]
+  return bandView($.ui.resolve(e), { head, parts: parts.filter(one => one !== undefined) }, { open: openPane($) })
 }
 
-/** Counts a finished request, and for the main loop puts the route and the band's facts up to date. */
 async function afterStep($: $, agentId: string | undefined, key: string, s: StepOutcome) {
   const { prevMainRoute } = await recordStep($, agentId, key, s)
   if (agentId !== undefined) return
@@ -95,29 +90,25 @@ async function afterStep($: $, agentId: string | undefined, key: string, s: Step
   await refresh($)
 }
 
-const SWITCH_TEXT = {
-  cost: {
-    on: 'Cost on.',
-    off: 'Cost off: no Cost pane, footer or band money; history keeps recording (/route stats clear deletes it).',
-  },
-  context: {
-    on: 'Context on.',
-    off: 'Context off: no Context pane, cold-send guard, next-step advice or band cache and context; measuring keeps running.',
-  },
+/** What switching a feature off does besides its config field; the engine follows `$` into no table, so each is named here. */
+async function afterSwitchOff($: $, f: Feature) {
+  if (f === 'learn') await learnSwitchedOff($)
+  if (f === 'cost') await closeCostPanes($)
+  if (f === 'context') await closeContextPane($)
 }
 
-async function switchFeature($: $, feature: 'cost' | 'context', isOn: boolean) {
-  await setConfigAndRefresh($, c => (feature === 'cost' ? { ...c, isCost: isOn } : { ...c, isContext: isOn }))
-  if (!isOn) await (feature === 'cost' ? closeCostPanes($) : closeContextPane($))
+async function switchFeature($: $, f: Feature, isOn: boolean) {
+  const { field } = featureOf(f)!
+  await setConfigAndRefresh($, c => ({ ...c, [field]: isOn }))
+  if (!isOn) await afterSwitchOff($, f)
 }
 
-/** `cost on|off` and `context on|off`, taken before `aliased` can read `cost on` as `on`, which is routing's switch. */
-async function switchVerb($: $, words: readonly string[], isPerson: boolean): Promise<{ text: string } | undefined> {
-  const [verb, state, ...more] = words
-  if ((verb !== 'cost' && verb !== 'context') || (state !== 'on' && state !== 'off') || more.length > 0) return undefined
+async function switchVerb($: $, [verb = '', state, ...more]: readonly string[], isPerson: boolean): Promise<{ text: string } | undefined> {
+  const row = featureOf(verb)
+  if (row === undefined || (state !== 'on' && state !== 'off') || more.length > 0) return undefined
   if (!isPerson) return { text: `model-router: /route ${verb} only runs when you type it.` }
-  await switchFeature($, verb, state === 'on')
-  return { text: SWITCH_TEXT[verb][state] }
+  await switchFeature($, row.key, state === 'on')
+  return { text: row[state] }
 }
 
 function featuresText(cfg: RouterConfig): string {
@@ -126,18 +117,17 @@ function featuresText(cfg: RouterConfig): string {
 }
 
 /**
- * `/route` words in their current form: `cost <tab>` opens a tab as `<tab>` does,
- * `routing on|off` is `on|off`, and `handoff on|off` is the older name of `handoffs auto on|off`.
+ * `/route` words in their current form: bare `on|off` is routing's switch, `cost <tab>` opens a tab as `<tab>` does,
+ * and `handoff on|off` is the older name of `handoffs auto on|off`.
  */
 function aliased(words: readonly string[]): string[] {
   const [verb, ...rest] = words
-  if (verb === 'cost' && rest.length === 1) return rest
-  if (verb === 'routing' && rest.length === 1 && (rest[0] === 'on' || rest[0] === 'off')) return rest
+  if (verb === 'on' || verb === 'off') return ['routing', verb, ...rest]
+  if (verb === 'cost' && rest.length === 1 && COST_TABS.some(tab => tab === rest[0])) return rest
   if (verb === 'handoff') return ['handoffs', 'auto', ...rest]
   return [...words]
 }
 
-/** The verbs no feature owns. */
 async function shellVerb($: $, verb: string, rest: string[]): Promise<{ text: string } | undefined> {
   if (verb === 'stats' && rest[0] === 'clear') {
     await setHistory($, () => [])
@@ -162,7 +152,7 @@ async function shellVerb($: $, verb: string, rest: string[]): Promise<{ text: st
   return undefined
 }
 
-const USAGE = '[features | cost [last|session|history] | last | stats [clear | text on|off] | context | learn [on|off | mute|unmute <topic>] | handoffs [on|off | auto on|off] | next on|off | away | unused | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60 | cost on|off | context on|off]'
+const USAGE = `[features | ${FEATURES.map(one => one.key).join('|')} on|off | on | off | cost [last|session|history] | last | stats [clear | text on|off] | context | learn [mute|unmute <topic>] | handoffs [auto on|off] | next on|off | away | unused | preset <name> | set <route> <model> [effort] | band on|off | guard refuse|warn|off | ttl 5|60]`
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -217,8 +207,7 @@ export const register: Register = on => {
     session.tick = $.clock.every(60_000, () => void refresh($).catch(() => undefined))
     void closeOldLearnPane($)
     const started = await configOf($)
-    if (!started.isCost) void closeCostPanes($)
-    if (!started.isContext) void closeContextPane($)
+    for (const one of FEATURES) if (!isFeatureOn(started, one.key)) void afterSwitchOff($, one.key).catch(() => undefined)
     void noteVersion($, stored !== undefined && stored !== UNREADABLE).catch(() => undefined)
     await $.command.register({ name: 'route', description: 'Model router: open the pane, or one of the verbs', argumentHint: USAGE })
     return next(e)
@@ -358,11 +347,11 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'route' }, async ($, e) => {
-    const words = e.args.trim().split(/\s+/).filter(Boolean)
+    const words = aliased(e.args.trim().split(/\s+/).filter(Boolean))
     const isPerson = USER_ORIGINS.has(e.origin.kind)
     const switched = await switchVerb($, words, isPerson)
     if (switched !== undefined) return switched
-    const [verb = 'route', ...rest] = aliased(words)
+    const [verb = 'route', ...rest] = words
     if (rest.length === 0 && isTarget(verb)) {
       const { pane, tab } = paneOf(verb)
       if ((pane === 'cost' || pane === 'context') && !isFeatureOn(await configOf($), pane)) return { text: offText(pane) }
@@ -382,8 +371,9 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANES.route.id }, ($, e) =>
     renderRoutesPane($, e, {
-      setLearning: isOn => void setLearning($, isOn),
-      setHandoffs: isOn => void setHandoffsOn($, isOn),
+      setRouting: isOn => void switchFeature($, 'routing', isOn),
+      setLearning: isOn => void switchFeature($, 'learn', isOn),
+      setHandoffs: isOn => void switchFeature($, 'handoffs', isOn),
       setAutoHandoff: isOn => void setAutoHandoff($, isOn),
       setShowNext: isOn => void setShowNext($, isOn),
       setCost: isOn => void switchFeature($, 'cost', isOn),

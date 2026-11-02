@@ -25,6 +25,7 @@ const mem = {
 
 /** What the Routes pane does that another feature owns; the orchestrator binds `$` into each, since `$` goes only into this file's own functions. */
 type RoutesPaneLinks = {
+  setRouting: (isOn: boolean) => void
   setLearning: (isOn: boolean) => void
   setHandoffs: (isOn: boolean) => void
   setAutoHandoff: (isOn: boolean) => void
@@ -92,7 +93,7 @@ export async function renderRoutesPane($: $, e: Args<'ui.render'>, links: Routes
         const next = fn(d ?? cfg)
         return JSON.stringify(next) === JSON.stringify(cfg) ? null : next
       }),
-    toggle: () => void setConfig($, c => ({ ...c, isEnabled: !c.isEnabled })),
+    toggle: () => links.setRouting(!cfg.isEnabled),
     ...links,
     setBand: isShown => void setBand($, isShown),
     // Only the routes come from the draft, so on/off or a setting changed while it was open is kept.
@@ -174,7 +175,6 @@ export async function routingDecide($: $, e: Args<'turn.step'>, cfg: RouterConfi
   return { route, model, effort, isHeld, isAfterCompact }
 }
 
-/** The main loop ran a request on this route: the toast when the route changed, and what the band and the Routes pane show as running. */
 export async function routingNoteApplied($: $, a: { route: string; model: string; effort?: Effort; isHeld: boolean; prevRoute?: string; cfg: RouterConfig }): Promise<void> {
   if (a.prevRoute !== undefined && a.prevRoute !== a.route && a.cfg.isEnabled) $.ui.toast(`Route ${a.route}: ${routeText(a.model, a.effort)}`)
   await update($, active, () => ({ route: a.route, model: a.model, effort: a.effort, isHeld: a.isHeld }))
@@ -187,10 +187,6 @@ export async function routingBandHead($: $): Promise<{ cfg: RouterConfig; now: A
 
 export async function routingVerb($: $, verb: string, rest: string[], isPerson: boolean): Promise<{ text: string } | undefined> {
   if (!isPerson) return undefined
-  if (verb === 'on' || verb === 'off') {
-    await setConfig($, c => ({ ...c, isEnabled: verb === 'on' }))
-    return { text: `Model router ${verb === 'on' ? 'enabled' : 'disabled'}.` }
-  }
   if (verb === 'preset') {
     const name = rest[0] ?? ''
     const preset = presetOf(name)

@@ -1,20 +1,19 @@
 # Release notes
 
-## Unreleased
+## 1.8.0 — 2026-11-02
 
 ### Added
 
 - **Cost and Context can be switched off, and `/route features` lists every feature.** `/route cost off` hides the Cost pane, the footer's `▤ today` and the band's money and 5h / 7d limits; `/route context off` hides the Context pane and the band's cache and context, and stops the cold-send guard and the next-step advice. Both are also rows in the Routes pane, and both default to on, so nothing changes until you turn one off. Measuring and the local prompt history keep running either way, so turning one back on loses nothing, and `/route stats clear` always deletes the history. `/route features` shows each feature, routing, context, cost, handoffs and learn, as on or off with a line on what it does.
 
+### Changed
+
+- **The Routes pane holds still while you switch things.** Every switch keeps its description whether it is on or off, a setting that depends on a feature that is off (Auto-handoff on Handoffs, Next-step advice and the Cold-cache guard on Context) stays in place greyed with `needs Handoffs` or `needs Context` instead of disappearing, **Turn on / off** is always the rightmost button, and the model and effort pickers line up.
+- **Auto-handoff also counts edits you haven't committed as open work.** Three or more file edits since the last `git commit` run in the session now make work open, as two open todos or tasks or an unstarted plan already did, so a long change left uncommitted without a todo list gets its handoff before the cache goes cold. The handoff then asks Claude to mark those files as uncommitted and to make committing them an open step. Edits by subagents count; edits under `~/.claude/`, such as handoffs and memory, don't. A commit made outside the session, in your own terminal, isn't seen.
+
 ### Fixed
 
 - **The band no longer hides what other plugins draw above the prompt.** With the band shown, another plugin's band or banner was dropped; it now stays below ours. A row with nothing in it is no longer drawn, so the band shrinks only when both Cost and Context are off.
-
-## 1.8.0 — 2026-10-16
-
-### Changed
-
-- **Auto-handoff also counts edits you haven't committed as open work.** Three or more file edits since the last `git commit` run in the session now make work open, as two open todos or tasks or an unstarted plan already did, so a long change left uncommitted without a todo list gets its handoff before the cache goes cold. The handoff then asks Claude to mark those files as uncommitted and to make committing them an open step. Edits by subagents count; edits under `~/.claude/`, such as handoffs and memory, don't. A commit made outside the session, in your own terminal, isn't seen.
 
 ## 1.7.1 — 2026-10-15
 
