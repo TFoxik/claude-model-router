@@ -21,7 +21,12 @@ export type RouterConfig = {
   autoHandoff: boolean
   /** The band's next /clear, /compact or /handoff and the Context pane's advice tip. */
   showNext: boolean
+  /** The longest a keep-warm run pings before it stops on its own. */
+  warmHours: WarmHours
 }
+export type WarmHours = 1 | 2 | 4 | 6
+/** A keep-warm run: when it started, when it stops at the latest, and what its pings cost so far. */
+export type WarmRun = { startedAt: number; until: number; usd: number; pings: number }
 export type ColdGuard = 'refuse' | 'warn' | 'off'
 export type Scope = 'repo' | 'all'
 
@@ -127,6 +132,7 @@ declare module 'claude-code' {
       lessons: Lesson[]
       learnCard: LearnCard | null
       carried: Carried | null
+      warmRun: WarmRun | null
       handoffs: Handoffs
       handoffScope: Scope
       handoffClosedShown: boolean

@@ -1,4 +1,4 @@
-import type { ColdGuard, LessonKind, RouteSetting, RouterConfig } from '../../types'
+import type { ColdGuard, LessonKind, RouteSetting, RouterConfig, WarmHours } from '../../types'
 import { isEffort, isModel, isRouteKey, withPreset } from '../routing/routes'
 
 /** A fresh install changes no model until a preset is picked; costs, the band and the guard still work. */
@@ -16,6 +16,7 @@ export const DEFAULT_CONFIG: RouterConfig = {
   isContext: true,
   autoHandoff: false,
   showNext: true,
+  warmHours: 4,
 }
 
 /**
@@ -84,6 +85,8 @@ export const isFeatureOn = (cfg: RouterConfig, f: Feature): boolean => cfg[featu
 
 export const GUARDS: readonly ColdGuard[] = ['refuse', 'warn', 'off']
 
+export const WARM_HOURS: readonly WarmHours[] = [1, 2, 4, 6]
+
 /** The prompt-cache lifetimes the API offers, in minutes. */
 export const CACHE_TTLS: readonly number[] = [60, 5]
 
@@ -134,5 +137,6 @@ export function sanitizeConfig(stored: unknown): RouterConfig {
     isContext: typeof s.isContext === 'boolean' ? s.isContext : DEFAULT_CONFIG.isContext,
     autoHandoff: typeof s.autoHandoff === 'boolean' ? s.autoHandoff : DEFAULT_CONFIG.autoHandoff,
     showNext: typeof s.showNext === 'boolean' ? s.showNext : DEFAULT_CONFIG.showNext,
+    warmHours: WARM_HOURS.includes(s.warmHours as WarmHours) ? (s.warmHours as WarmHours) : DEFAULT_CONFIG.warmHours,
   }
 }

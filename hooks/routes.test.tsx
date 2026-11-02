@@ -33,6 +33,7 @@ import {
   sanitizeConfig,
   startingConfig,
 } from './core/config'
+import { pingRead } from './core/measure'
 import {
   FORK,
   PRESETS,
@@ -2449,4 +2450,17 @@ test('with context or handoffs off their sub-settings stay greyed with no contro
   expect(await pane.find({ key: 'handoff-toggle' })).toBeDefined()
   expect(await pane.findAll({ type: 'Text', text: /^needs / })).toHaveLength(0)
   await pane.unmount()
+})
+
+test('a keep-warm ping counts as warm only when the cache served most of the prompt', () => {
+  const usage = (read: number) => ({ input_tokens: 10, cache_read_input_tokens: read, cache_creation_input_tokens: 0, output_tokens: 2 })
+  expect(pingRead(usage(150_000), 200_000)).toBe('warm')
+  expect(pingRead(usage(2_000), 200_000)).toBe('cold')
+})
+
+test('the keep-warm ceiling is read from the config, anything else falls back to 4 h', () => {
+  expect(sanitizeConfig({ ...DEFAULT_CONFIG, warmHours: 6 }).warmHours).toBe(6)
+  expect(sanitizeConfig({ ...DEFAULT_CONFIG, warmHours: 9 }).warmHours).toBe(4)
+  const { warmHours: _dropped, ...old } = DEFAULT_CONFIG
+  expect(sanitizeConfig(old).warmHours).toBe(4)
 })

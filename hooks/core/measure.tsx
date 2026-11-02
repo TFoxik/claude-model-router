@@ -1,5 +1,5 @@
 import type { Args, EngineInterface } from 'claude-code'
-import type { Effort, Health, LastUsage, PromptCost, PromptRecord, RouterConfig } from '../../types'
+import type { Effort, Health, LastUsage, PromptCost, PromptRecord, RouterConfig, WarmRun } from '../../types'
 import { repoOfHandoff } from '../handoffs/records'
 import { tildePath } from '../handoffs/handoff'
 import { pushLesson, pushUrgent } from '../learn/drafts'
@@ -10,9 +10,10 @@ import { fmtAge, kTokens, money, printable } from './format'
 import { itemsOfToolUse, noteUse } from './items'
 import { EMPTY_PROMPT, EMPTY_SPEND, HISTORY_LIMIT, addLateStep, addSpend, addStep, modelsOf, subagentCount } from './ledger'
 import { GUARD_MIN_TOKENS, coldForMs, contextLevel, costOf, labelOf, rewriteCause, rewriteOf, rewritePrice, warmMinutesLeft } from './pricing'
+import type { Usage } from './pricing'
 import { session } from './session'
 import { EXPLORE_MIN, NO_STEPS, boundaryOf, editsAfter, exploredTokens, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
-import { carry, configOf, healthOf, historyOf, isPlanOf, lastUsageOf, nowOf, promptCostOf, setHealth, setHistory, setIsPlan, setLastUsage, updatePromptCost, updateSpend, writeConfig } from './state'
+import { carry, configOf, healthOf, historyOf, isPlanOf, lastUsageOf, nowOf, promptCostOf, setHealth, setHistory, setIsPlan, setLastUsage, setWarmRun, updatePromptCost, updateSpend, warmRunOf, writeConfig } from './state'
 import { adviseSession } from './strategy'
 import { messagesOf } from './tips'
 
@@ -22,7 +23,7 @@ type $ = EngineInterface
 export const USER_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
 
 /** What a status refresh measured, for the features that act on it once the band is up to date. */
-export type HealthTick = { cfg: RouterConfig; warmMinutes: number; tokens: number; model: string }
+export type HealthTick = { cfg: RouterConfig; warmMinutes: number; tokens: number; model: string; warmRun: WarmRun | null }
 
 export async function setConfig($: $, fn: (c: RouterConfig) => RouterConfig): Promise<RouterConfig> {
   const next = await writeConfig($, fn)
@@ -118,9 +119,9 @@ export async function refreshStatus($: $): Promise<HealthTick | undefined> {
     ...(seven ? { sevenDay: Math.round(seven.percentUsed) } : {}),
     ...(advice.verdict === 'continue' || !cfg.showNext ? {} : { advice: { verdict: advice.verdict, reason: advice.reason, text: advice.text, command: advice.command } }),
   }
-  const prev = await healthOf($)
+  const [prev, warmRun] = await Promise.all([healthOf($), warmRunOf($)])
   await setHealth($, next)
-  const tick: HealthTick = { cfg, warmMinutes, tokens, model }
+  const tick: HealthTick = { cfg, warmMinutes, tokens, model, warmRun }
   if (!cfg.isLearning) return tick
   for (const draft of [lessonFromContext(prev?.ctxLevel, next.ctxLevel, tokens, model, ttl, session.compactAt !== undefined), ...(cfg.showNext && cfg.isContext ? [lessonFromAdvice(prev?.advice, advice)] : [])]) {
     pushLesson(draft)
@@ -128,7 +129,7 @@ export async function refreshStatus($: $): Promise<HealthTick | undefined> {
   // The one lesson that can't wait for a turn to end: by then the cache has gone cold. Queued, because a refresh that
   // only measures (a setting changed) may be the one that sees the cache cross the line, and would otherwise use it up.
   const expiring = lessonFromExpiry(prev?.warmMinutes, warmMinutes, ttl, tokens, model)
-  if (expiring !== undefined) pushUrgent(expiring)
+  if (expiring !== undefined && warmRun === null) pushUrgent(expiring)
   return tick
 }
 
@@ -295,4 +296,28 @@ export async function recordStep($: $, agentId: string | undefined, key: string,
   const prevMainRoute = session.lastMain?.route
   session.lastMain = { route: key, model: s.model, effort: s.effort, at: stepAt }
   return { prevMainRoute }
+}
+
+/** Whether a keep-warm fork found the cache: it should have served at least half the prompt the main loop last sent. */
+export function pingRead(usage: Usage, promptTokens: number): 'warm' | 'cold' {
+  return usage.cache_read_input_tokens >= 0.5 * promptTokens ? 'warm' : 'cold'
+}
+
+/**
+ * Counts a keep-warm fork under its own route, priced on the model the fork re-sent. When it found the cache, the cache
+ * counts as read now, so warmth, the cold guard and the next request's rewrite cause all start from the ping.
+ */
+export async function noteWarmPing($: $, usage: Usage): Promise<'warm' | 'cold'> {
+  const [last, cfg, now] = await Promise.all([lastUsageOf($), configOf($), nowOf($)])
+  if (last === null) return 'cold'
+  const ttl = cfg.cacheTtlMinutes
+  const usd = costOf(usage, last.model, ttl)
+  await updateSpend($, all => ({ ...all, 'keep-warm': addSpend(all['keep-warm'] ?? EMPTY_SPEND, usage, last.model, ttl) }))
+  await setWarmRun($, run => (run === null ? null : { ...run, usd: run.usd + usd, pings: run.pings + 1 }))
+  const read = pingRead(usage, promptTokens(last))
+  if (read === 'warm') {
+    await setLastUsage($, { ...last, at: now })
+    if (session.lastMain !== undefined) session.lastMain = { ...session.lastMain, at: now }
+  }
+  return read
 }

@@ -11,6 +11,8 @@ type Session = {
   // MCP servers and plugins used since the last save, whether this session has been counted yet, and the running prompt.
   kept: Carried
   isTurnRunning: boolean
+  /** A keep-warm fork is in flight: its own main-loop request, if the engine raises one, is not routed or counted. */
+  isPinging: boolean
   isAfterCompact: boolean
   lastMain?: { route: string; model: string; effort?: Effort; at: number }
   // Each agent's route, label and the prompt that started it (its `current.at`), when spawned in view.
@@ -41,6 +43,7 @@ export const session: Session = {
   repo: 'unknown',
   kept: { used: {}, isUncounted: true },
   isTurnRunning: false,
+  isPinging: false,
   isAfterCompact: false,
   agents: new Map(),
   pendingPrompt: 'prompt',

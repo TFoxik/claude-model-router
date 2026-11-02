@@ -324,6 +324,7 @@ export const register: Register = on => {
   })
 
   on('turn.step', async function* ($, e, next) {
+    if (session.isPinging && e.agentId === undefined) return yield* next(e)
     const cfg = await configOf($)
     const { route, model, effort, isHeld, isAfterCompact } = await routingDecide($, e, cfg)
 

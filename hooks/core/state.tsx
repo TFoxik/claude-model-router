@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
-import type { Carried, Health, LastUsage, PromptCost, PromptRecord, RouteSpend, RouterConfig } from '../../types'
+import type { Carried, Health, LastUsage, PromptCost, PromptRecord, RouterConfig, RouteSpend, WarmRun } from '../../types'
 import { DEFAULT_CONFIG, sanitizeConfig } from './config'
 import { sanitizeHistory } from './ledger'
 import { session } from './session'
@@ -16,6 +16,8 @@ const promptCost = atom({ plugin: 'model-router', key: 'promptCost' } as const, 
 const isBandShown = atom({ plugin: 'model-router', key: 'isBandShown' } as const, true)
 // Atoms outlive a hot reload of this code and `session` does not: this keeps what the session would lose with it.
 const carried = atom({ plugin: 'model-router', key: 'carried' } as const, null as Carried | null)
+// Outlives a hot reload as `carried` does, and session.start starts the tick again, so a run keeps pinging after one.
+const warmRun = atom({ plugin: 'model-router', key: 'warmRun' } as const, null as WarmRun | null)
 
 type $ = EngineInterface
 
@@ -135,4 +137,12 @@ export async function carriedOf($: $): Promise<Carried | null> {
 export async function carry($: $): Promise<void> {
   const next: Carried = { ...session.kept, used: { ...session.kept.used } }
   await update($, carried, () => next)
+}
+
+export async function warmRunOf($: $): Promise<WarmRun | null> {
+  return read($, warmRun)
+}
+
+export async function setWarmRun($: $, fn: (r: WarmRun | null) => WarmRun | null): Promise<WarmRun | null> {
+  return update($, warmRun, fn)
 }
