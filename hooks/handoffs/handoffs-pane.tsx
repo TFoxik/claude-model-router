@@ -1,7 +1,7 @@
 import type { Scope } from '../../types'
-import type { HandoffRow, HandoffStatus } from '../handoffs'
-import { STAMP_W, stamp } from './kit'
-import type { Els } from './kit'
+import type { HandoffRow, HandoffStatus } from './records'
+import { STAMP_W, stamp } from '../ui/kit'
+import type { Els } from '../ui/kit'
 
 type HandoffsData = { open: readonly HandoffRow[]; closed: readonly HandoffRow[]; isClosedShown: boolean; scope: Scope; repo: string; folder: string; isOn: boolean }
 type HandoffsActions = {

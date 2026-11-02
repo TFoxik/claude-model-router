@@ -20,78 +20,86 @@ import {
   lessonsFromPrompt,
   pickLesson,
   sanitizeLessons,
-} from './lessons'
-import type { AwayFacts, LessonDraft } from './lessons'
+} from './learn/lessons'
+import type { AwayFacts, LessonDraft } from './learn/lessons'
 import {
-  AUTO_LABELS,
-  CACHE_TTLS,
-  DEFAULT_CONFIG,
-  EMPTY_PROMPT,
-  EMPTY_SPEND,
-  ENGINE,
-  FORK,
-  GUARD_MIN_TOKENS,
-  HISTORY_LIMIT,
-  PRESETS,
-  ROUTES,
-  addSpend,
-  addLateStep,
-  addStep,
-  coldForMs,
   commandLabel,
-  contextLevel,
-  costOf,
-  effortForLabel,
   fmtAge,
-  isLessonKind,
   kTokens,
-  labelOf,
-  modelsOf,
   money,
-  parseSetting,
   plural,
-  presetOf,
   printable,
   typedText,
-  resolve,
+  versionOf,
+} from './core/format'
+import {
+  GUARD_MIN_TOKENS,
+  coldForMs,
+  contextLevel,
+  costOf,
+  labelOf,
   rewriteCause,
   rewriteOf,
   rewritePrice,
-  routeForSpawn,
-  routeText,
-  sanitizeConfig,
+  warmMinutesLeft,
+} from './core/pricing'
+import {
+  EMPTY_PROMPT,
+  EMPTY_SPEND,
+  HISTORY_LIMIT,
+  addSpend,
+  addLateStep,
+  addStep,
+  modelsOf,
   sanitizeHistory,
-  shouldSwitch,
-  startingConfig,
   subagentCount,
   sumUsd,
   todayUsd,
-  versionOf,
-  warmMinutesLeft,
   withoutText,
+} from './core/ledger'
+import {
+  CACHE_TTLS,
+  DEFAULT_CONFIG,
+  isLessonKind,
+  sanitizeConfig,
+  startingConfig,
+} from './core/config'
+import {
+  AUTO_LABELS,
+  ENGINE,
+  FORK,
+  PRESETS,
+  ROUTES,
+  effortForLabel,
+  parseSetting,
+  presetOf,
+  resolve,
+  routeForSpawn,
+  routeText,
+  shouldSwitch,
   withPreset,
   withRoute,
-} from './routes'
-import { HANDOFF_DIR, HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, handoffPrompt, isAgentBusy, pendingAfter, segment, shouldAutoHandoff, tildePath } from './handoff'
-import type { PendingHandoff } from './handoff'
-import { bandCount, closeMarked, handoffDir, handoffRows, handoffsRoot, mergeListing, recordWritten, reopen, repoOfHandoff, resumeIn, sanitizeHandoffs, setStatus, detailsOf, withDetails } from './handoffs'
-import type { HandoffStatus, Handoffs } from './handoffs'
-import { EXPLORE_MIN, NO_STEPS, boundaryOf, editsAfter, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './signals'
-import type { Boundary, Steps } from './signals'
-import { adviseSession } from './strategy'
-import { messagesOf, tokensByServer } from './tips'
-import type { TipAction } from './tips'
-import { DEV_PATIENCE, PATIENCE, applyUsage, claudeAiKey, claudeAiReport, claudeAiTips, connectedServers, connectorAliases, idleItems, idleReport, idleTips, itemOfCommand, itemOfToolCall, listingTokens, mcpKey, mergeAliases, onlyHere, patienceText, pluginKey, pluginName, pluginOfMcpTool, pluginServer, sanitizeAliases, sanitizeUsage, skillKey, skillReport, skillTips, sourcesOfLock, syncedSkillNames } from './usage'
-import type { ItemKey, OwnSkill, Patience, UsageStore } from './usage'
+} from './routing/routes'
+import { HANDOFF_DIR, HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, handoffPrompt, isAgentBusy, pendingAfter, segment, shouldAutoHandoff, tildePath } from './handoffs/handoff'
+import type { PendingHandoff } from './handoffs/handoff'
+import { bandCount, closeMarked, handoffDir, handoffRows, handoffsRoot, mergeListing, recordWritten, reopen, repoOfHandoff, resumeIn, sanitizeHandoffs, setStatus, detailsOf, withDetails } from './handoffs/records'
+import type { HandoffStatus, Handoffs } from './handoffs/records'
+import { EXPLORE_MIN, NO_STEPS, boundaryOf, editsAfter, exploredTokens, hasHandoffCommand, isCorrection, isExplorationHeavy, openSteps, planEventOf, stepsAfter } from './core/signals'
+import type { Boundary, Steps } from './core/signals'
+import { adviseSession } from './core/strategy'
+import { messagesOf, tokensByServer } from './core/tips'
+import type { TipAction } from './core/tips'
+import { DEV_PATIENCE, PATIENCE, applyUsage, claudeAiKey, claudeAiReport, claudeAiTips, connectedServers, connectorAliases, idleItems, idleReport, idleTips, itemOfCommand, itemOfToolCall, listingTokens, mcpKey, mergeAliases, onlyHere, patienceText, pluginKey, pluginName, pluginOfMcpTool, pluginServer, sanitizeAliases, sanitizeUsage, skillKey, skillReport, skillTips, sourcesOfLock, syncedSkillNames } from './core/usage'
+import type { ItemKey, OwnSkill, Patience, UsageStore } from './core/usage'
 import { bandView } from './ui/band'
-import { contextMobileView, contextPaneView } from './ui/context-pane'
+import { contextMobileView, contextPaneView } from './context/context-pane'
 import { COST_TAB_LABEL, OLD_COST_IDS, OLD_LEARN_ID, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
-import { costPaneView } from './ui/cost-pane'
-import { handoffsPaneView } from './ui/handoffs-pane'
-import { learnCardView } from './ui/learn-card'
-import { routesMobileView, routesPaneView } from './ui/routes-pane'
-import { statsFooterView } from './ui/stats'
+import { costPaneView } from './cost/cost-pane'
+import { handoffsPaneView } from './handoffs/handoffs-pane'
+import { learnCardView } from './learn/learn-card'
+import { routesMobileView, routesPaneView } from './routing/routes-pane'
+import { statsFooterView } from './cost/stats'
 
 // Everything that takes `$` or reads an atom lives in this file: the engine's
 // scan follows `$` only into functions declared here and accepts atoms only

@@ -1,8 +1,8 @@
 import type { EngineInterface, RenderChildren } from 'claude-code'
 
 import type { CostTab, Rewrite, RouteSpend } from '../../types'
-import { kTokens, money } from '../routes'
-import type { Tip, TipAction } from '../tips'
+import { kTokens, money } from '../core/format'
+import type { Tip, TipAction } from '../core/tips'
 
 export const PANES = {
   route: { id: 'model-router', title: 'Routes' },

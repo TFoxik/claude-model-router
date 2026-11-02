@@ -1,8 +1,9 @@
 import type { SessionContextBreakdown } from 'claude-code'
 
-import type { PromptCost, PromptRecord, Rewrite } from '../types'
-import { MIN_REWRITE_USD, isPricey, lessonsFromPrompt, pct } from './lessons'
-import { commandStats, kTokens, money, printable, shortPath, sumUsd } from './routes'
+import type { PromptCost, PromptRecord, Rewrite } from '../../types'
+import { MIN_REWRITE_USD, isPricey, lessonsFromPrompt, pct } from '../learn/lessons'
+import { kTokens, money, printable, shortPath } from './format'
+import { commandStats, sumUsd } from './ledger'
 import { isExplorationHeavy } from './signals'
 import type { Advice } from './strategy'
 

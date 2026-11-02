@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { Lesson, PromptCost, PromptItem } from '../types'
+import type { Lesson, PromptCost, PromptItem } from '../../types'
 import {
   CONCEPTS,
   TOPICS,
@@ -20,8 +20,8 @@ import {
   pickLesson,
   sanitizeLessons,
 } from './lessons'
-import { MODELS } from './routes'
-import { adviseSession } from './strategy'
+import { MODELS } from '../core/pricing'
+import { adviseSession } from '../core/strategy'
 
 const opus = MODELS.opus.id
 const sonnet = MODELS.sonnet.id

@@ -1,5 +1,7 @@
 import type { ActiveRoute, Health, RouterConfig } from '../../types'
-import { labelOf, money, resolve, routeText, shortLabel } from '../routes'
+import { money } from '../core/format'
+import { labelOf, shortLabel } from '../core/pricing'
+import { resolve, routeText } from '../routing/routes'
 import { colorOf } from './kit'
 import type { Els, Open } from './kit'
 

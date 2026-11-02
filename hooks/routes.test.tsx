@@ -2,42 +2,50 @@ import type { Args, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { CostTab, Lesson } from '../types'
-import { HANDOFF_PROMPT } from './handoff'
+import { HANDOFF_PROMPT } from './handoffs/handoff'
 import { paneOf } from './ui/kit'
 
 import {
-  DEFAULT_CONFIG,
-  FORK,
-  MODELS,
-  PRESETS,
-  SMALL_CONTEXT,
   commandLabel,
-  commandStats,
-  contextLevel,
-  addStep,
-  costOf,
-  effortForLabel,
-  parseSetting,
-  presetOf,
   printable,
   typedText,
-  sanitizeConfig,
-  sanitizeHistory,
-  startingConfig,
-  todayUsd,
-  withPreset,
   fmtAge,
+  versionOf,
+} from './core/format'
+import {
+  MODELS,
+  SMALL_CONTEXT,
+  contextLevel,
+  costOf,
   rewriteCause,
   rewriteOf,
   rewritePrice,
+  labelOf,
+} from './core/pricing'
+import {
+  commandStats,
+  addStep,
+  sanitizeHistory,
+  todayUsd,
+} from './core/ledger'
+import {
+  DEFAULT_CONFIG,
+  sanitizeConfig,
+  startingConfig,
+} from './core/config'
+import {
+  FORK,
+  PRESETS,
+  effortForLabel,
+  parseSetting,
+  presetOf,
+  withPreset,
   estimateChanges,
   modeSwitchCost,
   resolve,
   routeForSpawn,
   shouldSwitch,
-  labelOf,
-  versionOf,
-} from './routes'
+} from './routing/routes'
 
 const opus = MODELS.opus.id
 const sonnet = MODELS.sonnet.id

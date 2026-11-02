@@ -1,10 +1,11 @@
-import { contextLevel, kTokens, printable, shortPath } from '../routes'
-import { contextTips, tokensByServer } from '../tips'
-import type { Breakdown, Tip, TipAction } from '../tips'
-import type { Advice } from '../strategy'
-import type { Away } from '../lessons'
-import { bulletSection, tipsSection } from './kit'
-import type { Els } from './kit'
+import { kTokens, printable, shortPath } from '../core/format'
+import { contextLevel } from '../core/pricing'
+import { contextTips, tokensByServer } from '../core/tips'
+import type { Breakdown, Tip, TipAction } from '../core/tips'
+import type { Advice } from '../core/strategy'
+import type { Away } from '../learn/lessons'
+import { bulletSection, tipsSection } from '../ui/kit'
+import type { Els } from '../ui/kit'
 
 // Theme keys as hex, for the one place a theme key cannot go: an SVG drawn as an image.
 const HEX: Record<string, string> = {

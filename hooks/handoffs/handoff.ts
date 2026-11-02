@@ -1,5 +1,5 @@
-import { GUARD_MIN_TOKENS } from './routes'
-import { EDITS_MIN, OPEN_MIN } from './signals'
+import { GUARD_MIN_TOKENS } from '../core/pricing'
+import { EDITS_MIN, OPEN_MIN } from '../core/signals'
 
 export const HANDOFF_LABEL = 'auto-handoff'
 export const HANDOFF_DIR = '.claude/handoffs'

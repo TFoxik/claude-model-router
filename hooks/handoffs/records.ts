@@ -1,6 +1,6 @@
-import type { HandoffRecord, HandoffStatus, Handoffs } from '../types'
+import type { HandoffRecord, HandoffStatus, Handoffs } from '../../types'
 import { handoffDir, handoffsRoot, tildePath } from './handoff'
-import { printable } from './routes'
+import { printable } from '../core/format'
 
 export type { HandoffRecord, HandoffStatus, Handoffs }
 export { handoffDir, handoffsRoot }

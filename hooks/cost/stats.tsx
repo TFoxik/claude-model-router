@@ -1,8 +1,9 @@
 import type { PromptRecord, Rewrite, Scope } from '../../types'
-import { HISTORY_LIMIT, money, plural, statsSummary, sumUsd, typedText } from '../routes'
-import { statsTips } from '../tips'
-import { DATE_W, day, rewriteText, tipsSection } from './kit'
-import type { Els, Open } from './kit'
+import { money, plural, typedText } from '../core/format'
+import { HISTORY_LIMIT, statsSummary, sumUsd } from '../core/ledger'
+import { statsTips } from '../core/tips'
+import { DATE_W, day, rewriteText, tipsSection } from '../ui/kit'
+import type { Els, Open } from '../ui/kit'
 
 const colorOfLabel = (label: string) => (label === 'prompt' ? undefined : 'suggestion')
 

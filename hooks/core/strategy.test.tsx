@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { MODELS, money, rewritePrice } from './routes'
+import { money } from './format'
+import { MODELS, rewritePrice } from './pricing'
 import { boundaryOf } from './signals'
 import { adviseSession } from './strategy'
 import type { StrategyFacts } from './strategy'

@@ -1,8 +1,11 @@
 import type { CostTab, PromptCost, PromptRecord, RouteSpend, Scope } from '../../types'
-import { PRICES_AS_OF, isSub, money, plural, routeLabel, routeText, sumUsd } from '../routes'
-import { lastTips } from '../tips'
-import { COST_TABS, COST_TAB_LABEL, ledgerRow, rewriteText, shareOf, tipsSection, tokenLine } from './kit'
-import type { Els } from './kit'
+import { money, plural } from '../core/format'
+import { PRICES_AS_OF } from '../core/pricing'
+import { isSub, sumUsd } from '../core/ledger'
+import { routeLabel, routeText } from '../routing/routes'
+import { lastTips } from '../core/tips'
+import { COST_TABS, COST_TAB_LABEL, ledgerRow, rewriteText, shareOf, tipsSection, tokenLine } from '../ui/kit'
+import type { Els } from '../ui/kit'
 import { historyTabView } from './stats'
 
 function lastTabView(els: Els, p: PromptCost | null, ttlMinutes: number) {

@@ -1,6 +1,6 @@
 import type { LearnCard } from '../../types'
-import { CONCEPTS } from '../lessons'
-import type { Els } from './kit'
+import { CONCEPTS } from './lessons'
+import type { Els } from '../ui/kit'
 
 type CardActions = { dismiss: () => void; mute: () => void }
 

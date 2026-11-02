@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { STALE_MS, bandCount, closeMarked, handoffDir, handoffRows, isStale, mergeListing, recordWritten, repoOfHandoff, resumedBy, sanitizeHandoffs, setStatus, detailsOf, gistOf, stepsOf, titleOf, withDetails } from './handoffs'
-import type { Handoffs } from './handoffs'
+import { STALE_MS, bandCount, closeMarked, handoffDir, handoffRows, isStale, mergeListing, recordWritten, repoOfHandoff, resumedBy, sanitizeHandoffs, setStatus, detailsOf, gistOf, stepsOf, titleOf, withDetails } from './records'
+import type { Handoffs } from './records'
 
 const HOME = '/home/me'
 const dir = handoffDir(HOME, 'app')
@@ -139,8 +139,8 @@ test('a long gist is cut at a word, under 320 characters, with an ellipsis', () 
 
 test('details read from disk fill title and gist; an empty gist is kept', () => {
   const records: Handoffs = { [`${dir}/a.md`]: { repo: 'app', at: T0, title: 'Kept', status: 'open' } }
-  const next = withDetails(records, { [`${dir}/a.md`]: { title: 'A', gist: 'Why\u0007it matters' }, [`${dir}/gone.md`]: { title: 'X', gist: '' } })
-  expect(next).toEqual({ [`${dir}/a.md`]: { repo: 'app', at: T0, title: 'A', gist: 'Why it matters', status: 'open' } })
+  const next = withDetails(records, { [`${dir}/a.md`]: { title: 'A', gist: 'Why\u0007it matters', steps: [], stepCount: 0 }, [`${dir}/gone.md`]: { title: 'X', gist: '', steps: [], stepCount: 0 } })
+  expect(next).toEqual({ [`${dir}/a.md`]: { repo: 'app', at: T0, title: 'A', gist: 'Why it matters', steps: [], stepCount: 0, status: 'open' } })
   expect(withDetails(records, {})).toBe(records)
   expect(sanitizeHandoffs(next)).toEqual(next)
   expect(handoffRows(next, 'app', T0).open[0]!.gist).toBe('Why it matters')

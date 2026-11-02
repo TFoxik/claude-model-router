@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { PromptCost, PromptItem, PromptRecord } from '../types'
-import { MODELS } from './routes'
+import type { PromptCost, PromptItem, PromptRecord } from '../../types'
+import { MODELS } from './pricing'
 import type { Breakdown } from './tips'
 import { contextTips, lastTips, statsTips } from './tips'
 

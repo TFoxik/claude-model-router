@@ -1,6 +1,6 @@
 import type { CommandInfo } from 'claude-code'
 
-import { plural, printable } from './routes'
+import { plural, printable } from './format'
 import type { Tip, TipAction } from './tips'
 
 const DAY = 86_400_000
