@@ -2464,3 +2464,136 @@ test('the keep-warm ceiling is read from the config, anything else falls back to
   const { warmHours: _dropped, ...old } = DEFAULT_CONFIG
   expect(sanitizeConfig(old).warmHours).toBe(4)
 })
+
+type ForkReply = { isAnswered: true; text: string; usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number } } | { isAnswered: false; reason: string; status?: number }
+const forkRead = (read: number): ForkReply => ({ isAnswered: true, text: 'OK', usage: { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: read, cache_creation_input_tokens: 0 } })
+
+/** A 200k session on the 60-minute cache, one main request at T0; forks answer from `replies` in turn, then read the whole cache. */
+async function warmSession($: Engine, on: On, replies: ForkReply[] = [], config: Record<string, unknown> = {}, onFork?: () => Promise<void>) {
+  mock.store(on, { config: { ...MINE, coldGuard: 'refuse', cacheTtlMinutes: 60, ...config } })
+  const clock = mock.clock(on, { now: T0 })
+  guardSession(on, { context: 200_000, usage: usageOf(200_000) })
+  on('ui.toast', () => ({ value: undefined }) as never)
+  const forks: string[] = []
+  on('model.fork', async (_$, e) => {
+    forks.push(e.prompt)
+    await onFork?.()
+    return { value: replies.shift() ?? forkRead(200_000) } as never
+  })
+  const logs: string[] = []
+  on('ui.log', (_$, e) => {
+    logs.push(e.text)
+    return { value: undefined } as never
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await step($, 'a')
+  const isRunning = async () => (await route($, 'warm stop')).text !== "Keep warm isn't running."
+  return { clock, forks, logs, isRunning }
+}
+
+test('/route warm keeps the cache warm with a fork before each expiry until the ceiling', async ($, on) => {
+  const { clock, forks, logs } = await warmSession($, on)
+  expect((await route($, 'warm 2h')).text).toBe('Keeping the cache warm for up to 2 h; it stops when you send anything.')
+  await clock.advance(53 * 60_000)
+  expect(forks).toEqual([])
+  await clock.advance(60_000)
+  expect(forks).toEqual(['Reply with OK.'])
+  await clock.advance(54 * 60_000)
+  expect(forks).toHaveLength(2)
+  await clock.advance(20 * 60_000)
+  expect(logs.some(one => one.startsWith('model-router: keep-warm stopped'))).toBe(true)
+  await clock.advance(60 * 60_000)
+  expect(forks).toHaveLength(2)
+})
+
+test('sending a prompt ends a keep-warm run and the prompt is not held', async ($, on) => {
+  const { clock, forks, isRunning } = await warmSession($, on)
+  await route($, 'warm')
+  await clock.advance(54 * 60_000)
+  expect(forks).toHaveLength(1)
+  await clock.advance(30 * 60_000)
+  expect((await submit($, 'back')).drop).toBeUndefined()
+  expect(await isRunning()).toBe(false)
+  await clock.advance(30 * 60_000)
+  expect(forks).toHaveLength(1)
+})
+
+test('keep-warm is not offered on the 5-minute cache and not on a cold one', async ($, on) => {
+  const { clock, forks } = await warmSession($, on)
+  await route($, 'ttl 5')
+  expect((await route($, 'warm')).text).toBe('Keep warm needs the 60-minute cache: /route ttl 60.')
+  await route($, 'ttl 60')
+  await clock.advance(61 * 60_000)
+  expect((await route($, 'warm')).text).toBe("Keep warm can't help: the cache is already cold.")
+  expect(forks).toEqual([])
+})
+
+test('a failed ping is retried, a ping that read nothing from the cache ends the run', async ($, on) => {
+  const { clock, forks, isRunning } = await warmSession($, on, [{ isAnswered: false, reason: 'api-error', status: 529 }, forkRead(200_000), forkRead(0)])
+  await route($, 'warm')
+  await clock.advance(54 * 60_000)
+  expect(forks).toHaveLength(1)
+  await clock.advance(60_000)
+  expect(forks).toHaveLength(2)
+  await clock.advance(54 * 60_000)
+  expect(forks).toHaveLength(3)
+  expect(await isRunning()).toBe(false)
+})
+
+test('while keep-warm runs the cache-expiring lesson stays quiet', async ($, on) => {
+  const { clock, forks } = await warmSession($, on, Array(10).fill({ isAnswered: false, reason: 'api-error', status: 529 }), { isLearning: true, coldGuard: 'off' })
+  await route($, 'warm')
+  await clock.advance(56 * 60_000)
+  expect(forks.length).toBeGreaterThan(0)
+  expect(await shownCard($)).toBeUndefined()
+})
+
+test('auto-handoff stays quiet while keep-warm runs', async ($, on) => {
+  on('model.fork', () => ({ value: { isAnswered: false, reason: 'api-error', status: 529 } }) as never)
+  const { clock, asked } = await handoffSession($, on)
+  await route($, 'warm')
+  await clock.advance(58 * 60_000)
+  expect(asked).toEqual([])
+})
+
+test('Context off ends a keep-warm run, and only a person can start or stop one', async ($, on) => {
+  const { isRunning } = await warmSession($, on)
+  const peer = (args: string) => $.command.run({ command: 'route', args, origin: { kind: 'peer' } } as unknown as Args<'command.run'>)
+  expect((await peer('warm')).text).toBe('model-router: /route warm only runs when you type it.')
+  await route($, 'warm')
+  expect((await peer('warm stop')).text).toBe('model-router: /route warm only runs when you type it.')
+  await route($, 'context off')
+  expect(await isRunning()).toBe(false)
+})
+
+test('a keep-warm run survives a hot reload', async ($, on) => {
+  const { clock, forks } = await warmSession($, on)
+  await route($, 'warm')
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await clock.advance(54 * 60_000)
+  expect(forks).toHaveLength(1)
+})
+
+test('the fork\'s own main-loop step passes through unrouted', async ($, on) => {
+  mock.store(on, { config: { ...MINE, coldGuard: 'off', cacheTtlMinutes: 60 } })
+  const clock = mock.clock(on, { now: T0 })
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 200_000, window: 1_000_000, percent: 20 }, rateLimits: [] } }) as never)
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('ui.toast', () => ({ value: undefined }) as never)
+  const seen: string[] = []
+  on('turn.step', async function* (_$, e) {
+    seen.push(e.model)
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: usageOf(200_000) }
+  })
+  on('model.fork', async () => {
+    await step($, 'fork')
+    return { value: forkRead(200_000) } as never
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await step($, 'a')
+  expect(seen).toEqual([MODELS.opus.id])
+  await route($, 'warm')
+  await clock.advance(54 * 60_000)
+  expect(seen).toEqual([MODELS.opus.id, sonnet])
+})

@@ -140,6 +140,8 @@ export async function handoffsOnWrite($: $, w: { path: string; repo: string; tex
 
 /** In the cache's last minutes with work open, asks Claude for a handoff while reading the context is still cheap. */
 export async function handoffsOnTick($: $, tick: HealthTick): Promise<void> {
+  // A keep-warm run holds the cache, so there is no cold cache to hand off ahead of.
+  if (tick.warmRun !== null) return
   const { cfg } = tick
   const facts = {
     isOn: cfg.isHandoffs && cfg.autoHandoff,

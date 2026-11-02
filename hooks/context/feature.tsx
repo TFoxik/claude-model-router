@@ -2,15 +2,16 @@ import type { Args, EngineInterface, On } from 'claude-code'
 
 import type { ColdGuard, Health, RouterConfig } from '../../types'
 import { offText } from '../core/config'
-import { plural, printable } from '../core/format'
-import { GUARD_MIN_TOKENS } from '../core/pricing'
+import { money, plural, printable } from '../core/format'
+import { GUARD_MIN_TOKENS, warmMinutesLeft } from '../core/pricing'
 import { DEV_PATIENCE, claudeAiReport, claudeAiTips, idleReport, idleTips, listingTokens, mcpKey, patienceText, skillReport, skillTips } from '../core/usage'
 import type { ItemKey } from '../core/usage'
 import { idleHere, listCommands } from '../core/items'
-import { USER_ORIGINS, awayFacts, coldSend, routedMainModel, setConfig, signalFacts } from '../core/measure'
+import { USER_ORIGINS, awayFacts, coldSend, noteWarmPing, routedMainModel, setConfig, signalFacts } from '../core/measure'
+import type { HealthTick } from '../core/measure'
 import { closePanes } from '../core/panes'
 import { session } from '../core/session'
-import { STORE, UNREADABLE, configOf, healthOf, load, save } from '../core/state'
+import { STORE, UNREADABLE, configOf, healthOf, lastUsageOf, load, nowOf, save, setWarmRun, warmRunOf } from '../core/state'
 import { adviseSession } from '../core/strategy'
 import { messagesOf, tokensByServer } from '../core/tips'
 import type { TipAction } from '../core/tips'
@@ -19,6 +20,7 @@ import type { BandPart } from '../ui/band'
 import { contextBandPart } from './band-part'
 import { PANES } from '../ui/kit'
 import { contextMobileView, contextPaneView } from './context-pane'
+import { WARM_PROMPT, parseWarmHours, shouldPing } from './warm'
 
 type $ = EngineInterface
 
@@ -185,6 +187,7 @@ export async function contextVerb($: $, verb: string, rest: string[], isPerson: 
   if (verb === 'away') return { text: await awayReport($) }
   if (verb === 'unused') return { text: await unusedReport($) }
   if (!isPerson) return undefined
+  if (verb === 'warm') return { text: await warmVerb($, rest) }
   if (verb === 'next') {
     if (rest[0] !== 'on' && rest[0] !== 'off') return { text: 'Usage: /route next on|off (show next /clear, /compact or /handoff when carrying on is not the best move)' }
     const isOn = rest[0] === 'on'
@@ -198,4 +201,55 @@ export async function contextVerb($: $, verb: string, rest: string[], isPerson: 
     return { text: GUARD_TEXT[mode] }
   }
   return undefined
+}
+
+const WARM_USAGE = 'Usage: /route warm [1-6h] (keep the cache warm while you are away) or /route warm stop'
+
+async function warmVerb($: $, rest: string[]): Promise<string> {
+  if (rest[0] === 'stop' && rest.length === 1) {
+    const run = await warmRunOf($)
+    if (run === null) return "Keep warm isn't running."
+    await stopWarm($, 'stop')
+    return `Keep warm stopped (${plural(run.pings, 'ping')}, ${money(run.usd)}).`
+  }
+  if (rest.length > 1) return WARM_USAGE
+  const hours = parseWarmHours(rest[0], (await configOf($)).warmHours)
+  return hours === 'invalid' ? WARM_USAGE : startWarm($, hours)
+}
+
+/** Starts a run, or says why it can't help: Context off, the 5-minute cache, or a cache already cold. */
+export async function startWarm($: $, hours: number): Promise<string> {
+  const [cfg, last, now] = await Promise.all([configOf($), lastUsageOf($), nowOf($)])
+  if (!cfg.isContext) return offText('context')
+  if (cfg.cacheTtlMinutes !== 60) return 'Keep warm needs the 60-minute cache: /route ttl 60.'
+  if (last === null || warmMinutesLeft(last.at, now, cfg.cacheTtlMinutes) === 0) return "Keep warm can't help: the cache is already cold."
+  await setWarmRun($, () => ({ startedAt: now, until: now + hours * 3_600_000, usd: 0, pings: 0 }))
+  return `Keeping the cache warm for up to ${hours} h; it stops when you send anything.`
+}
+
+const STOP_WHY = { ceiling: 'it reached its limit', cold: 'the cache went cold anyway' } as const
+
+export async function stopWarm($: $, why: 'back' | 'stop' | 'off' | keyof typeof STOP_WHY): Promise<void> {
+  const run = await warmRunOf($)
+  if (run === null) return
+  await setWarmRun($, () => null)
+  if (why === 'ceiling' || why === 'cold') $.ui.log(`model-router: keep-warm stopped: ${STOP_WHY[why]}; ${plural(run.pings, 'ping')} cost ${money(run.usd)}.`)
+}
+
+/** On each status tick: ends a run at its limit or on a cold cache, and pings when the cache is in its last minutes. */
+export async function contextOnTick($: $, tick: HealthTick): Promise<void> {
+  const run = tick.warmRun
+  if (run === null || session.isPinging) return
+  const now = await nowOf($)
+  if (now >= run.until) return stopWarm($, 'ceiling')
+  if (tick.warmMinutes === 0) return stopWarm($, 'cold')
+  if (!shouldPing(run, tick.warmMinutes, now)) return
+  session.isPinging = true
+  try {
+    const reply = await $.model.fork({ prompt: WARM_PROMPT })
+    // A fork that didn't answer (rate limit, overload, a turn in flight) is tried again on the next tick.
+    if (reply.isAnswered && (await noteWarmPing($, reply.usage)) === 'cold') await stopWarm($, 'cold')
+  } finally {
+    session.isPinging = false
+  }
 }

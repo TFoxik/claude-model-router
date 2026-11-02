@@ -19,7 +19,7 @@ import { ENGINE, asEffort, routeForSpawn } from './routing/routes'
 import { registerRouting, renderRoutesPane, routingBandHead, routingDecide, routingNoteApplied, routingOnSpawn, routingOnTurnStart, routingVerb } from './routing/feature'
 import { handoffsAfterPrompt, handoffsBand, handoffsOnFreshContext, handoffsOnOpen, handoffsOnSessionStart, handoffsOnTick, handoffsOnTurnComplete, handoffsOnTurnStart, handoffsOnUserPrompt, handoffsOnWrite, handoffsVerb, registerHandoffs, setAutoHandoff } from './handoffs/feature'
 import { bandView } from './ui/band'
-import { closeContextPane, contextBand, contextNoteCommand, contextOnSessionStart, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext } from './context/feature'
+import { closeContextPane, contextBand, contextNoteCommand, contextOnSessionStart, contextOnTick, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext, stopWarm } from './context/feature'
 import { COST_TABS, COST_TAB_LABEL, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
 import { closeCostPanes, costBand, costOnSessionStart, registerCost, registerCostFooter, setCostTab } from './cost/feature'
@@ -60,6 +60,7 @@ async function refresh($: $) {
   const tick = await refreshStatus($)
   if (tick === undefined) return
   void handoffsOnTick($, tick).catch(() => undefined)
+  void contextOnTick($, tick).catch(() => undefined)
   const urgent = takeUrgent()
   if (tick.cfg.isLearning && urgent.length > 0) await teach($, urgent, await nowOf($)).catch(() => undefined)
 }
@@ -94,7 +95,7 @@ async function afterStep($: $, agentId: string | undefined, key: string, s: Step
 async function afterSwitchOff($: $, f: Feature) {
   if (f === 'learn') await learnSwitchedOff($)
   if (f === 'cost') await closeCostPanes($)
-  if (f === 'context') await closeContextPane($)
+  if (f === 'context') await Promise.all([closeContextPane($), stopWarm($, 'off')])
 }
 
 async function switchFeature($: $, f: Feature, isOn: boolean) {
@@ -248,6 +249,7 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     let resumeText: string | undefined
     if (e.turnId === undefined) {
+      if (USER_ORIGINS.has(e.origin.kind)) await stopWarm($, 'back')
       const cfg = await configOf($)
       const held = await holdColdPrompt($, cfg, e, guardWhy(cfg))
       if (held !== undefined) return held
@@ -271,6 +273,7 @@ export const register: Register = on => {
   on('command.run', async ($, e, next) => {
     if (e.origin.kind === 'plugin' || e.command === 'route') return next(e)
     await noteCommand($, e.command).catch(() => undefined)
+    if (USER_ORIGINS.has(e.origin.kind)) await stopWarm($, 'back')
     const cfg = await configOf($)
     const held = await holdColdCommand($, cfg, e, guardWhy(cfg))
     if (held !== undefined) return held
