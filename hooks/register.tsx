@@ -1,11 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, Register } from 'claude-code'
 
-import type { ActiveRoute, ColdGuard, CostTab, Effort, LearnCard, Lesson, LessonKind, RouterConfig } from '../types'
+import type { ActiveRoute, ColdGuard, CostTab, Effort, RouterConfig } from '../types'
 import { commandLabel, plural, printable, typedText, versionOf } from './core/format'
 import { GUARD_MIN_TOKENS } from './core/pricing'
 import { EMPTY_PROMPT, sanitizeHistory, sumUsd, todayUsd, withoutText } from './core/ledger'
-import { CACHE_TTLS, isLessonKind, startingConfig } from './core/config'
+import { CACHE_TTLS, startingConfig } from './core/config'
 import { DEV_PATIENCE, claudeAiReport, claudeAiTips, idleReport, idleTips, listingTokens, mcpKey, patienceText, skillReport, skillTips } from './core/usage'
 import type { ItemKey } from './core/usage'
 import { backfillUsage, flushUsage, idleHere, listCommands, noteCommand, startItems } from './core/items'
@@ -17,17 +17,16 @@ import { STORE, UNREADABLE, carriedOf, carry, configOf, healthOf, initBand, init
 import { adviseSession } from './core/strategy'
 import { messagesOf, tokensByServer } from './core/tips'
 import type { TipAction } from './core/tips'
-import { dropLessons, pushLesson, takeLessons } from './learn/drafts'
-import { CONCEPTS, TOPICS, awayOptions, awayText, capLessons, cardOf, lessonFromCompact, lessonsFromPrompt, pickLesson, sanitizeLessons } from './learn/lessons'
-import type { LessonDraft } from './learn/lessons'
+import { pushLesson } from './learn/drafts'
+import { closeOldLearnPane, guardWhy, learnBandCard, learnOnSessionStart, learnVerb, flushLessons, clearCard, setLearning, teach } from './learn/feature'
+import { awayOptions, awayText, lessonFromCompact } from './learn/lessons'
 import { AUTO_LABELS, ENGINE, FORK, PRESETS, ROUTES, effortForLabel, parseSetting, presetOf, resolve, routeForSpawn, routeText, shouldSwitch, withPreset, withRoute } from './routing/routes'
 import { handoffsAfterPrompt, handoffsBandCount, handoffsOnFreshContext, handoffsOnOpen, handoffsOnSessionStart, handoffsOnTick, handoffsOnTurnComplete, handoffsOnTurnStart, handoffsOnUserPrompt, handoffsOnWrite, handoffsVerb, registerHandoffs, setAutoHandoff, setHandoffsOn } from './handoffs/feature'
 import { bandView } from './ui/band'
 import { contextMobileView, contextPaneView } from './context/context-pane'
-import { COST_TAB_LABEL, OLD_COST_IDS, OLD_LEARN_ID, PANES, isTarget, paneOf } from './ui/kit'
+import { COST_TAB_LABEL, OLD_COST_IDS, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
 import { costPaneView } from './cost/cost-pane'
-import { learnCardView } from './learn/learn-card'
 import { routesMobileView, routesPaneView } from './routing/routes-pane'
 import { statsFooterView } from './cost/stats'
 
@@ -37,13 +36,11 @@ const active = atom({ plugin: 'model-router', key: 'active' } as const, null as 
 const draft = atom({ plugin: 'model-router', key: 'draft' } as const, null as RouterConfig | null)
 const statsScope = atom({ plugin: 'model-router', key: 'statsScope' } as const, 'repo' as 'repo' | 'all')
 const costTab = atom({ plugin: 'model-router', key: 'costTab' } as const, 'last' as CostTab)
-const lessons = atom({ plugin: 'model-router', key: 'lessons' } as const, [] as Lesson[])
-const learnCard = atom({ plugin: 'model-router', key: 'learnCard' } as const, null as LearnCard | null)
 
 type $ = EngineInterface
 
-/** Unlike core's setConfig, refreshes through `refresh`, so the auto-handoff check and the expiry lesson run too. */
-async function setConfig($: $, fn: (c: RouterConfig) => RouterConfig): Promise<RouterConfig> {
+/** Unlike core's `setConfig`, refreshes through `refresh`, so the auto-handoff check and the expiry lesson run too. */
+async function setConfigAndRefresh($: $, fn: (c: RouterConfig) => RouterConfig): Promise<RouterConfig> {
   const next = await writeConfig($, fn)
   await refresh($).catch(() => undefined)
   return next
@@ -73,80 +70,17 @@ async function reachesModel($: $, name: string): Promise<boolean> {
   return info !== undefined && PROMPT_SOURCES.has(info.source)
 }
 
-async function setLessons($: $, fn: (all: Lesson[]) => Lesson[]): Promise<Lesson[]> {
-  const stored = await load($, STORE.lessons)
-  const next = await update($, lessons, all => fn(stored === UNREADABLE || stored === undefined ? all : sanitizeLessons(stored)))
-  if (stored !== UNREADABLE) await save($, STORE.lessons, next)
-  return next
-}
-
-/** Keeps what the finished main-loop turn taught, and puts the one most worth it on the card. */
-async function flushLessons($: $) {
-  const drafts = takeLessons()
-  const [cfg, p] = await Promise.all([configOf($), promptCostOf($)])
-  if (!cfg.isLearning) return
-  await teach($, [...drafts, ...(p === null ? [] : lessonsFromPrompt(p, cfg.cacheTtlMinutes))], await nowOf($))
-}
-
-/** Keeps the lessons of topics not muted and puts the one most worth it on the card, if any is due. */
-async function teach($: $, drafts: readonly LessonDraft[], now: number) {
-  const { learnMuted } = await configOf($)
-  const all = drafts.filter(d => !learnMuted.includes(d.kind))
-  if (all.length === 0) return
-  let card: LearnCard | undefined
-  await setLessons($, earlier => {
-    const { sessionId } = session.kept
-    const fresh: Lesson[] = all.map(d => ({ ...d, at: now, repo: session.repo, ...(sessionId === undefined ? {} : { sessionId }) }))
-    const pick = pickLesson(fresh, earlier, now)
-    card = pick && cardOf(pick, earlier, fresh.length)
-    return capLessons([...earlier, ...fresh.map(one => (one === pick ? { ...one, isToasted: true } : one))])
-  })
-  const shown = card
-  if (shown === undefined) return
-  const [, isDrawn] = await Promise.all([update($, learnCard, () => shown), isCardDrawn($)])
-  if (!isDrawn) $.ui.toast(`${CONCEPTS[shown.kind].title}: ${shown.fact}`)
-}
-
-const clearCard = ($: $) => update($, learnCard, () => null)
-
-/** Only the terminal and the desktop draw above the prompt; a session drawn elsewhere alone gets the lesson as a toast. */
-async function isCardDrawn($: $) {
-  const surfaces = await $.session.surfaces().catch(() => [])
-  return surfaces.length === 0 || surfaces.some(one => one === 'terminal' || one === 'desktop')
-}
-
-/** Learn mode on or off; off drops what the running turn had drafted and the card, so nothing is kept or shown from it. */
-async function setLearning($: $, isOn: boolean) {
-  if (!isOn) {
-    dropLessons()
-    await clearCard($)
-  }
-  await setConfig($, c => ({ ...c, isLearning: isOn }))
-}
-
 async function setShowNext($: $, isOn: boolean) {
-  await setConfig($, c => ({ ...c, showNext: isOn }))
+  await setConfigAndRefresh($, c => ({ ...c, showNext: isOn }))
 }
 
 /** Turning it off also removes the text already kept, this prompt's included. */
 async function setKeepText($: $, keep: boolean) {
-  await setConfig($, c => ({ ...c, keepPromptText: keep }))
+  await setConfigAndRefresh($, c => ({ ...c, keepPromptText: keep }))
   if (keep) return
   if (session.kept.current) session.kept = { ...session.kept, current: { ...session.kept.current, text: '' } }
   await carry($)
   await setHistory($, withoutText)
-}
-
-async function setMuted($: $, kind: LessonKind, isMuted: boolean) {
-  await setConfig($, c => ({ ...c, learnMuted: isMuted ? [...new Set([...c.learnMuted, kind])] : c.learnMuted.filter(one => one !== kind) }))
-  if (isMuted && (await read($, learnCard))?.kind === kind) await clearCard($)
-}
-
-const muteText = (kind: LessonKind) => `Learn mode stays quiet about "${CONCEPTS[kind].title}" now. /route learn unmute ${kind} brings it back.`
-
-async function muteFromCard($: $, kind: LessonKind) {
-  await setMuted($, kind, true)
-  $.ui.toast(muteText(kind))
 }
 
 /**
@@ -160,16 +94,6 @@ async function noteVersion($: $, hadSettings: boolean) {
   await save($, STORE.version, now)
   if (typeof seen === 'string') $.ui.toast(`model-router ${now} loaded (was ${seen})`)
   else if (hadSettings) $.ui.toast(`model-router ${now} loaded`)
-}
-
-async function closeOldLearnPane($: $) {
-  if ((await $.ui.panes().catch(() => [])).some(one => one.id === OLD_LEARN_ID)) await $.ui.close({ id: OLD_LEARN_ID }).catch(() => undefined)
-}
-
-async function learnStatus($: $): Promise<string> {
-  const cfg = await configOf($)
-  const muted = cfg.learnMuted.length === 0 ? ['No topics muted.'] : cfg.learnMuted.map(kind => `Muted: ${kind} (/route learn unmute ${kind})`)
-  return [`Learn mode is ${cfg.isLearning ? 'on' : 'off'}.`, ...muted].join('\n')
 }
 
 /** `/route away`: the ways to step away, priced for this session as it stands. */
@@ -243,13 +167,6 @@ async function renderCostPane($: $, e: Args<'ui.render'>) {
   })
 }
 
-async function renderCard($: $, e: Args<'ui.render'>) {
-  const card = await read($, learnCard)
-  if (card === null) return null
-  const actions = { dismiss: () => void clearCard($), mute: () => void muteFromCard($, card.kind) }
-  return learnCardView($.ui.resolve(e), card, actions)
-}
-
 async function renderBand($: $, e: Args<'ui.render'>) {
   const [cfg, now, pending, costs, hp] = await Promise.all([
     configOf($),
@@ -314,20 +231,20 @@ async function renderPane($: $, e: Args<'ui.render'>) {
         const next = fn(d ?? cfg)
         return JSON.stringify(next) === JSON.stringify(cfg) ? null : next
       }),
-    toggle: () => void setConfig($, c => ({ ...c, isEnabled: !c.isEnabled })),
+    toggle: () => void setConfigAndRefresh($, c => ({ ...c, isEnabled: !c.isEnabled })),
     setLearning: isOn => void setLearning($, isOn),
     setHandoffs: isOn => void setHandoffsOn($, isOn),
     setAutoHandoff: isOn => void setAutoHandoff($, isOn),
     setBand: isShown => void setBand($, isShown),
     openHandoffs: () => openPane($)('handoffs'),
     setShowNext: isOn => void setShowNext($, isOn),
-    setGuard: mode => void setConfig($, c => ({ ...c, coldGuard: mode })),
-    setTtl: minutes => void setConfig($, c => ({ ...c, cacheTtlMinutes: minutes })),
+    setGuard: mode => void setConfigAndRefresh($, c => ({ ...c, coldGuard: mode })),
+    setTtl: minutes => void setConfigAndRefresh($, c => ({ ...c, cacheTtlMinutes: minutes })),
     setKeepText: keep => void setKeepText($, keep),
     // Only the routes come from the draft, so on/off or a setting changed while it was open is kept.
     apply: async next => {
       await update($, draft, () => null)
-      await setConfig($, c => ({ ...c, preset: next.preset, routes: next.routes }))
+      await setConfigAndRefresh($, c => ({ ...c, preset: next.preset, routes: next.routes }))
     },
     discard: () => void update($, draft, () => null),
   })
@@ -341,10 +258,7 @@ const GUARD_TEXT: Record<ColdGuard, string> = {
 
 /** The cold guard's line: the price, what happens next, and with learn mode on, why. */
 const guardText = (cfg: RouterConfig, cold: { text: string }, tail: string) =>
-  `model-router: ${cold.text} ${tail}${cfg.isLearning && !cfg.learnMuted.includes('cold-rewrite') ? `\n\nWhy: ${CONCEPTS['cold-rewrite'].body}` : ''}`
-
-const LEARN_ON_TEXT =
-  'Learn mode on: when a cache rewrite, a pricey model, a growing context or busy subagents cost you, a card above the band explains it with the numbers, until your next prompt.'
+  `model-router: ${cold.text} ${tail}${guardWhy(cfg)}`
 
 /**
  * `/route` words in their current form: `cost <tab>` opens a tab as `<tab>` does, and
@@ -441,7 +355,7 @@ export const register: Register = on => {
       if (stored === undefined) await save($, STORE.config, cfg)
     }
     await initHistory($, kept)
-    if (storedLessons !== UNREADABLE) await update($, lessons, () => sanitizeLessons(storedLessons))
+    await learnOnSessionStart($, storedLessons)
     if (scope === 'repo' || scope === 'all') await update($, statsScope, () => scope)
     if (typeof band === 'boolean') await initBand($, band)
     const root = repo?.root ?? (await $.session.root().catch(() => ''))
@@ -683,23 +597,13 @@ export const register: Register = on => {
       const { pane, tab } = paneOf(verb)
       return { text: tab === undefined ? `${PANES[pane].title} pane opened.` : `Cost pane opened on ${COST_TAB_LABEL[tab]}.` }
     }
-    if (verb === 'learn' && rest.length === 0) return { text: await learnStatus($) }
+    const learnReadOnly = await learnVerb($, verb, rest, false)
+    if (learnReadOnly !== undefined) return learnReadOnly
     if (verb === 'away') return { text: await awayReport($) }
     if (verb === 'unused') return { text: await unusedReport($) }
     if (!USER_ORIGINS.has(e.origin.kind)) return { text: `model-router: /route ${verb} only runs when you type it.` }
-    if (verb === 'learn' && (rest[0] === 'on' || rest[0] === 'off')) {
-      const isOn = rest[0] === 'on'
-      await setLearning($, isOn)
-      return { text: isOn ? LEARN_ON_TEXT : 'Learn mode off.' }
-    }
-    if (verb === 'learn' && (rest[0] === 'mute' || rest[0] === 'unmute')) {
-      const kind = rest[1]
-      if (!isLessonKind(kind)) return { text: `Usage: /route learn mute|unmute <topic>, topics: ${TOPICS.join(', ')}` }
-      const isMuted = rest[0] === 'mute'
-      await setMuted($, kind, isMuted)
-      const title = CONCEPTS[kind].title
-      return { text: isMuted ? muteText(kind) : `Learn mode explains "${title}" again.` }
-    }
+    const learnReply = await learnVerb($, verb, rest, true)
+    if (learnReply !== undefined) return learnReply
     if (verb === 'stats' && rest[0] === 'clear') {
       await setHistory($, () => [])
       return { text: 'Prompt history cleared.' }
@@ -712,7 +616,7 @@ export const register: Register = on => {
     if (verb === 'ttl') {
       const minutes = Number(rest[0])
       if (!CACHE_TTLS.includes(minutes)) return { text: 'Usage: /route ttl 5|60 (prompt-cache lifetime in minutes)' }
-      await setConfig($, c => ({ ...c, cacheTtlMinutes: minutes }))
+      await setConfigAndRefresh($, c => ({ ...c, cacheTtlMinutes: minutes }))
       return { text: `Cache lifetime set to ${minutes} minutes.` }
     }
     if (verb === 'next') {
@@ -726,7 +630,7 @@ export const register: Register = on => {
     if (verb === 'guard') {
       const mode = rest[0] as ColdGuard
       if (!Object.hasOwn(GUARD_TEXT, mode ?? '')) return { text: 'Usage: /route guard refuse|warn|off (what a send onto a cold prompt cache does)' }
-      await setConfig($, c => ({ ...c, coldGuard: mode }))
+      await setConfigAndRefresh($, c => ({ ...c, coldGuard: mode }))
       return { text: GUARD_TEXT[mode] }
     }
     if (verb === 'band') {
@@ -735,14 +639,14 @@ export const register: Register = on => {
       return { text: `Model router band ${isShown ? 'shown' : 'hidden'}.` }
     }
     if (verb === 'on' || verb === 'off') {
-      await setConfig($, c => ({ ...c, isEnabled: verb === 'on' }))
+      await setConfigAndRefresh($, c => ({ ...c, isEnabled: verb === 'on' }))
       return { text: `Model router ${verb === 'on' ? 'enabled' : 'disabled'}.` }
     }
     if (verb === 'preset') {
       const name = rest[0] ?? ''
       const preset = presetOf(name)
       if (preset === undefined) return { text: `Presets: ${Object.keys(PRESETS).join(', ')}.` }
-      await setConfig($, c => withPreset(c, name)!)
+      await setConfigAndRefresh($, c => withPreset(c, name)!)
       return { text: `Preset ${name}: ${preset.label}.` }
     }
     if (verb === 'set') {
@@ -750,7 +654,7 @@ export const register: Register = on => {
       if (route === undefined) return { text: `Routes: ${ROUTES.map(one => one.key).join(', ')}, or sub:<agent-type>.` }
       const setting = parseSetting(route, model, effort)
       if (typeof setting === 'string') return { text: setting }
-      await setConfig($, c => withRoute(c, route, setting))
+      await setConfigAndRefresh($, c => withRoute(c, route, setting))
       return { text: `${route} → ${setting.model} · ${setting.effort}.` }
     }
     return { text: `Usage: /route ${USAGE}` }
@@ -773,7 +677,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
-    const [card, isShown] = await Promise.all([renderCard($, e), isBandShownOf($)])
+    const [card, isShown] = await Promise.all([learnBandCard($, e), isBandShownOf($)])
     const below = isShown ? await renderBand($, e) : await next(e)
     if (card === null) return below
     const { Box } = $.ui.resolve(e)
