@@ -812,7 +812,10 @@ td .ex { color: var(--muted); font-size: 13.5px; }
             <tr><td><code>/route stats text on|off</code></td><td>Keep the first 120 characters of each prompt (default on); off also removes text already kept; also in the Routes pane</td></tr>
             <tr><td><code>/route preset &lt;name&gt;</code></td><td>Apply a preset: <code>inherit</code>, <code>mine</code>, <code>balanced</code>, <code>frugal</code>, <code>max</code></td></tr>
             <tr><td><code>/route set &lt;route&gt; &lt;model&gt; [effort]</code></td><td>Set one route now, e.g. <code>/route set sub:Explore haiku low</code></td></tr>
-            <tr><td><code>/route on</code> · <code>off</code></td><td>Turn routing on or off</td></tr>
+            <tr><td><code>/route features</code></td><td>List the five features, each on or off, with a line on what it does</td></tr>
+            <tr><td><code>/route on</code> · <code>off</code></td><td>Turn routing on or off (<code>/route routing on|off</code> does the same)</td></tr>
+            <tr><td><code>/route cost on|off</code></td><td>Turn the Cost feature on or off (default on): off hides the Cost pane, the footer's ▤ today and the band's money; history keeps recording; also in the Routes pane</td></tr>
+            <tr><td><code>/route context on|off</code></td><td>Turn the Context feature on or off (default on): off hides the Context pane and the band's cache and context, and stops the cold-send guard and next-step advice; measuring keeps running; also in the Routes pane</td></tr>
             <tr><td><code>/route band on|off</code></td><td>Show or hide the band</td></tr>
             <tr><td><code>/route guard refuse|warn|off</code></td><td>What a send onto a cold cache does; also in the Routes pane</td></tr>
             <tr><td><code>/route ttl 5|60</code></td><td>Cache lifetime in minutes used for the warm/cold timer and prices (default 60); also in the Routes pane</td></tr>

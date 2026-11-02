@@ -71,7 +71,10 @@ Then restart or run `/reload-plugins`. Saved settings carry over. See [CHANGELOG
 | `/route` | Open the Routes pane: routing on top, every setting below it |
 | `/route preset inherit\|mine\|balanced\|frugal\|max` | Apply a preset (`inherit` changes no model, it only tracks) |
 | `/route set <route> <model> [effort]` | Set one route, for example `/route set sub:Explore haiku low` |
-| `/route on` / `off` | Enable or disable routing |
+| `/route features` | List the five features (routing, context, cost, handoffs, learn), each on or off, with a line on what it does |
+| `/route on` / `off` | Enable or disable routing (`/route routing on\|off` does the same) |
+| `/route cost on\|off` | Turn the Cost feature on or off (default on): off hides the Cost pane, the footer's `▤ today` and the band's money, while history keeps recording; also the Routes pane's **Cost** row |
+| `/route context on\|off` | Turn the Context feature on or off (default on): off hides the Context pane and the band's cache and context, and stops the cold-send guard and next-step advice, while measuring keeps running; also the Routes pane's **Context** row |
 | `/route cost [last\|session\|history]` | Open the Cost pane, on a tab |
 | `/route last` / `stats` / `context` | Open Cost on Last prompt, Cost on History, or the Context pane |
 | `/route stats clear` | Delete the saved prompt history |
@@ -93,7 +96,7 @@ Routes: `main`, `plan`, `sub:*`, `sub:<agent-type>` (such as `sub:Explore`), `wo
 
 - **Switching the main loop's model or effort rewrites the cache once**, at 1.25-2× input over the whole context. The pane shows that cost before you apply. With plan and main routed differently, entering and leaving plan mode each pay it.
 - **Rerouting subagents is free**: they start with a fresh context. Forks always inherit the parent's model.
-- **Prices are estimates**, hard-coded in `hooks/routes.ts` (as of 2026-10-06). Model IDs are the Anthropic API's; on a provider that names models differently, turn routing off or set routes to `inherit`.
+- **Prices are estimates**, hard-coded in `hooks/core/pricing.ts` (as of 2026-10-06). Model IDs are the Anthropic API's; on a provider that names models differently, turn routing off or set routes to `inherit`.
 - **The guard works from the band's clock**, not a server check, and doesn't keep the cache warm while you're away.
 
 ## Overhead and privacy
@@ -106,6 +109,7 @@ Routes: `main`, `plan`, `sub:*`, `sub:<agent-type>` (such as `sub:Explore`), `wo
 - **Files: it writes only under `~/.claude/handoffs/`.** It lists and reads the handoffs there and, with auto-handoff on, writes new ones. It also reads the `.md.closed` markers other tools may leave beside a handoff, to show it as done. It never writes, edits or deletes a file it didn't write.
 - **Other reads.** It lists `~/.claude/skills` and `~/.claude/commands` and reads `~/.agents/.skill-lock.json`, to know your personal skills and where the `skills` CLI installed them from. It never reads your transcripts.
 - **No network or process access of its own.** Nothing leaves your machine except the model calls above, which go through Claude Code.
+- **Turning a feature off** hides it and stops what it does: it draws nothing, opens no pane and changes no setting of its own. Measuring and the local prompt history keep running, so the other features keep working and nothing is lost when you turn it back on. Prompt text is kept only while `/route stats text` is on, and `/route stats clear` deletes the history. Nothing leaves the machine.
 - **Settings change only when you type a command or use a pane control**, never from a peer session, channel or trigger. Opening a pane works from anywhere.
 
 ## Develop
