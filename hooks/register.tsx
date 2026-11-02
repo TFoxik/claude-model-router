@@ -1,30 +1,24 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, Register } from 'claude-code'
 
-import type { ActiveRoute, ColdGuard, Effort, RouterConfig } from '../types'
-import { commandLabel, plural, printable, typedText, versionOf } from './core/format'
-import { GUARD_MIN_TOKENS } from './core/pricing'
+import type { ActiveRoute, Effort, RouterConfig } from '../types'
+import { commandLabel, printable, typedText, versionOf } from './core/format'
 import { EMPTY_PROMPT, sanitizeHistory, sumUsd, withoutText } from './core/ledger'
 import { CACHE_TTLS, startingConfig } from './core/config'
-import { DEV_PATIENCE, claudeAiReport, claudeAiTips, idleReport, idleTips, listingTokens, mcpKey, patienceText, skillReport, skillTips } from './core/usage'
-import type { ItemKey } from './core/usage'
-import { backfillUsage, flushUsage, idleHere, listCommands, noteCommand, startItems } from './core/items'
-import { USER_ORIGINS, awayFacts, coldSend, mainRoute, noteSpawn, noteToolCall, promptTokens, recordPrompt, recordStep, refreshStatus, resetSignals, routeKeyOfAgent, routedMainModel, setPlan, signalFacts } from './core/measure'
+import { backfillUsage, flushUsage, listCommands, noteCommand, startItems } from './core/items'
+import { USER_ORIGINS, mainRoute, noteSpawn, noteToolCall, promptTokens, recordPrompt, recordStep, refreshStatus, resetSignals, routeKeyOfAgent, setPlan } from './core/measure'
 import type { StepOutcome } from './core/measure'
 import { hasHandoffCommand, isCorrection } from './core/signals'
 import { raisePane } from './core/panes'
 import { session } from './core/session'
 import { STORE, UNREADABLE, carriedOf, carry, configOf, healthOf, initBand, initConfig, initHistory, isBandShownOf, isPlanOf, lastUsageOf, load, nowOf, promptCostOf, save, setBand, setHistory, spendOf, updatePromptCost, writeConfig } from './core/state'
-import { adviseSession } from './core/strategy'
-import { messagesOf, tokensByServer } from './core/tips'
-import type { TipAction } from './core/tips'
 import { pushLesson } from './learn/drafts'
 import { closeOldLearnPane, guardWhy, learnBandCard, learnOnSessionStart, learnVerb, flushLessons, clearCard, setLearning, teach } from './learn/feature'
-import { awayOptions, awayText, lessonFromCompact } from './learn/lessons'
+import { lessonFromCompact } from './learn/lessons'
 import { AUTO_LABELS, ENGINE, FORK, PRESETS, ROUTES, effortForLabel, parseSetting, presetOf, resolve, routeForSpawn, routeText, shouldSwitch, withPreset, withRoute } from './routing/routes'
 import { handoffsAfterPrompt, handoffsBandCount, handoffsOnFreshContext, handoffsOnOpen, handoffsOnSessionStart, handoffsOnTick, handoffsOnTurnComplete, handoffsOnTurnStart, handoffsOnUserPrompt, handoffsOnWrite, handoffsVerb, registerHandoffs, setAutoHandoff, setHandoffsOn } from './handoffs/feature'
 import { bandView } from './ui/band'
-import { contextMobileView, contextPaneView } from './context/context-pane'
+import { contextNoteCommand, contextOnSessionStart, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext } from './context/feature'
 import { COST_TAB_LABEL, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
 import { costOnSessionStart, registerCost, registerCostFooter, setCostTab } from './cost/feature'
@@ -42,34 +36,6 @@ async function setConfigAndRefresh($: $, fn: (c: RouterConfig) => RouterConfig):
   const next = await writeConfig($, fn)
   await refresh($).catch(() => undefined)
   return next
-}
-
-/**
- * Remembers that a slash command reached the model, so the cold guard holds it
- * next time; merged with what other sessions learned.
- */
-async function learnModelCommand($: $, name: string) {
-  if (mem.modelCommands.has(name)) return
-  mem.modelCommands.add(name)
-  const stored = await load($, STORE.modelCommands)
-  if (stored === UNREADABLE) return
-  const known = Array.isArray(stored) ? stored.filter((one): one is string => typeof one === 'string') : []
-  for (const one of known) mem.modelCommands.add(one)
-  await save($, STORE.modelCommands, [...mem.modelCommands])
-}
-
-// Prompt-only sources: their commands always reach the model.
-const PROMPT_SOURCES: ReadonlySet<string> = new Set(['user', 'mcp'])
-
-/** Whether a slash command starts a model turn: learned from earlier runs, or known from where it comes from. */
-async function reachesModel($: $, name: string): Promise<boolean> {
-  if (mem.modelCommands.has(name)) return true
-  const info = (await listCommands($)).find(one => one.name === name)
-  return info !== undefined && PROMPT_SOURCES.has(info.source)
-}
-
-async function setShowNext($: $, isOn: boolean) {
-  await setConfigAndRefresh($, c => ({ ...c, showNext: isOn }))
 }
 
 /** Turning it off also removes the text already kept, this prompt's included. */
@@ -94,40 +60,12 @@ async function noteVersion($: $, hadSettings: boolean) {
   else if (hadSettings) $.ui.toast(`model-router ${now} loaded`)
 }
 
-/** `/route away`: the ways to step away, priced for this session as it stands. */
-async function awayReport($: $): Promise<string> {
-  const facts = await awayFacts($, await configOf($))
-  return facts === undefined ? 'Nothing is cached in this session yet.' : awayText(facts)
-}
-
 /** Measures the session, then lets the features act on what it found. */
 async function refresh($: $) {
   const tick = await refreshStatus($)
   if (tick === undefined) return
   void handoffsOnTick($, tick).catch(() => undefined)
   if (tick.expiring !== undefined) await teach($, [tick.expiring], await nowOf($)).catch(() => undefined)
-}
-
-/** Names to show: what the mod worked out, over the /mcp names of servers /context lists. */
-const withServerNames = (names: Record<ItemKey, string>, servers: readonly { serverName: string }[]) => ({
-  ...Object.fromEntries(servers.map(one => [mcpKey(one.serverName), one.serverName])),
-  ...names,
-})
-
-/** `/route unused`: every idle MCP server and plugin here, or why nothing is listed yet. */
-async function unusedReport($: $): Promise<string> {
-  const [breakdown, { idle, only, loaded, repo, patience: idlePatience }] = await Promise.all([
-    $.session.usage({ breakdown: 'summary' }).then(u => u.context.breakdown).catch(() => undefined),
-    idleHere($),
-  ])
-  const here = printable(session.repo)
-  const patience = `${patienceText(idlePatience)}${idlePatience === DEV_PATIENCE ? ' (MODEL_ROUTER_IDLE_DEV)' : ''}`
-  if (repo === undefined) return `No usage recorded for ${here} yet. model-router notes which MCP servers, plugins and your own skills each repo uses; idle ones show here after ${patience}.`
-  const lines = [...idleReport(idle, withServerNames(loaded.names, breakdown?.mcpTools ?? []), loaded.keys), ...skillReport(idle, only, loaded.own, session.root), ...claudeAiReport(idle, loaded.syncedCount)]
-  if (lines.length === 0) {
-    return `Nothing idle in ${here}: every MCP server, plugin and skill of yours loaded here was used in the last 30 days, or has been loaded for under ${patience} (${plural(repo.sessions, 'session')} recorded).`
-  }
-  return [`Unused in ${here} (${plural(repo.sessions, 'session')} recorded):`, ...lines.map(line => `  ${line}`)].join('\n')
 }
 
 /** What opening a pane does besides showing it. */
@@ -154,36 +92,6 @@ async function renderBand($: $, e: Args<'ui.render'>) {
   const handoffsOpen = await handoffsBandCount($, cfg)
   const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp, handoffsOpen }
   return bandView($.ui.resolve(e), data, { open: openPane($) })
-}
-
-async function renderCtxPane($: $, e: Args<'ui.render'>) {
-  if (e.surface === 'mobile') return contextMobileView($.ui.resolve(e))
-  const columns = (e.component === 'Pane' ? e.props.bodyColumns : undefined) || 80
-  const [{ context }, hp, cfg, { idle, only, loaded }] = await Promise.all([$.session.usage({ breakdown: 'summary', columns }), healthOf($), configOf($), idleHere($)])
-  const b = context.breakdown
-  const servers = b?.mcpTools ?? []
-  // Worked out from this breakdown, not the band's last refresh, so it holds before the first request and right after a /clear.
-  const advice = b && cfg.showNext && adviseSession({
-    tokens: b.totalTokens,
-    window: b.rawMaxTokens,
-    compactAt: b.isAutoCompactEnabled ? b.autoCompactThreshold : undefined,
-    model: hp === null ? b.model : await routedMainModel($, cfg, b.model),
-    ttlMinutes: cfg.cacheTtlMinutes,
-    warmMinutes: hp?.warmMinutes ?? cfg.cacheTtlMinutes,
-    messagesShare: b.totalTokens > 0 ? messagesOf(b) / b.totalTokens : undefined,
-    boundary: session.boundary,
-    ...signalFacts(),
-  })
-  // Only once there is enough cached to be worth planning a break around: the cold guard's threshold.
-  const facts = (context.tokens ?? 0) >= GUARD_MIN_TOKENS ? await awayFacts($, cfg, context.tokens) : undefined
-  const away = facts && awayOptions(facts)
-  const tokens = listingTokens(b?.skills?.skillFrontmatter ?? [])
-  const tips = [...idleTips(idle, withServerNames(loaded.names, servers), tokensByServer(servers), { root: session.root, tokens }), ...skillTips(idle, only, loaded.own, session.root, tokens), ...claudeAiTips(idle, loaded.syncedCount, tokens)]
-  const data = { breakdown: b, isTerminal: e.surface === 'terminal', columns, advice: advice || undefined, explored: session.explored, unused: tips, away }
-  const fill = (text: string) => void $.prompt.fill({ text, mode: 'replace' }).catch(() => undefined)
-  // A menu such as /mcp opens as if typed; where the engine refuses, it is left in the prompt instead.
-  const act = (action: TipAction) => (action.isSlash ? void $.command.run({ command: action.command }).catch(() => fill(`/${action.command}`)) : fill(action.command))
-  return contextPaneView($.ui.resolve(e), data, { act })
 }
 
 async function renderPane($: $, e: Args<'ui.render'>) {
@@ -225,16 +133,6 @@ async function renderPane($: $, e: Args<'ui.render'>) {
     discard: () => void update($, draft, () => null),
   })
 }
-
-const GUARD_TEXT: Record<ColdGuard, string> = {
-  refuse: 'Cold sends are dropped once with their price; the resend goes through.',
-  warn: 'Cold sends go through with their price shown.',
-  off: 'Cold-send guard off.',
-}
-
-/** The cold guard's line: the price, what happens next, and with learn mode on, why. */
-const guardText = (cfg: RouterConfig, cold: { text: string }, tail: string) =>
-  `model-router: ${cold.text} ${tail}${guardWhy(cfg)}`
 
 /**
  * `/route` words in their current form: `cost <tab>` opens a tab as `<tab>` does, and
@@ -320,7 +218,7 @@ export const register: Register = on => {
       load($, STORE.handoffs),
       load($, STORE.handoffScope),
     ])
-    if (Array.isArray(learned)) for (const one of learned) if (typeof one === 'string') mem.modelCommands.add(one)
+    await contextOnSessionStart($, learned)
     const kept = saved === UNREADABLE ? [] : sanitizeHistory(saved)
     if (stored === UNREADABLE || saved === UNREADABLE) {
       $.ui.log('model-router: could not read saved settings or history; using defaults for this session and saving nothing over them.')
@@ -422,21 +320,13 @@ export const register: Register = on => {
     let resumeText: string | undefined
     if (e.turnId === undefined) {
       const cfg = await configOf($)
-      const guard = cfg.coldGuard
-      // Only a person can resend a dropped message; a notification, trigger or peer message would be lost.
-      if (guard !== 'off' && USER_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) {
-        const cold = await coldSend($, cfg).catch(() => undefined)
-        if (cold !== undefined && guard === 'warn') $.ui.log(guardText(cfg, cold, 'Sending anyway.'))
-        if (cold !== undefined && guard === 'refuse' && mem.coldAckedAt !== cold.at) {
-          mem.coldAckedAt = cold.at
-          return { drop: guardText(cfg, cold, 'Send it again to pay it, or /clear and start from a note.') }
-        }
-      }
+      const held = await holdColdPrompt($, cfg, e, guardWhy(cfg))
+      if (held !== undefined) return held
       if (USER_ORIGINS.has(e.origin.kind)) {
         resumeText = handoffsOnUserPrompt(e.text)
       }
       session.pendingPrompt = commandLabel(e.text)
-      if (!e.text.trimStart().startsWith('/')) mem.lastCommand = undefined
+      if (!e.text.trimStart().startsWith('/')) contextNoteCommand(undefined)
     }
     if (USER_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) session.corrections = isCorrection(e.text) ? session.corrections + 1 : 0
     if (USER_ORIGINS.has(e.origin.kind) && commandLabel(e.text) !== '/route') await clearCard($)
@@ -452,18 +342,10 @@ export const register: Register = on => {
     if (e.origin.kind === 'plugin' || e.command === 'route') return next(e)
     await noteCommand($, e.command).catch(() => undefined)
     const cfg = await configOf($)
-    if (cfg.coldGuard !== 'off' && USER_ORIGINS.has(e.origin.kind)) {
-      const cold = await coldSend($, cfg).catch(() => undefined)
-      if (cold !== undefined && (await reachesModel($, e.command))) {
-        if (cfg.coldGuard === 'warn') $.ui.log(guardText(cfg, cold, `Running /${e.command} anyway.`))
-        else if (mem.coldAckedAt !== cold.at) {
-          mem.coldAckedAt = cold.at
-          return { text: guardText(cfg, cold, `Run /${e.command} again to pay it, or /clear and start from a note.`) }
-        }
-      }
-    }
+    const held = await holdColdCommand($, cfg, e, guardWhy(cfg))
+    if (held !== undefined) return held
     session.pendingPrompt = `/${e.command}`
-    mem.lastCommand = e.command
+    contextNoteCommand(e.command)
     const done = await next(e)
     if (e.command === 'clear') {
       session.boundary = undefined
@@ -484,11 +366,7 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     session.isTurnRunning = true
-    if (mem.lastCommand !== undefined) {
-      const name = mem.lastCommand
-      mem.lastCommand = undefined
-      await learnModelCommand($, name).catch(() => undefined)
-    }
+    await contextOnTurnStart($)
     const [cfg, route] = await Promise.all([configOf($), mainRoute($)])
     const handoffLabel = handoffsOnTurnStart(e.turnId, e.text)
     if (handoffLabel !== undefined) session.pendingPrompt = handoffLabel
@@ -575,8 +453,8 @@ export const register: Register = on => {
     }
     const learnReadOnly = await learnVerb($, verb, rest, false)
     if (learnReadOnly !== undefined) return learnReadOnly
-    if (verb === 'away') return { text: await awayReport($) }
-    if (verb === 'unused') return { text: await unusedReport($) }
+    const contextReadOnly = await contextVerb($, verb, rest, false)
+    if (contextReadOnly !== undefined) return contextReadOnly
     if (!USER_ORIGINS.has(e.origin.kind)) return { text: `model-router: /route ${verb} only runs when you type it.` }
     const learnReply = await learnVerb($, verb, rest, true)
     if (learnReply !== undefined) return learnReply
@@ -595,20 +473,10 @@ export const register: Register = on => {
       await setConfigAndRefresh($, c => ({ ...c, cacheTtlMinutes: minutes }))
       return { text: `Cache lifetime set to ${minutes} minutes.` }
     }
-    if (verb === 'next') {
-      if (rest[0] !== 'on' && rest[0] !== 'off') return { text: 'Usage: /route next on|off (show next /clear, /compact or /handoff when carrying on is not the best move)' }
-      const isOn = rest[0] === 'on'
-      await setShowNext($, isOn)
-      return { text: isOn ? 'Next-step advice on: the band shows next /clear, /compact or /handoff when carrying on is not the best move, with the reason in the Context pane.' : 'Next-step advice off: the band and the Context pane no longer suggest when to clear, compact or hand off.' }
-    }
     const handoffsReply = await handoffsVerb($, verb, rest, true)
     if (handoffsReply !== undefined) return handoffsReply
-    if (verb === 'guard') {
-      const mode = rest[0] as ColdGuard
-      if (!Object.hasOwn(GUARD_TEXT, mode ?? '')) return { text: 'Usage: /route guard refuse|warn|off (what a send onto a cold prompt cache does)' }
-      await setConfigAndRefresh($, c => ({ ...c, coldGuard: mode }))
-      return { text: GUARD_TEXT[mode] }
-    }
+    const contextReply = await contextVerb($, verb, rest, true)
+    if (contextReply !== undefined) return contextReply
     if (verb === 'band') {
       const isShown = rest[0] !== 'off'
       await setBand($, isShown)
@@ -638,7 +506,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANES.route.id }, ($, e) => renderPane($, e))
 
-  on('ui.render', { component: 'Pane', requestId: PANES.context.id }, ($, e) => renderCtxPane($, e))
+  registerContext(on)
 
   registerCost(on)
 
