@@ -12,6 +12,8 @@ export const DEFAULT_CONFIG: RouterConfig = {
   isLearning: false,
   learnMuted: [],
   isHandoffs: true,
+  isCost: true,
+  isContext: true,
   autoHandoff: false,
   showNext: true,
 }
@@ -25,6 +27,22 @@ export function startingConfig(stored: unknown, hasHistory: boolean): RouterConf
   if (stored !== undefined) return sanitizeConfig(stored)
   return hasHistory ? withPreset(DEFAULT_CONFIG, 'mine')! : DEFAULT_CONFIG
 }
+
+export type Feature = 'routing' | 'context' | 'cost' | 'handoffs' | 'learn'
+
+/** What `/route features` lists, in this order: each feature's switch in the config and what it does. */
+export const FEATURES: readonly { key: Feature; field: 'isEnabled' | 'isContext' | 'isCost' | 'isHandoffs' | 'isLearning'; title: string; line: string }[] = [
+  { key: 'routing', field: 'isEnabled', title: 'Routing', line: 'models and effort per kind of work' },
+  { key: 'context', field: 'isContext', title: 'Context', line: 'cache and context in the band, cold-send guard, next-step advice' },
+  { key: 'cost', field: 'isCost', title: 'Cost', line: 'what each prompt costs: the Cost pane, the footer and the band' },
+  { key: 'handoffs', field: 'isHandoffs', title: 'Handoffs', line: 'notes to resume work in a fresh session' },
+  { key: 'learn', field: 'isLearning', title: 'Learn', line: 'cards that explain what a cache miss or a model cost you' },
+]
+
+/** What a verb of a feature that is off answers. */
+export const offText = (f: Feature): string => `${FEATURES.find(one => one.key === f)!.title} is off. /route ${f} on turns it on.`
+
+export const isFeatureOn = (cfg: RouterConfig, f: Feature): boolean => cfg[FEATURES.find(one => one.key === f)!.field]
 
 export const GUARDS: readonly ColdGuard[] = ['refuse', 'warn', 'off']
 
@@ -74,6 +92,8 @@ export function sanitizeConfig(stored: unknown): RouterConfig {
     isLearning: typeof s.isLearning === 'boolean' ? s.isLearning : DEFAULT_CONFIG.isLearning,
     learnMuted: Array.isArray(s.learnMuted) ? [...new Set(s.learnMuted.filter(isLessonKind))] : DEFAULT_CONFIG.learnMuted,
     isHandoffs: typeof s.isHandoffs === 'boolean' ? s.isHandoffs : DEFAULT_CONFIG.isHandoffs,
+    isCost: typeof s.isCost === 'boolean' ? s.isCost : DEFAULT_CONFIG.isCost,
+    isContext: typeof s.isContext === 'boolean' ? s.isContext : DEFAULT_CONFIG.isContext,
     autoHandoff: typeof s.autoHandoff === 'boolean' ? s.autoHandoff : DEFAULT_CONFIG.autoHandoff,
     showNext: typeof s.showNext === 'boolean' ? s.showNext : DEFAULT_CONFIG.showNext,
   }

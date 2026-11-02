@@ -80,7 +80,7 @@ export async function setLearning($: $, isOn: boolean): Promise<void> {
   await setConfig($, c => ({ ...c, isLearning: isOn }))
 }
 
-export async function setMuted($: $, kind: LessonKind, isMuted: boolean): Promise<void> {
+async function setMuted($: $, kind: LessonKind, isMuted: boolean): Promise<void> {
   await setConfig($, c => ({ ...c, learnMuted: isMuted ? [...new Set([...c.learnMuted, kind])] : c.learnMuted.filter(one => one !== kind) }))
   if (isMuted && (await read($, learnCard))?.kind === kind) await clearCard($)
 }

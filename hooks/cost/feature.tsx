@@ -4,7 +4,7 @@ import type { Args, EngineInterface, On } from 'claude-code'
 import type { CostTab } from '../../types'
 import { todayUsd } from '../core/ledger'
 import { allRecords } from '../core/measure'
-import { raisePane } from '../core/panes'
+import { closePanes, raisePane } from '../core/panes'
 import { session } from '../core/session'
 import { STORE, configOf, promptCostOf, save, spendOf } from '../core/state'
 import { OLD_COST_IDS, PANES } from '../ui/kit'
@@ -38,16 +38,20 @@ async function renderCostPane($: $, e: Args<'ui.render'>) {
 }
 
 export function registerCost(on: On): void {
-  on('ui.render', { component: 'Pane', requestId: PANES.cost.id }, ($, e) => renderCostPane($, e))
-
-  for (const id of OLD_COST_IDS) on('ui.render', { component: 'Pane', requestId: id }, ($, e) => renderCostPane($, e))
+  for (const id of [PANES.cost.id, ...OLD_COST_IDS]) {
+    on('ui.render', { component: 'Pane', requestId: id }, async ($, e, next) => ((await configOf($)).isCost ? renderCostPane($, e) : next(e)))
+  }
 }
 
 export function registerCostFooter(on: On): void {
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
-    if (e.component !== 'SessionMode') return next(e)
+    if (e.component !== 'SessionMode' || !(await configOf($)).isCost) return next(e)
     return renderStatsFooter($, e, e.props.modes)
   })
+}
+
+export async function closeCostPanes($: $): Promise<void> {
+  await closePanes($, [PANES.cost.id, ...OLD_COST_IDS])
 }
 
 export async function costOnSessionStart($: $, scope: unknown): Promise<void> {

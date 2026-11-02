@@ -1,12 +1,14 @@
 import type { Args, EngineInterface, On } from 'claude-code'
 
 import type { ColdGuard, RouterConfig } from '../../types'
+import { offText } from '../core/config'
 import { plural, printable } from '../core/format'
 import { GUARD_MIN_TOKENS } from '../core/pricing'
 import { DEV_PATIENCE, claudeAiReport, claudeAiTips, idleReport, idleTips, listingTokens, mcpKey, patienceText, skillReport, skillTips } from '../core/usage'
 import type { ItemKey } from '../core/usage'
 import { idleHere, listCommands } from '../core/items'
 import { USER_ORIGINS, awayFacts, coldSend, routedMainModel, setConfig, signalFacts } from '../core/measure'
+import { closePanes } from '../core/panes'
 import { session } from '../core/session'
 import { STORE, UNREADABLE, configOf, healthOf, load, save } from '../core/state'
 import { adviseSession } from '../core/strategy'
@@ -119,10 +121,14 @@ const GUARD_TEXT: Record<ColdGuard, string> = {
 }
 
 export function registerContext(on: On): void {
-  on('ui.render', { component: 'Pane', requestId: PANES.context.id }, ($, e) => renderContextPane($, e))
+  on('ui.render', { component: 'Pane', requestId: PANES.context.id }, async ($, e, next) => ((await configOf($)).isContext ? renderContextPane($, e) : next(e)))
 }
 
-export async function contextOnSessionStart($: $, learned: unknown): Promise<void> {
+export async function closeContextPane($: $): Promise<void> {
+  await closePanes($, [PANES.context.id])
+}
+
+export function contextOnSessionStart(learned: unknown): void {
   if (Array.isArray(learned)) for (const one of learned) if (typeof one === 'string') mem.modelCommands.add(one)
 }
 
@@ -133,7 +139,7 @@ const guardText = (cold: { text: string }, tail: string, why: string) => `model-
 export async function holdColdPrompt($: $, cfg: RouterConfig, e: Args<'prompt.submit'>, why: string): Promise<{ drop: string } | undefined> {
   const guard = cfg.coldGuard
   // Only a person can resend a dropped message; a notification, trigger or peer message would be lost.
-  if (guard === 'off' || !USER_ORIGINS.has(e.origin.kind) || e.text.trimStart().startsWith('/')) return undefined
+  if (!cfg.isContext || guard === 'off' || !USER_ORIGINS.has(e.origin.kind) || e.text.trimStart().startsWith('/')) return undefined
   const cold = await coldSend($, cfg).catch(() => undefined)
   if (cold !== undefined && guard === 'warn') $.ui.log(guardText(cold, 'Sending anyway.', why))
   if (cold !== undefined && guard === 'refuse' && mem.coldAckedAt !== cold.at) {
@@ -145,7 +151,7 @@ export async function holdColdPrompt($: $, cfg: RouterConfig, e: Args<'prompt.su
 
 /** The same for a slash command that starts a model turn. */
 export async function holdColdCommand($: $, cfg: RouterConfig, e: Args<'command.run'>, why: string): Promise<{ text: string } | undefined> {
-  if (cfg.coldGuard === 'off' || !USER_ORIGINS.has(e.origin.kind)) return undefined
+  if (!cfg.isContext || cfg.coldGuard === 'off' || !USER_ORIGINS.has(e.origin.kind)) return undefined
   const cold = await coldSend($, cfg).catch(() => undefined)
   if (cold === undefined || !(await reachesModel($, e.command))) return undefined
   if (cfg.coldGuard === 'warn') $.ui.log(guardText(cold, `Running /${e.command} anyway.`, why))
@@ -169,6 +175,7 @@ export async function contextOnTurnStart($: $): Promise<void> {
 }
 
 export async function contextVerb($: $, verb: string, rest: string[], isPerson: boolean): Promise<{ text: string } | undefined> {
+  if ((verb === 'away' || verb === 'unused') && !(await configOf($)).isContext) return { text: offText('context') }
   if (verb === 'away') return { text: await awayReport($) }
   if (verb === 'unused') return { text: await unusedReport($) }
   if (!isPerson) return undefined

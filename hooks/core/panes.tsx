@@ -8,3 +8,9 @@ export async function raisePane($: EngineInterface, pane: keyof typeof PANES): P
   if (open !== undefined && !open.isShown) await $.ui.close({ id: PANES[pane].id })
   await $.ui.open(PANES[pane])
 }
+
+/** Closes whichever of these panes is open. */
+export async function closePanes($: EngineInterface, ids: readonly string[]): Promise<void> {
+  const open = await $.ui.panes().catch(() => [])
+  for (const one of open) if (ids.includes(one.id)) await $.ui.close({ id: one.id }).catch(() => undefined)
+}

@@ -19,12 +19,12 @@ function bandHead(cfg: RouterConfig, now: ActiveRoute | null): string {
 }
 
 /** Text only: a desktop draws every Button as a native control, which would break up the line's spacing. */
-function healthRowView({ Text }: Els, health: Health | null, total: number) {
-  if (health === null) return null
+function healthRowView({ Text }: Els, health: Health | null, total: number, { isContext, isCost }: RouterConfig) {
+  if (health === null || (!isContext && !isCost)) return null
   const cacheColor = health.cache < 50 ? 'error' : health.cache < 80 ? 'warning' : 'success'
   const limits = [['5h', health.fiveHour], ['7d', health.sevenDay]].filter((one): one is [string, number] => one[1] !== undefined)
-  return (
-    <Text dimColor wrap="truncate-end">
+  const context = isContext ? (
+    <Text key="h-context">
       {'cache '}
       {health.warmMinutes === 0 ? (
         <Text color="error">{health.coldUsd === undefined ? 'cold' : `cold ${money(health.coldUsd)}`}</Text>
@@ -36,13 +36,24 @@ function healthRowView({ Text }: Els, health: Health | null, total: number) {
       )}
       {' · context '}
       <Text color={health.ctxLevel}>{health.ctx}%</Text>
-      {` · last ${money(health.last)} · session ${money(total)}`}
+    </Text>
+  ) : null
+  const cost = isCost ? (
+    <Text key="h-cost">
+      {`last ${money(health.last)} · session ${money(total)}`}
       {limits.map(([name, pct]) => (
         <Text key={`l:${name}`}>
           {` · ${name} `}
           <Text color={level(pct, 70, 90)}>{pct}%</Text>
         </Text>
       ))}
+    </Text>
+  ) : null
+  return (
+    <Text dimColor wrap="truncate-end">
+      {context}
+      {context && cost ? ' · ' : null}
+      {cost}
     </Text>
   )
 }
@@ -69,15 +80,15 @@ export function bandView(els: Els, { cfg, now, pending, total, health, handoffsO
         {pending ? <Text color="warning">● draft</Text> : null}
       </Box>
       <Box key="band-health" height={1}>
-        {healthRowView(els, health, total)}
+        {healthRowView(els, health, total, cfg)}
       </Box>
       <Box key="band-actions" flexDirection="row" justifyContent="flex-end" gap={1}>
         {handoffsOpen > 0 ? <Button key="band-handoffs" label={`Handoffs ●${handoffsOpen}`} plain onPress={() => open('handoffs')} /> : null}
-        {health?.advice === undefined ? null : (
+        {cfg.isContext && health?.advice !== undefined ? (
           <Button key="advice" label={`next ${health.advice.command}`} variant="primary" onPress={() => open('context')} />
-        )}
-        <Button key="ctx" label="Context" plain dimColor onPress={() => open('context')} />
-        <Button key="band-cost" label="Cost" plain dimColor onPress={() => open('last')} />
+        ) : null}
+        {cfg.isContext ? <Button key="ctx" label="Context" plain dimColor onPress={() => open('context')} /> : null}
+        {cfg.isCost ? <Button key="band-cost" label="Cost" plain dimColor onPress={() => open('last')} /> : null}
         <Button key="band-open" label="Routes" plain onPress={() => open('route')} />
       </Box>
     </Box>

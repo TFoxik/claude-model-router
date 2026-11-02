@@ -1,9 +1,9 @@
 import type { Args, EngineInterface, Register } from 'claude-code'
 
-import type { RouterConfig } from '../types'
+import type { ColdGuard, RouterConfig } from '../types'
 import { commandLabel, printable, typedText, versionOf } from './core/format'
 import { EMPTY_PROMPT, sanitizeHistory, sumUsd, withoutText } from './core/ledger'
-import { CACHE_TTLS, startingConfig } from './core/config'
+import { CACHE_TTLS, FEATURES, isFeatureOn, offText, startingConfig } from './core/config'
 import { backfillUsage, flushUsage, listCommands, noteCommand, startItems } from './core/items'
 import { USER_ORIGINS, noteSpawn, noteToolCall, promptTokens, recordPrompt, recordStep, refreshStatus, resetSignals } from './core/measure'
 import type { StepOutcome } from './core/measure'
@@ -18,10 +18,10 @@ import { ENGINE, asEffort, routeForSpawn } from './routing/routes'
 import { registerRouting, renderRoutesPane, routingBandHead, routingDecide, routingNoteApplied, routingOnSpawn, routingOnTurnStart, routingVerb } from './routing/feature'
 import { handoffsAfterPrompt, handoffsBandCount, handoffsOnFreshContext, handoffsOnOpen, handoffsOnSessionStart, handoffsOnTick, handoffsOnTurnComplete, handoffsOnTurnStart, handoffsOnUserPrompt, handoffsOnWrite, handoffsVerb, registerHandoffs, setAutoHandoff, setHandoffsOn } from './handoffs/feature'
 import { bandView } from './ui/band'
-import { contextNoteCommand, contextOnSessionStart, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext } from './context/feature'
+import { closeContextPane, contextNoteCommand, contextOnSessionStart, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext } from './context/feature'
 import { COST_TAB_LABEL, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
-import { costOnSessionStart, registerCost, registerCostFooter, setCostTab } from './cost/feature'
+import { closeCostPanes, costOnSessionStart, registerCost, registerCostFooter, setCostTab } from './cost/feature'
 
 type $ = EngineInterface
 
@@ -90,13 +90,44 @@ async function afterStep($: $, agentId: string | undefined, key: string, s: Step
   await refresh($)
 }
 
+const SWITCH_TEXT = {
+  cost: {
+    on: 'Cost on.',
+    off: 'Cost off: no Cost pane, footer or band money; history keeps recording (/route stats clear deletes it).',
+  },
+  context: {
+    on: 'Context on.',
+    off: 'Context off: no Context pane, cold-send guard, next-step advice or band cache and context; measuring keeps running.',
+  },
+}
+
+async function switchFeature($: $, feature: 'cost' | 'context', isOn: boolean) {
+  await setConfigAndRefresh($, c => (feature === 'cost' ? { ...c, isCost: isOn } : { ...c, isContext: isOn }))
+  if (!isOn) await (feature === 'cost' ? closeCostPanes($) : closeContextPane($))
+}
+
+/** `cost on|off` and `context on|off`, taken before `aliased` can read `cost on` as `on`, which is routing's switch. */
+async function switchVerb($: $, words: readonly string[], isPerson: boolean): Promise<{ text: string } | undefined> {
+  const [verb, state, ...more] = words
+  if ((verb !== 'cost' && verb !== 'context') || (state !== 'on' && state !== 'off') || more.length > 0) return undefined
+  if (!isPerson) return { text: `model-router: /route ${verb} only runs when you type it.` }
+  await switchFeature($, verb, state === 'on')
+  return { text: SWITCH_TEXT[verb][state] }
+}
+
+function featuresText(cfg: RouterConfig): string {
+  const rows = FEATURES.map(one => `${one.key}  ${(isFeatureOn(cfg, one.key) ? 'on' : 'off').padEnd(3)}  ${one.line}`)
+  return [...rows, 'Turn one on or off with /route <feature> on|off.'].join('\n')
+}
+
 /**
- * `/route` words in their current form: `cost <tab>` opens a tab as `<tab>` does, and
- * `handoff on|off` is the older name of `handoffs auto on|off`.
+ * `/route` words in their current form: `cost <tab>` opens a tab as `<tab>` does,
+ * `routing on|off` is `on|off`, and `handoff on|off` is the older name of `handoffs auto on|off`.
  */
 function aliased(words: readonly string[]): string[] {
   const [verb, ...rest] = words
   if (verb === 'cost' && rest.length === 1) return rest
+  if (verb === 'routing' && rest.length === 1 && (rest[0] === 'on' || rest[0] === 'off')) return rest
   if (verb === 'handoff') return ['handoffs', 'auto', ...rest]
   return [...words]
 }
@@ -126,7 +157,7 @@ async function shellVerb($: $, verb: string, rest: string[]): Promise<{ text: st
   return undefined
 }
 
-const USAGE = '[cost [last|session|history] | last | stats [clear | text on|off] | context | learn [on|off | mute|unmute <topic>] | handoffs [on|off | auto on|off] | next on|off | away | unused | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
+const USAGE = '[features | cost [last|session|history] | last | stats [clear | text on|off] | context | learn [on|off | mute|unmute <topic>] | handoffs [on|off | auto on|off] | next on|off | away | unused | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60 | cost on|off | context on|off]'
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -141,7 +172,7 @@ export const register: Register = on => {
       load($, STORE.handoffs),
       load($, STORE.handoffScope),
     ])
-    await contextOnSessionStart($, learned)
+    contextOnSessionStart(learned)
     const kept = saved === UNREADABLE ? [] : sanitizeHistory(saved)
     if (stored === UNREADABLE || saved === UNREADABLE) {
       $.ui.log('model-router: could not read saved settings or history; using defaults for this session and saving nothing over them.')
@@ -167,12 +198,12 @@ export const register: Register = on => {
       listCommands($),
     ])
     session.home = home
-    await handoffsOnSessionStart($, storedHandoffs, handoffScopeSaved)
     session.hasHandoffSkill = hasHandoffCommand(commands.map(one => one.name))
     const isSame = sessionId !== undefined && before?.sessionId === sessionId
     // A copy: noteUse writes into `used`, and the atom's own value is not ours to change in place.
     session.kept = isSame ? { ...before, used: { ...before.used } } : { sessionId, used: {}, isUncounted: true }
     if (!isSame) await carry($)
+    await handoffsOnSessionStart($, storedHandoffs, handoffScopeSaved)
     startItems(idleDev)
     void backfillUsage($).catch(() => undefined)
     $.ui.status(undefined)
@@ -289,13 +320,13 @@ export const register: Register = on => {
       await carry($)
       await updatePromptCost($, () => EMPTY_PROMPT)
     }
-    await routingOnTurnStart($, e)
+    await routingOnTurnStart($, e, cfg)
     return next(e)
   })
 
   on('turn.step', async function* ($, e, next) {
     const cfg = await configOf($)
-    const { route, model, effort, isHeld, isAfterCompact } = await routingDecide($, e)
+    const { route, model, effort, isHeld, isAfterCompact } = await routingDecide($, e, cfg)
 
     const isChanged = model !== e.model || effort !== asEffort(e.effort)
     const result = yield* next(isChanged ? { ...e, model, ...(effort ? { effort } : {}) } : e)
@@ -317,13 +348,18 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'route' }, async ($, e) => {
-    const [verb = 'route', ...rest] = aliased(e.args.trim().split(/\s+/).filter(Boolean))
+    const words = e.args.trim().split(/\s+/).filter(Boolean)
+    const isPerson = USER_ORIGINS.has(e.origin.kind)
+    const switched = await switchVerb($, words, isPerson)
+    if (switched !== undefined) return switched
+    const [verb = 'route', ...rest] = aliased(words)
     if (rest.length === 0 && isTarget(verb)) {
-      await showPane($, verb)
       const { pane, tab } = paneOf(verb)
+      if ((pane === 'cost' || pane === 'context') && !isFeatureOn(await configOf($), pane)) return { text: offText(pane) }
+      await showPane($, verb)
       return { text: tab === undefined ? `${PANES[pane].title} pane opened.` : `Cost pane opened on ${COST_TAB_LABEL[tab]}.` }
     }
-    const isPerson = USER_ORIGINS.has(e.origin.kind)
+    if (verb === 'features' && rest.length === 0) return { text: featuresText(await configOf($)) }
     const answered =
       (await routingVerb($, verb, rest, isPerson)) ??
       (await contextVerb($, verb, rest, isPerson)) ??
@@ -340,6 +376,10 @@ export const register: Register = on => {
       setHandoffs: isOn => void setHandoffsOn($, isOn),
       setAutoHandoff: isOn => void setAutoHandoff($, isOn),
       setShowNext: isOn => void setShowNext($, isOn),
+      setCost: isOn => void switchFeature($, 'cost', isOn),
+      setContext: isOn => void switchFeature($, 'context', isOn),
+      setGuard: (mode: ColdGuard) => void setConfigAndRefresh($, c => ({ ...c, coldGuard: mode })),
+      setTtl: minutes => void setConfigAndRefresh($, c => ({ ...c, cacheTtlMinutes: minutes })),
       setKeepText: keep => void setKeepText($, keep),
       openHandoffs: () => openPane($)('handoffs'),
     }),

@@ -80,6 +80,8 @@ type PaneActions = {
   setBand: (isShown: boolean) => void
   openHandoffs: () => void
   setShowNext: (isOn: boolean) => void
+  setCost: (isOn: boolean) => void
+  setContext: (isOn: boolean) => void
   setGuard: (mode: ColdGuard) => void
   setTtl: (minutes: number) => void
   setKeepText: (keep: boolean) => void
@@ -144,6 +146,11 @@ function settingsSection(els: InputEls, { cfg, isBand }: PaneData, a: PaneAction
         {group('Handoffs')}
         {toggle('handoffs', 'Handoffs', cfg.isHandoffs, a.setHandoffs, 'counts open handoffs in the band and lets auto-handoff run', <Button key="handoffs-open" label="Open" onPress={a.openHandoffs} />)}
         {cfg.isHandoffs ? toggle('handoff', 'Auto-handoff', cfg.autoHandoff, a.setAutoHandoff, 'saves a handoff while the cache is warm, before it goes cold with work open', undefined, true) : null}
+      </Box>
+      <Box flexDirection="column" gap={1}>
+        {group('Cost and context')}
+        {toggle('cost', 'Cost', cfg.isCost, a.setCost, 'shows what each prompt costs: the Cost pane, the footer and the band\'s money; history keeps recording')}
+        {toggle('context', 'Context', cfg.isContext, a.setContext, 'shows cache and context in the band, guards cold sends and advises the next step; measuring keeps running')}
       </Box>
       <Box flexDirection="column" gap={1}>
         {group('Cache and display')}

@@ -14,6 +14,10 @@ export type RouterConfig = {
   learnMuted: LessonKind[]
   /** Handoffs as a whole: off hides the band's count and keeps auto-handoff from asking, whatever autoHandoff says. */
   isHandoffs: boolean
+  /** Cost as a whole: off hides its pane, footer and the band's money; history keeps recording. */
+  isCost: boolean
+  /** Context as a whole: off hides its pane, the cold-send guard, next-step advice and the band's cache and context; measuring keeps running. */
+  isContext: boolean
   autoHandoff: boolean
   /** The band's next /clear, /compact or /handoff and the Context pane's advice tip. */
   showNext: boolean

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, On } from 'claude-code'
 
-import type { ActiveRoute, Effort, RouterConfig } from '../../types'
+import type { ActiveRoute, ColdGuard, Effort, RouterConfig } from '../../types'
 import { sumUsd } from '../core/ledger'
 import { mainRoute, routeKeyOfAgent, setConfig, setPlan } from '../core/measure'
 import { session } from '../core/session'
@@ -29,6 +29,10 @@ type RoutesPaneLinks = {
   setHandoffs: (isOn: boolean) => void
   setAutoHandoff: (isOn: boolean) => void
   setShowNext: (isOn: boolean) => void
+  setCost: (isOn: boolean) => void
+  setContext: (isOn: boolean) => void
+  setGuard: (mode: ColdGuard) => void
+  setTtl: (minutes: number) => void
   setKeepText: (keep: boolean) => void
   openHandoffs: () => void
 }
@@ -91,8 +95,6 @@ export async function renderRoutesPane($: $, e: Args<'ui.render'>, links: Routes
     toggle: () => void setConfig($, c => ({ ...c, isEnabled: !c.isEnabled })),
     ...links,
     setBand: isShown => void setBand($, isShown),
-    setGuard: mode => void setConfig($, c => ({ ...c, coldGuard: mode })),
-    setTtl: minutes => void setConfig($, c => ({ ...c, cacheTtlMinutes: minutes })),
     // Only the routes come from the draft, so on/off or a setting changed while it was open is kept.
     apply: async next => {
       await update($, draft, () => null)
@@ -134,9 +136,8 @@ export async function routingOnSpawn($: $, e: Args<'agent.spawn'>): Promise<Args
 }
 
 /** With auto effort on the main route, a small model reads the prompt to pick the effort for the turn. */
-export async function routingOnTurnStart($: $, e: Args<'turn.start'>): Promise<void> {
-  const [cfg, route] = await Promise.all([configOf($), mainRoute($)])
-  const { effort } = resolve(cfg, route)
+export async function routingOnTurnStart($: $, e: Args<'turn.start'>, cfg: RouterConfig): Promise<void> {
+  const { effort } = resolve(cfg, await mainRoute($))
   if (effort === 'auto' && e.text.trim() !== '') {
     const label = await $.model
       .classify(e.text.slice(0, 4000), AUTO_LABELS, { model: 'haiku' })
@@ -145,10 +146,8 @@ export async function routingOnTurnStart($: $, e: Args<'turn.start'>): Promise<v
   }
 }
 
-
 /** The model and effort a request runs on: the main loop's route when routing is on, a subagent's own route otherwise. */
-export async function routingDecide($: $, e: Args<'turn.step'>): Promise<{ route?: string; model: string; effort?: Effort; isHeld: boolean; isAfterCompact: boolean }> {
-  const cfg = await configOf($)
+export async function routingDecide($: $, e: Args<'turn.step'>, cfg: RouterConfig): Promise<{ route?: string; model: string; effort?: Effort; isHeld: boolean; isAfterCompact: boolean }> {
   let route: string | undefined
   let model = e.model
   let effort = asEffort(e.effort)
