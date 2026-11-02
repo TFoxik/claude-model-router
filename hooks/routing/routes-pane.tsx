@@ -140,7 +140,7 @@ function settingsSection(els: InputEls, { cfg, isBand }: PaneData, a: PaneAction
       <Box flexDirection="column" gap={1}>
         {group('Coaching')}
         {toggle('learn', 'Learn mode', cfg.isLearning, a.setLearning, 'explains cache misses and model costs with your own numbers, when they happen')}
-        {toggle('next', 'Next-step advice', cfg.showNext, a.setShowNext, 'shows next /clear, /compact or /handoff in the band when carrying on is not the best move')}
+        {cfg.isContext ? toggle('next', 'Next-step advice', cfg.showNext, a.setShowNext, 'shows next /clear, /compact or /handoff in the band when carrying on is not the best move') : null}
       </Box>
       <Box flexDirection="column" gap={1}>
         {group('Handoffs')}
@@ -154,12 +154,14 @@ function settingsSection(els: InputEls, { cfg, isBand }: PaneData, a: PaneAction
       </Box>
       <Box flexDirection="column" gap={1}>
         {group('Cache and display')}
-        {settingRow(els, {
-          key: 'set-guard',
-          name: 'Cold-cache guard',
-          note: 'a send onto a cold cache: held once with its price, sent with it, or not checked',
-          controls: select('guard', GUARD_OPTIONS, cfg.coldGuard, value => a.setGuard(value as ColdGuard)),
-        })}
+        {cfg.isContext
+          ? settingRow(els, {
+              key: 'set-guard',
+              name: 'Cold-cache guard',
+              note: 'a send onto a cold cache: held once with its price, sent with it, or not checked',
+              controls: select('guard', GUARD_OPTIONS, cfg.coldGuard, value => a.setGuard(value as ColdGuard)),
+            })
+          : null}
         {settingRow(els, {
           key: 'set-ttl',
           name: 'Cache lifetime',
