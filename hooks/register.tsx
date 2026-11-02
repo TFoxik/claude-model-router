@@ -1,33 +1,27 @@
-import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, Register } from 'claude-code'
 
-import type { ActiveRoute, Effort, RouterConfig } from '../types'
+import type { RouterConfig } from '../types'
 import { commandLabel, printable, typedText, versionOf } from './core/format'
 import { EMPTY_PROMPT, sanitizeHistory, sumUsd, withoutText } from './core/ledger'
 import { CACHE_TTLS, startingConfig } from './core/config'
 import { backfillUsage, flushUsage, listCommands, noteCommand, startItems } from './core/items'
-import { USER_ORIGINS, mainRoute, noteSpawn, noteToolCall, promptTokens, recordPrompt, recordStep, refreshStatus, resetSignals, routeKeyOfAgent, setPlan } from './core/measure'
+import { USER_ORIGINS, noteSpawn, noteToolCall, promptTokens, recordPrompt, recordStep, refreshStatus, resetSignals } from './core/measure'
 import type { StepOutcome } from './core/measure'
 import { hasHandoffCommand, isCorrection } from './core/signals'
 import { raisePane } from './core/panes'
 import { session } from './core/session'
-import { STORE, UNREADABLE, carriedOf, carry, configOf, healthOf, initBand, initConfig, initHistory, isBandShownOf, isPlanOf, lastUsageOf, load, nowOf, promptCostOf, save, setBand, setHistory, spendOf, updatePromptCost, writeConfig } from './core/state'
+import { STORE, UNREADABLE, carriedOf, carry, configOf, healthOf, initBand, initConfig, initHistory, isBandShownOf, lastUsageOf, load, nowOf, save, setBand, setHistory, spendOf, updatePromptCost, writeConfig } from './core/state'
 import { pushLesson } from './learn/drafts'
 import { closeOldLearnPane, guardWhy, learnBandCard, learnOnSessionStart, learnVerb, flushLessons, clearCard, setLearning, teach } from './learn/feature'
 import { lessonFromCompact } from './learn/lessons'
-import { AUTO_LABELS, ENGINE, FORK, PRESETS, ROUTES, effortForLabel, parseSetting, presetOf, resolve, routeForSpawn, routeText, shouldSwitch, withPreset, withRoute } from './routing/routes'
+import { ENGINE, asEffort, routeForSpawn } from './routing/routes'
+import { registerRouting, renderRoutesPane, routingBandHead, routingDecide, routingNoteApplied, routingOnSpawn, routingOnTurnStart, routingVerb } from './routing/feature'
 import { handoffsAfterPrompt, handoffsBandCount, handoffsOnFreshContext, handoffsOnOpen, handoffsOnSessionStart, handoffsOnTick, handoffsOnTurnComplete, handoffsOnTurnStart, handoffsOnUserPrompt, handoffsOnWrite, handoffsVerb, registerHandoffs, setAutoHandoff, setHandoffsOn } from './handoffs/feature'
 import { bandView } from './ui/band'
 import { contextNoteCommand, contextOnSessionStart, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext } from './context/feature'
 import { COST_TAB_LABEL, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
 import { costOnSessionStart, registerCost, registerCostFooter, setCostTab } from './cost/feature'
-import { routesMobileView, routesPaneView } from './routing/routes-pane'
-
-// The engine's scan accepts an atom only in the file that declares it, and follows `$` across an import
-// only into function declarations. The views in the feature folders are plain functions of the data they're given.
-const active = atom({ plugin: 'model-router', key: 'active' } as const, null as ActiveRoute | null)
-const draft = atom({ plugin: 'model-router', key: 'draft' } as const, null as RouterConfig | null)
 
 type $ = EngineInterface
 
@@ -82,56 +76,18 @@ async function showPane($: $, target: Target) {
 const openPane = ($: $): Open => target => void showPane($, target)
 
 async function renderBand($: $, e: Args<'ui.render'>) {
-  const [cfg, now, pending, costs, hp] = await Promise.all([
-    configOf($),
-    read($, active),
-    read($, draft),
-    spendOf($),
-    healthOf($),
-  ])
+  const [{ cfg, now, pending }, costs, hp] = await Promise.all([routingBandHead($), spendOf($), healthOf($)])
   const handoffsOpen = await handoffsBandCount($, cfg)
   const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp, handoffsOpen }
   return bandView($.ui.resolve(e), data, { open: openPane($) })
 }
 
-async function renderPane($: $, e: Args<'ui.render'>) {
-  const now = await read($, active)
-  if (e.surface === 'mobile') return routesMobileView($.ui.resolve(e), now)
-  const els = $.ui.resolve(e)
-  const [cfg, costs, isPlanning, pending, lastPrompt, usage, isBand] = await Promise.all([
-    configOf($),
-    spendOf($),
-    isPlanOf($),
-    read($, draft),
-    promptCostOf($),
-    $.session.usage(),
-    isBandShownOf($),
-  ])
-  const sessionModel = now?.model ?? (await $.session.model())
-  const data = { cfg, total: sumUsd(Object.values(costs)), now, isPlanning, pending, lastPrompt, contextTokens: usage.context.tokens ?? 0, sessionModel, isBand }
-  return routesPaneView(els, data, {
-    editDraft: fn =>
-      void update($, draft, d => {
-        const next = fn(d ?? cfg)
-        return JSON.stringify(next) === JSON.stringify(cfg) ? null : next
-      }),
-    toggle: () => void setConfigAndRefresh($, c => ({ ...c, isEnabled: !c.isEnabled })),
-    setLearning: isOn => void setLearning($, isOn),
-    setHandoffs: isOn => void setHandoffsOn($, isOn),
-    setAutoHandoff: isOn => void setAutoHandoff($, isOn),
-    setBand: isShown => void setBand($, isShown),
-    openHandoffs: () => openPane($)('handoffs'),
-    setShowNext: isOn => void setShowNext($, isOn),
-    setGuard: mode => void setConfigAndRefresh($, c => ({ ...c, coldGuard: mode })),
-    setTtl: minutes => void setConfigAndRefresh($, c => ({ ...c, cacheTtlMinutes: minutes })),
-    setKeepText: keep => void setKeepText($, keep),
-    // Only the routes come from the draft, so on/off or a setting changed while it was open is kept.
-    apply: async next => {
-      await update($, draft, () => null)
-      await setConfigAndRefresh($, c => ({ ...c, preset: next.preset, routes: next.routes }))
-    },
-    discard: () => void update($, draft, () => null),
-  })
+/** Counts a finished request, and for the main loop puts the route and the band's facts up to date. */
+async function afterStep($: $, agentId: string | undefined, key: string, s: StepOutcome) {
+  const { prevMainRoute } = await recordStep($, agentId, key, s)
+  if (agentId !== undefined) return
+  await routingNoteApplied($, { route: key, model: s.model, effort: s.effort, isHeld: s.isHeld, prevRoute: prevMainRoute, cfg: s.cfg })
+  await refresh($)
 }
 
 /**
@@ -145,65 +101,32 @@ function aliased(words: readonly string[]): string[] {
   return [...words]
 }
 
-const asEffort = (effort: unknown): Effort | undefined =>
-  typeof effort === 'string' ? (effort as Effort) : undefined
+/** The verbs no feature owns. */
+async function shellVerb($: $, verb: string, rest: string[]): Promise<{ text: string } | undefined> {
+  if (verb === 'stats' && rest[0] === 'clear') {
+    await setHistory($, () => [])
+    return { text: 'Prompt history cleared.' }
+  }
+  if (verb === 'stats' && rest[0] === 'text' && (rest[1] === 'on' || rest[1] === 'off')) {
+    const keep = rest[1] === 'on'
+    await setKeepText($, keep)
+    return { text: keep ? 'Stats keeps the first 120 characters of each prompt again.' : 'Stats keeps only labels and costs now; saved prompt text was removed.' }
+  }
+  if (verb === 'ttl') {
+    const minutes = Number(rest[0])
+    if (!CACHE_TTLS.includes(minutes)) return { text: 'Usage: /route ttl 5|60 (prompt-cache lifetime in minutes)' }
+    await setConfigAndRefresh($, c => ({ ...c, cacheTtlMinutes: minutes }))
+    return { text: `Cache lifetime set to ${minutes} minutes.` }
+  }
+  if (verb === 'band') {
+    const isShown = rest[0] !== 'off'
+    await setBand($, isShown)
+    return { text: `Model router band ${isShown ? 'shown' : 'hidden'}.` }
+  }
+  return undefined
+}
 
 const USAGE = '[cost [last|session|history] | last | stats [clear | text on|off] | context | learn [on|off | mute|unmute <topic>] | handoffs [on|off | auto on|off] | next on|off | away | unused | preset <name> | set <route> <model> [effort] | on | off | band on|off | guard refuse|warn|off | ttl 5|60]'
-
-type Decision = { model: string; effort?: Effort; isHeld: boolean }
-
-// Per-load memory: a hot reload starts it over, which only costs one unguarded turn.
-const mem = {
-  autoEffort: new Map<string, Effort>(),
-  decisions: new Map<string, Decision>(),
-  coldAckedAt: undefined as number | undefined,
-  // Slash commands seen to start a model turn, and the command that ran last, until a turn shows whether it did.
-  modelCommands: new Set<string>(),
-  lastCommand: undefined as string | undefined,
-}
-
-async function decideMain(
-  $: $,
-  cfg: RouterConfig,
-  turnId: string,
-  index: number,
-  route: string,
-  model: string,
-  isAfterCompact: boolean,
-  effort?: Effort,
-): Promise<Decision> {
-  const known = mem.decisions.get(turnId)
-  if (known !== undefined && index > 0) return known
-  const want = resolve(cfg, route)
-  const toModel = want.model ?? model
-  let toEffort: Effort | undefined =
-    want.effort === 'auto' ? (mem.autoEffort.get(turnId) ?? session.lastMain?.effort ?? 'medium') : (want.effort ?? effort)
-  let isHeld = false
-  const last = session.lastMain
-  if (want.effort === 'auto' && last !== undefined && last.route === route) {
-    const contextTokens = (await $.session.usage()).context.tokens ?? 0
-    const from = { model: last.model, effort: last.effort }
-    const to = { model: toModel, effort: toEffort }
-    if (!shouldSwitch({ contextTokens, isAfterCompact, from, to, ttlMinutes: cfg.cacheTtlMinutes })) {
-      toEffort = last.effort
-      isHeld = true
-    }
-  }
-  mem.autoEffort.delete(turnId)
-  const decision = { model: toModel, effort: toEffort, isHeld }
-  mem.decisions.clear()
-  mem.decisions.set(turnId, decision)
-  return decision
-}
-
-/** Counts a finished request, and for the main loop puts the route and the band's facts up to date. */
-async function afterStep($: $, agentId: string | undefined, key: string, s: StepOutcome) {
-  const { prevMainRoute } = await recordStep($, agentId, key, s)
-  if (agentId !== undefined) return
-  if (prevMainRoute !== undefined && prevMainRoute !== key && s.cfg.isEnabled) $.ui.toast(`Route ${key}: ${routeText(s.model, s.effort)}`)
-  await update($, active, () => ({ route: key, model: s.model, effort: s.effort, isHeld: s.isHeld }))
-  await refresh($)
-}
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -244,7 +167,6 @@ export const register: Register = on => {
       listCommands($),
     ])
     session.home = home
-    // The band only needs this repo's; the pane lists every repo when it opens under All.
     await handoffsOnSessionStart($, storedHandoffs, handoffScopeSaved)
     session.hasHandoffSkill = hasHandoffCommand(commands.map(one => one.name))
     const isSame = sessionId !== undefined && before?.sessionId === sessionId
@@ -263,26 +185,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // Hooks that pass events on fail open: if our own code throws, the event goes on as if we weren't here.
-  on('prompt.attachment', async ($, e, next) => {
-    if (e.agentId === undefined) {
-      if (e.type === 'plan_mode' || e.type === 'plan_mode_reentry') await setPlan($, true)
-      if (e.type === 'plan_mode_exit') await setPlan($, false)
-    }
-    return next(e)
-  }).catch(($, e, next) => next(e))
-
-  on('tool.call', { tool: 'EnterPlanMode' }, async ($, e, next) => {
-    const ran = await next(e)
-    if (e.agentId === undefined && ran.deny === undefined && !ran.isError) await setPlan($, true)
-    return ran
-  }).catch(($, e, next) => next(e))
-
-  on('tool.call', { tool: 'ExitPlanMode' }, async ($, e, next) => {
-    const ran = await next(e)
-    if (e.agentId === undefined && ran.deny === undefined && !ran.isError) await setPlan($, false)
-    return ran
-  }).catch(($, e, next) => next(e))
+  registerRouting(on)
 
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
@@ -306,12 +209,9 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
-    const route = routeForSpawn(e)
-    const { model } = resolve(await configOf($), route)
-    const canRewrite = route !== FORK && e.workflow === undefined
-    const started = await next(canRewrite && model ? { ...e, model } : e)
+    const started = await next(await routingOnSpawn($, e))
     if (started.agentId !== undefined) {
-      noteSpawn(started.agentId, route, printable(`${e.subagentType} · ${e.description}`))
+      noteSpawn(started.agentId, routeForSpawn(e), printable(`${e.subagentType} · ${e.description}`))
     }
     return started
   }).catch(($, e, next) => next(e))
@@ -367,7 +267,7 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     session.isTurnRunning = true
     await contextOnTurnStart($)
-    const [cfg, route] = await Promise.all([configOf($), mainRoute($)])
+    const cfg = await configOf($)
     const handoffLabel = handoffsOnTurnStart(e.turnId, e.text)
     if (handoffLabel !== undefined) session.pendingPrompt = handoffLabel
     if (session.pendingPrompt !== undefined) {
@@ -389,41 +289,13 @@ export const register: Register = on => {
       await carry($)
       await updatePromptCost($, () => EMPTY_PROMPT)
     }
-    const { effort } = resolve(cfg, route)
-    if (effort === 'auto' && e.text.trim() !== '') {
-      const label = await $.model
-        .classify(e.text.slice(0, 4000), AUTO_LABELS, { model: 'haiku' })
-        .catch(() => undefined)
-      mem.autoEffort.set(e.turnId, effortForLabel(label, e.text))
-    }
+    await routingOnTurnStart($, e)
     return next(e)
   })
 
   on('turn.step', async function* ($, e, next) {
     const cfg = await configOf($)
-    let route: string | undefined
-    let model = e.model
-    let effort = asEffort(e.effort)
-    let isHeld = false
-    const isAfterCompact = e.agentId === undefined && session.isAfterCompact
-
-    if (e.agentId === undefined) {
-      session.isAfterCompact = false
-      route = await mainRoute($)
-      if (cfg.isEnabled) {
-        const decision = await decideMain($, cfg, e.turnId, e.index, route, e.model, isAfterCompact, effort)
-        model = decision.model
-        effort = decision.effort
-        isHeld = decision.isHeld
-      }
-    } else {
-      route = await routeKeyOfAgent($, e.agentId)
-      if (route !== undefined && route !== FORK) {
-        const want = resolve(cfg, route)
-        model = want.model ?? e.model
-        if (want.effort !== undefined && want.effort !== 'auto') effort = want.effort
-      }
-    }
+    const { route, model, effort, isHeld, isAfterCompact } = await routingDecide($, e)
 
     const isChanged = model !== e.model || effort !== asEffort(e.effort)
     const result = yield* next(isChanged ? { ...e, model, ...(effort ? { effort } : {}) } : e)
@@ -451,60 +323,27 @@ export const register: Register = on => {
       const { pane, tab } = paneOf(verb)
       return { text: tab === undefined ? `${PANES[pane].title} pane opened.` : `Cost pane opened on ${COST_TAB_LABEL[tab]}.` }
     }
-    const learnReadOnly = await learnVerb($, verb, rest, false)
-    if (learnReadOnly !== undefined) return learnReadOnly
-    const contextReadOnly = await contextVerb($, verb, rest, false)
-    if (contextReadOnly !== undefined) return contextReadOnly
-    if (!USER_ORIGINS.has(e.origin.kind)) return { text: `model-router: /route ${verb} only runs when you type it.` }
-    const learnReply = await learnVerb($, verb, rest, true)
-    if (learnReply !== undefined) return learnReply
-    if (verb === 'stats' && rest[0] === 'clear') {
-      await setHistory($, () => [])
-      return { text: 'Prompt history cleared.' }
-    }
-    if (verb === 'stats' && rest[0] === 'text' && (rest[1] === 'on' || rest[1] === 'off')) {
-      const keep = rest[1] === 'on'
-      await setKeepText($, keep)
-      return { text: keep ? 'Stats keeps the first 120 characters of each prompt again.' : 'Stats keeps only labels and costs now; saved prompt text was removed.' }
-    }
-    if (verb === 'ttl') {
-      const minutes = Number(rest[0])
-      if (!CACHE_TTLS.includes(minutes)) return { text: 'Usage: /route ttl 5|60 (prompt-cache lifetime in minutes)' }
-      await setConfigAndRefresh($, c => ({ ...c, cacheTtlMinutes: minutes }))
-      return { text: `Cache lifetime set to ${minutes} minutes.` }
-    }
-    const handoffsReply = await handoffsVerb($, verb, rest, true)
-    if (handoffsReply !== undefined) return handoffsReply
-    const contextReply = await contextVerb($, verb, rest, true)
-    if (contextReply !== undefined) return contextReply
-    if (verb === 'band') {
-      const isShown = rest[0] !== 'off'
-      await setBand($, isShown)
-      return { text: `Model router band ${isShown ? 'shown' : 'hidden'}.` }
-    }
-    if (verb === 'on' || verb === 'off') {
-      await setConfigAndRefresh($, c => ({ ...c, isEnabled: verb === 'on' }))
-      return { text: `Model router ${verb === 'on' ? 'enabled' : 'disabled'}.` }
-    }
-    if (verb === 'preset') {
-      const name = rest[0] ?? ''
-      const preset = presetOf(name)
-      if (preset === undefined) return { text: `Presets: ${Object.keys(PRESETS).join(', ')}.` }
-      await setConfigAndRefresh($, c => withPreset(c, name)!)
-      return { text: `Preset ${name}: ${preset.label}.` }
-    }
-    if (verb === 'set') {
-      const [route, model, effort] = rest
-      if (route === undefined) return { text: `Routes: ${ROUTES.map(one => one.key).join(', ')}, or sub:<agent-type>.` }
-      const setting = parseSetting(route, model, effort)
-      if (typeof setting === 'string') return { text: setting }
-      await setConfigAndRefresh($, c => withRoute(c, route, setting))
-      return { text: `${route} → ${setting.model} · ${setting.effort}.` }
-    }
-    return { text: `Usage: /route ${USAGE}` }
+    const isPerson = USER_ORIGINS.has(e.origin.kind)
+    const answered =
+      (await routingVerb($, verb, rest, isPerson)) ??
+      (await contextVerb($, verb, rest, isPerson)) ??
+      (await handoffsVerb($, verb, rest, isPerson)) ??
+      (await learnVerb($, verb, rest, isPerson))
+    if (answered !== undefined) return answered
+    if (!isPerson) return { text: `model-router: /route ${verb} only runs when you type it.` }
+    return (await shellVerb($, verb, rest)) ?? { text: `Usage: /route ${USAGE}` }
   })
 
-  on('ui.render', { component: 'Pane', requestId: PANES.route.id }, ($, e) => renderPane($, e))
+  on('ui.render', { component: 'Pane', requestId: PANES.route.id }, ($, e) =>
+    renderRoutesPane($, e, {
+      setLearning: isOn => void setLearning($, isOn),
+      setHandoffs: isOn => void setHandoffsOn($, isOn),
+      setAutoHandoff: isOn => void setAutoHandoff($, isOn),
+      setShowNext: isOn => void setShowNext($, isOn),
+      setKeepText: keep => void setKeepText($, keep),
+      openHandoffs: () => openPane($)('handoffs'),
+    }),
+  )
 
   registerContext(on)
 

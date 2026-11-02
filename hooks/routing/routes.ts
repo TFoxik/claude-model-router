@@ -92,6 +92,10 @@ export const withRoute = (config: RouterConfig, route: string, setting: RouteSet
 })
 
 export const isModel = (m: unknown): m is RouteSetting['model'] => m === 'inherit' || (typeof m === 'string' && Object.hasOwn(MODELS, m))
+
+export const asEffort = (effort: unknown): Effort | undefined =>
+  typeof effort === 'string' ? (effort as Effort) : undefined
+
 export const isEffort = (e: unknown): e is RouteEffort =>
   e === 'inherit' || e === 'auto' || (typeof e === 'string' && EFFORTS.includes(e as Effort))
 
