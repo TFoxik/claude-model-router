@@ -1,9 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, Register } from 'claude-code'
 
-import type { ActiveRoute, ColdGuard, CostTab, Effort, LearnCard, Lesson, LessonKind, RouterConfig, Scope } from '../types'
+import type { ActiveRoute, ColdGuard, CostTab, Effort, LearnCard, Lesson, LessonKind, RouterConfig } from '../types'
 import { commandLabel, plural, printable, typedText, versionOf } from './core/format'
-import { GUARD_MIN_TOKENS, rewritePrice } from './core/pricing'
+import { GUARD_MIN_TOKENS } from './core/pricing'
 import { EMPTY_PROMPT, sanitizeHistory, sumUsd, todayUsd, withoutText } from './core/ledger'
 import { CACHE_TTLS, isLessonKind, startingConfig } from './core/config'
 import { DEV_PATIENCE, claudeAiReport, claudeAiTips, idleReport, idleTips, listingTokens, mcpKey, patienceText, skillReport, skillTips } from './core/usage'
@@ -11,26 +11,22 @@ import type { ItemKey } from './core/usage'
 import { backfillUsage, flushUsage, idleHere, listCommands, noteCommand, startItems } from './core/items'
 import { USER_ORIGINS, allRecords, awayFacts, coldSend, mainRoute, noteSpawn, noteToolCall, promptTokens, recordPrompt, recordStep, refreshStatus, resetSignals, routeKeyOfAgent, routedMainModel, setPlan, signalFacts } from './core/measure'
 import type { StepOutcome } from './core/measure'
-import { hasHandoffCommand, isCorrection, openSteps } from './core/signals'
+import { hasHandoffCommand, isCorrection } from './core/signals'
 import { session } from './core/session'
 import { STORE, UNREADABLE, carriedOf, carry, configOf, healthOf, initBand, initConfig, initHistory, isBandShownOf, isPlanOf, lastUsageOf, load, nowOf, promptCostOf, save, setBand, setHistory, spendOf, updatePromptCost, writeConfig } from './core/state'
 import { adviseSession } from './core/strategy'
 import { messagesOf, tokensByServer } from './core/tips'
 import type { TipAction } from './core/tips'
 import { dropLessons, pushLesson, takeLessons } from './learn/drafts'
-import { CONCEPTS, TOPICS, awayOptions, awayText, capLessons, cardOf, lessonFromAutoHandoff, lessonFromCompact, lessonsFromPrompt, pickLesson, sanitizeLessons } from './learn/lessons'
+import { CONCEPTS, TOPICS, awayOptions, awayText, capLessons, cardOf, lessonFromCompact, lessonsFromPrompt, pickLesson, sanitizeLessons } from './learn/lessons'
 import type { LessonDraft } from './learn/lessons'
 import { AUTO_LABELS, ENGINE, FORK, PRESETS, ROUTES, effortForLabel, parseSetting, presetOf, resolve, routeForSpawn, routeText, shouldSwitch, withPreset, withRoute } from './routing/routes'
-import { HANDOFF_DIR, HANDOFF_LABEL, HANDOFF_PROMPT, handoffPath, handoffPrompt, isAgentBusy, pendingAfter, segment, shouldAutoHandoff, tildePath } from './handoffs/handoff'
-import type { PendingHandoff } from './handoffs/handoff'
-import { bandCount, closeMarked, handoffDir, handoffRows, handoffsRoot, mergeListing, recordWritten, reopen, resumeIn, sanitizeHandoffs, setStatus, detailsOf, withDetails } from './handoffs/records'
-import type { HandoffStatus, Handoffs } from './handoffs/records'
+import { handoffsAfterPrompt, handoffsBandCount, handoffsOnFreshContext, handoffsOnOpen, handoffsOnSessionStart, handoffsOnTick, handoffsOnTurnComplete, handoffsOnTurnStart, handoffsOnUserPrompt, handoffsOnWrite, handoffsVerb, registerHandoffs, setAutoHandoff, setHandoffsOn } from './handoffs/feature'
 import { bandView } from './ui/band'
 import { contextMobileView, contextPaneView } from './context/context-pane'
 import { COST_TAB_LABEL, OLD_COST_IDS, OLD_LEARN_ID, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
 import { costPaneView } from './cost/cost-pane'
-import { handoffsPaneView } from './handoffs/handoffs-pane'
 import { learnCardView } from './learn/learn-card'
 import { routesMobileView, routesPaneView } from './routing/routes-pane'
 import { statsFooterView } from './cost/stats'
@@ -43,9 +39,6 @@ const statsScope = atom({ plugin: 'model-router', key: 'statsScope' } as const, 
 const costTab = atom({ plugin: 'model-router', key: 'costTab' } as const, 'last' as CostTab)
 const lessons = atom({ plugin: 'model-router', key: 'lessons' } as const, [] as Lesson[])
 const learnCard = atom({ plugin: 'model-router', key: 'learnCard' } as const, null as LearnCard | null)
-const handoffs = atom({ plugin: 'model-router', key: 'handoffs' } as const, {} as Handoffs)
-const handoffScope = atom({ plugin: 'model-router', key: 'handoffScope' } as const, 'repo' as Scope)
-const handoffClosedShown = atom({ plugin: 'model-router', key: 'handoffClosedShown' } as const, false)
 
 type $ = EngineInterface
 
@@ -87,116 +80,12 @@ async function setLessons($: $, fn: (all: Lesson[]) => Lesson[]): Promise<Lesson
   return next
 }
 
-/** One at a time: two overlapping edits would both start from the same stored value, and the later save would drop the earlier. */
-function setHandoffs($: $, fn: (all: Handoffs) => Handoffs): Promise<Handoffs> {
-  const run = mem.handoffsChain.then(() => applyHandoffs($, fn))
-  mem.handoffsChain = run.catch(() => undefined)
-  return run
-}
-
-/** An edit that returns the records it was given changes nothing, so nothing is saved. */
-async function applyHandoffs($: $, fn: (all: Handoffs) => Handoffs): Promise<Handoffs> {
-  const stored = await load($, STORE.handoffs)
-  let isChanged = false
-  const next = await update($, handoffs, all => {
-    const base = stored === UNREADABLE || stored === undefined ? all : sanitizeHandoffs(stored)
-    const edited = fn(base)
-    isChanged = edited !== base
-    return edited
-  })
-  if (isChanged && stored !== UNREADABLE) await save($, STORE.handoffs, next)
-  return next
-}
-
-/** Without the text, title and gist are left for the next listing to read from the file. */
-async function recordHandoff($: $, path: string, repo: string, text: string | undefined) {
-  const [at, sessionId] = [await nowOf($), session.kept.sessionId]
-  const details = text === undefined ? {} : detailsOf(text)
-  await setHandoffs($, all => recordWritten(all, path, { repo, at, ...(sessionId === undefined ? {} : { sessionId }), ...details })).catch(() => undefined)
-}
-
-type Listed = { path: string; mtimeMs: number }[]
-
-/** A folder's handoff files, and the mtime of each `.md.closed` marker by the handoff it closes; empty when the folder doesn't exist, `undefined` when it couldn't be read. */
-async function listHandoffs($: $, dir: string): Promise<{ files: Listed; markers: Record<string, number> } | undefined> {
-  try {
-    if (!(await $.fs.exists(dir))) return { files: [], markers: {} }
-    const entries = (await $.fs.list(dir)).filter(one => one.kind === 'file')
-    const files = entries.filter(one => one.name.endsWith('.md')).map(one => ({ path: `${dir}/${one.name}`, mtimeMs: one.mtimeMs }))
-    const markers = Object.fromEntries(entries.filter(one => one.name.endsWith('.md.closed')).map(one => [`${dir}/${one.name.slice(0, -'.closed'.length)}`, one.mtimeMs]))
-    return { files, markers }
-  } catch {
-    return undefined
-  }
-}
-
-/** Brings the records in line with the folder on disk, and reads the details of files not read yet or changed since. */
-async function refreshHandoffs($: $, scope?: Scope) {
-  const home = session.home
-  if (home === undefined) return
-  const inScope = scope ?? (await read($, handoffScope))
-  const repos = inScope === 'repo' ? [segment(session.repo)] : ((await $.fs.list(handoffsRoot(home)).catch(() => undefined))?.filter(one => one.kind === 'dir').map(one => one.name) ?? [])
-  const listedAt = await nowOf($)
-  const lists = await Promise.all(repos.map(repo => listHandoffs($, handoffDir(home, repo))))
-  const listing: Record<string, Listed> = Object.fromEntries(repos.flatMap((repo, i) => (lists[i] === undefined ? [] : [[repo, lists[i]!.files]])))
-  const markers = Object.assign({}, ...lists.map(one => one?.markers))
-  const preview = mergeListing(await read($, handoffs), listing, listedAt)
-  // A file outside the listing is stamped 0, so it is read once more when a listing shows its real mtime.
-  const mtimes: Record<string, number> = Object.fromEntries(Object.values(listing).flat().map(one => [one.path, one.mtimeMs]))
-  const unread = Object.entries(preview).filter(([path, r]) => r.readMtimeMs === undefined || (mtimes[path] ?? 0) > r.readMtimeMs)
-    .sort((a, b) => Number(b[1].status === 'open') - Number(a[1].status === 'open') || b[1].at - a[1].at).slice(0, 20)
-  const found = await Promise.all(unread.map(([path]) => $.fs.read(path).then(text => detailsOf(typeof text === 'string' ? text : ''), () => detailsOf(''))))
-  const details = Object.fromEntries(unread.map(([path], i) => [path, { ...found[i]!, readMtimeMs: mtimes[path] ?? 0 }]))
-  await setHandoffs($, all => withDetails(closeMarked(mergeListing(all, listing, listedAt), markers), details))
-}
-
-async function renderHandoffsPane($: $, e: Args<'ui.render'>) {
-  const [all, scope, isClosedShown, now, cfg] = await Promise.all([read($, handoffs), read($, handoffScope), read($, handoffClosedShown), nowOf($), configOf($)])
-  const repo = segment(session.repo)
-  const { open, closed } = handoffRows(all, scope === 'repo' ? repo : undefined, now)
-  const folder = session.home === undefined ? `~/${HANDOFF_DIR}/` : tildePath(scope === 'repo' ? handoffDir(session.home, repo) : handoffsRoot(session.home), session.home)
-  return handoffsPaneView($.ui.resolve(e), { open, closed, isClosedShown, scope, repo, folder, isOn: cfg.isHandoffs }, {
-    setOn: isOn => void setHandoffsOn($, isOn),
-    resume: path => void $.prompt.fill({ text: `resume from ${tildePath(path, session.home)}`, mode: 'replace' }).catch(() => undefined),
-    setStatus: (path, status: HandoffStatus) => void setHandoffs($, records => setStatus(records, path, status)),
-    reopen: path => void nowOf($).then(at => setHandoffs($, records => reopen(records, path, at))),
-    toggleClosed: () => void update($, handoffClosedShown, was => !was),
-    setScope: async next => {
-      await save($, STORE.handoffScope, await update($, handoffScope, () => next))
-      await refreshHandoffs($)
-    },
-  })
-}
-
 /** Keeps what the finished main-loop turn taught, and puts the one most worth it on the card. */
 async function flushLessons($: $) {
   const drafts = takeLessons()
   const [cfg, p] = await Promise.all([configOf($), promptCostOf($)])
   if (!cfg.isLearning) return
   await teach($, [...drafts, ...(p === null ? [] : lessonsFromPrompt(p, cfg.cacheTtlMinutes))], await nowOf($))
-}
-
-/** Writes the auto-handoff turn's reply to its file; an interrupted, failed or empty turn saves nothing. */
-async function finishHandoff($: $, e: Args<'turn.complete'>) {
-  const asked = mem.handoff
-  if (asked?.turnId === undefined || asked.turnId !== e.turnId) return
-  mem.handoff = undefined
-  if (e.reason !== 'answer' || e.answer.trim() === '' || session.home === undefined) return
-  const [now, sessionId, cost, cfg] = await Promise.all([nowOf($), $.session.id().catch(() => session.kept.sessionId), promptCostOf($), configOf($)])
-  const path = handoffPath(session.home, session.repo, now, sessionId ?? 'session')
-  try {
-    await $.fs.write(path, `${e.answer.trim()}\n`)
-  } catch (err) {
-    $.ui.log(`model-router: could not save the auto-handoff to ${path}: ${err instanceof Error ? err.message : String(err)}`)
-    return
-  }
-  session.handoffPath = path
-  await recordHandoff($, path, segment(session.repo), e.answer)
-  if (cfg.isLearning) {
-    const avoidedUsd = rewritePrice(asked.model, asked.tokens, cfg.cacheTtlMinutes).write
-    pushLesson(lessonFromAutoHandoff({ spentUsd: cost?.usd ?? 0, avoidedUsd, tokens: asked.tokens, path: tildePath(path, session.home) }))
-  }
-  await refresh($).catch(() => undefined)
 }
 
 /** Keeps the lessons of topics not muted and puts the one most worth it on the card, if any is due. */
@@ -233,20 +122,6 @@ async function setLearning($: $, isOn: boolean) {
     await clearCard($)
   }
   await setConfig($, c => ({ ...c, isLearning: isOn }))
-}
-
-/** A fresh context leaves no handoff to resume from, and an auto-handoff asked for before it is no longer wanted. */
-function resetHandoff() {
-  session.handoffPath = undefined
-  mem.handoff = pendingAfter(mem.handoff, { kind: 'fresh-context' })
-}
-
-async function setHandoffsOn($: $, isOn: boolean) {
-  await setConfig($, c => ({ ...c, isHandoffs: isOn }))
-}
-
-async function setAutoHandoff($: $, isOn: boolean) {
-  await setConfig($, c => ({ ...c, autoHandoff: isOn }))
 }
 
 async function setShowNext($: $, isOn: boolean) {
@@ -307,37 +182,8 @@ async function awayReport($: $): Promise<string> {
 async function refresh($: $) {
   const tick = await refreshStatus($)
   if (tick === undefined) return
-  void maybeAutoHandoff($, tick.cfg, tick).catch(() => undefined)
+  void handoffsOnTick($, tick).catch(() => undefined)
   if (tick.expiring !== undefined) await teach($, [tick.expiring], await nowOf($)).catch(() => undefined)
-}
-
-/** In the cache's last minutes with work open, asks Claude for a handoff while reading the context is still cheap. */
-async function maybeAutoHandoff($: $, cfg: RouterConfig, warm: { warmMinutes: number; tokens: number; model: string }) {
-  const facts = {
-    isOn: cfg.isHandoffs && cfg.autoHandoff,
-    isArmed: mem.handoffArmed && mem.handoff === undefined,
-    isIdle: !session.isTurnRunning,
-    isPromptEmpty: true,
-    canSave: session.home !== undefined,
-    warmMinutes: warm.warmMinutes,
-    ttlMinutes: cfg.cacheTtlMinutes,
-    tokens: warm.tokens,
-    openSteps: openSteps(session.steps),
-    hasPlan: session.planPath !== undefined,
-    editsSinceCommit: session.editsSinceCommit,
-  }
-  if (!shouldAutoHandoff(facts)) return
-  // Claimed before the awaits, so a refresh running alongside cannot submit a second one.
-  mem.handoffArmed = false
-  const [agents, box] = await Promise.all([$.agent.list().catch(() => []), $.prompt.read()])
-  const isIdle = !session.isTurnRunning && !agents.some(one => isAgentBusy(one.status))
-  if (!shouldAutoHandoff({ ...facts, isIdle, isPromptEmpty: box.text.trim() === '' })) {
-    mem.handoffArmed = true
-    return
-  }
-  mem.handoff = { tokens: warm.tokens, model: warm.model }
-  const sent = await $.prompt.submit({ text: handoffPrompt(facts.editsSinceCommit) }).catch(() => undefined)
-  mem.handoff = pendingAfter(mem.handoff, { kind: 'submitted', isDropped: sent === undefined || sent.drop !== undefined })
 }
 
 /** Names to show: what the mod worked out, over the /mcp names of servers /context lists. */
@@ -371,7 +217,7 @@ async function raisePane($: $, pane: keyof typeof PANES) {
 
 /** What opening a pane does besides showing it. */
 async function onOpen($: $, pane: keyof typeof PANES) {
-  if (pane === 'handoffs') await refreshHandoffs($)
+  if (pane === 'handoffs') await handoffsOnOpen($)
 }
 
 async function showPane($: $, target: Target) {
@@ -405,15 +251,14 @@ async function renderCard($: $, e: Args<'ui.render'>) {
 }
 
 async function renderBand($: $, e: Args<'ui.render'>) {
-  const [cfg, now, pending, costs, hp, records] = await Promise.all([
+  const [cfg, now, pending, costs, hp] = await Promise.all([
     configOf($),
     read($, active),
     read($, draft),
     spendOf($),
     healthOf($),
-    read($, handoffs),
   ])
-  const handoffsOpen = !cfg.isHandoffs ? 0 : bandCount(records, segment(session.repo), session.kept.sessionId, await nowOf($))
+  const handoffsOpen = await handoffsBandCount($, cfg)
   const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp, handoffsOpen }
   return bandView($.ui.resolve(e), data, { open: openPane($) })
 }
@@ -501,12 +346,6 @@ const guardText = (cfg: RouterConfig, cold: { text: string }, tail: string) =>
 const LEARN_ON_TEXT =
   'Learn mode on: when a cache rewrite, a pricey model, a growing context or busy subagents cost you, a card above the band explains it with the numbers, until your next prompt.'
 
-const HANDOFFS_ON_TEXT = 'Handoffs on: the band counts handoffs other sessions left open, and auto-handoff runs when it is on (/route handoffs auto on|off).'
-const HANDOFFS_OFF_TEXT = 'Handoffs off: no count in the band and no auto-handoff. Handoffs you save with /handoff are still listed in /route handoffs.'
-
-const handoffOnText = (repo: string) =>
-  `Auto-handoff on: when the cache is about to go cold with steps open or a plan not yet started, model-router asks Claude for a handoff while the cache is still warm and saves it under ~/${HANDOFF_DIR}/${segment(repo)}/. It runs once per prompt and never clears the session itself.`
-
 /**
  * `/route` words in their current form: `cost <tab>` opens a tab as `<tab>` does, and
  * `handoff on|off` is the older name of `handoffs auto on|off`.
@@ -533,11 +372,6 @@ const mem = {
   // Slash commands seen to start a model turn, and the command that ran last, until a turn shows whether it did.
   modelCommands: new Set<string>(),
   lastCommand: undefined as string | undefined,
-  // Whether an auto-handoff may still run before the person prompts again.
-  handoffArmed: false,
-  // The auto-handoff asked for and not yet answered: its turn once it starts, and the context it would have rewritten cold.
-  handoff: undefined as PendingHandoff,
-  handoffsChain: Promise.resolve() as Promise<unknown>,
 }
 
 async function decideMain(
@@ -608,8 +442,6 @@ export const register: Register = on => {
     }
     await initHistory($, kept)
     if (storedLessons !== UNREADABLE) await update($, lessons, () => sanitizeLessons(storedLessons))
-    if (storedHandoffs !== UNREADABLE) await update($, handoffs, () => sanitizeHandoffs(storedHandoffs))
-    if (handoffScopeSaved === 'repo' || handoffScopeSaved === 'all') await update($, handoffScope, () => handoffScopeSaved)
     if (scope === 'repo' || scope === 'all') await update($, statsScope, () => scope)
     if (typeof band === 'boolean') await initBand($, band)
     const root = repo?.root ?? (await $.session.root().catch(() => ''))
@@ -625,7 +457,7 @@ export const register: Register = on => {
     ])
     session.home = home
     // The band only needs this repo's; the pane lists every repo when it opens under All.
-    void refreshHandoffs($, 'repo').catch(() => undefined)
+    await handoffsOnSessionStart($, storedHandoffs, handoffScopeSaved)
     session.hasHandoffSkill = hasHandoffCommand(commands.map(one => one.name))
     const isSame = sessionId !== undefined && before?.sessionId === sessionId
     // A copy: noteUse writes into `used`, and the atom's own value is not ours to change in place.
@@ -668,7 +500,7 @@ export const register: Register = on => {
     const ran = await next(e)
     if (ran.deny === undefined && !ran.isError) {
       const noted = await noteToolCall($, e, ran.result).catch(() => undefined)
-      if (noted?.handoffWritten !== undefined) await recordHandoff($, noted.handoffWritten.path, noted.handoffWritten.repo, noted.handoffWritten.text)
+      if (noted?.handoffWritten !== undefined) await handoffsOnWrite($, noted.handoffWritten).catch(() => undefined)
     }
     return ran
   }).catch(($, e, next) => next(e))
@@ -711,10 +543,7 @@ export const register: Register = on => {
         }
       }
       if (USER_ORIGINS.has(e.origin.kind)) {
-        mem.handoff = pendingAfter(mem.handoff, { kind: 'user-prompt' })
-        mem.handoffArmed = true
-        session.handoffPath = undefined
-        resumeText = e.text
+        resumeText = handoffsOnUserPrompt(e.text)
       }
       session.pendingPrompt = commandLabel(e.text)
       if (!e.text.trimStart().startsWith('/')) mem.lastCommand = undefined
@@ -724,8 +553,7 @@ export const register: Register = on => {
     const out = await next(e)
     // Marked once the prompt is through: a hook further down may still drop it.
     if (resumeText !== undefined && out.drop === undefined) {
-      const text = resumeText
-      await setHandoffs($, all => resumeIn(all, text, session.home)).catch(() => undefined)
+      await handoffsAfterPrompt($, resumeText)
     }
     return out
   }).catch(($, e, next) => next(e))
@@ -751,7 +579,7 @@ export const register: Register = on => {
       session.boundary = undefined
       await carry($)
       resetSignals(true)
-      resetHandoff()
+      handoffsOnFreshContext()
       await clearCard($)
       await refresh($).catch(() => undefined)
     }
@@ -772,11 +600,8 @@ export const register: Register = on => {
       await learnModelCommand($, name).catch(() => undefined)
     }
     const [cfg, route] = await Promise.all([configOf($), mainRoute($)])
-    // The auto-handoff's own submit never reaches this plugin's prompt.submit hook, so its turn is told by its text.
-    if (mem.handoff !== undefined && mem.handoff.turnId === undefined && e.text.includes(HANDOFF_PROMPT)) {
-      mem.handoff = { ...mem.handoff, turnId: e.turnId }
-      session.pendingPrompt = HANDOFF_LABEL
-    }
+    const handoffLabel = handoffsOnTurnStart(e.turnId, e.text)
+    if (handoffLabel !== undefined) session.pendingPrompt = handoffLabel
     if (session.pendingPrompt !== undefined) {
       const label = session.pendingPrompt
       session.pendingPrompt = undefined
@@ -790,7 +615,7 @@ export const register: Register = on => {
       // Plan approval's "clear context" and /resume change the session without a /clear.
       if (isNew) {
         resetSignals(true)
-        resetHandoff()
+        handoffsOnFreshContext()
         await clearCard($)
       }
       await carry($)
@@ -844,7 +669,7 @@ export const register: Register = on => {
     const done = await next(e)
     if (e.agentId === undefined) {
       session.isTurnRunning = false
-      await finishHandoff($, e).catch(() => undefined)
+      if (await handoffsOnTurnComplete($, e).catch(() => false)) await refresh($).catch(() => undefined)
       await flushLessons($).catch(() => undefined)
       await flushUsage($, true).catch(() => undefined)
     }
@@ -896,19 +721,8 @@ export const register: Register = on => {
       await setShowNext($, isOn)
       return { text: isOn ? 'Next-step advice on: the band shows next /clear, /compact or /handoff when carrying on is not the best move, with the reason in the Context pane.' : 'Next-step advice off: the band and the Context pane no longer suggest when to clear, compact or hand off.' }
     }
-    if (verb === 'handoffs' && rest[0] === 'auto') {
-      const autoSwitch = rest[1]
-      if (autoSwitch !== 'on' && autoSwitch !== 'off') return { text: 'Usage: /route handoffs auto on|off (save a handoff while the cache is still warm, before it goes cold with work open)' }
-      const isOn = autoSwitch === 'on'
-      await setAutoHandoff($, isOn)
-      return { text: isOn ? handoffOnText(session.repo) : 'Auto-handoff off.' }
-    }
-    if (verb === 'handoffs') {
-      if (rest[0] !== 'on' && rest[0] !== 'off') return { text: 'Usage: /route handoffs on|off (the Handoffs pane, the band\'s count and auto-handoff), /route handoffs auto on|off, or /route handoffs to open the pane' }
-      const isOn = rest[0] === 'on'
-      await setHandoffsOn($, isOn)
-      return { text: isOn ? HANDOFFS_ON_TEXT : HANDOFFS_OFF_TEXT }
-    }
+    const handoffsReply = await handoffsVerb($, verb, rest, true)
+    if (handoffsReply !== undefined) return handoffsReply
     if (verb === 'guard') {
       const mode = rest[0] as ColdGuard
       if (!Object.hasOwn(GUARD_TEXT, mode ?? '')) return { text: 'Usage: /route guard refuse|warn|off (what a send onto a cold prompt cache does)' }
@@ -950,7 +764,7 @@ export const register: Register = on => {
 
   for (const id of OLD_COST_IDS) on('ui.render', { component: 'Pane', requestId: id }, ($, e) => renderCostPane($, e))
 
-  on('ui.render', { component: 'Pane', requestId: PANES.handoffs.id }, ($, e) => renderHandoffsPane($, e))
+  registerHandoffs(on)
 
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     if (e.component !== 'SessionMode') return next(e)
