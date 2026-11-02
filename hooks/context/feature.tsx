@@ -20,7 +20,7 @@ import type { BandPart } from '../ui/band'
 import { contextBandPart, warmBandPart } from './band-part'
 import { PANES } from '../ui/kit'
 import { contextMobileView, contextPaneView } from './context-pane'
-import { WARM_PROMPT, parseWarmHours, shouldPing } from './warm'
+import { FORK_TIMEOUT_MS, WARM_PROMPT, parseWarmHours, shouldPing } from './warm'
 
 type $ = EngineInterface
 
@@ -233,28 +233,34 @@ export async function startWarm($: $, hours: number): Promise<string> {
   return `Keeping the cache warm for up to ${hours} h; it stops when you send anything.`
 }
 
-const STOP_WHY = { ceiling: 'it reached its limit', cold: 'the cache went cold anyway' } as const
+const STOP_WHY = { ceiling: 'it reached its limit', cold: 'the cache went cold anyway', ttl: 'the cache lifetime is 5 minutes now' } as const
 
 export async function stopWarm($: $, why: 'back' | 'stop' | 'off' | keyof typeof STOP_WHY): Promise<void> {
   const run = await warmRunOf($)
   if (run === null) return
   await setWarmRun($, () => null)
-  if (why === 'ceiling' || why === 'cold') $.ui.log(`model-router: keep-warm stopped: ${STOP_WHY[why]}; ${plural(run.pings, 'ping')} cost ${money(run.usd)}.`)
+  if (why === 'ceiling' || why === 'cold' || why === 'ttl') $.ui.log(`model-router: keep-warm stopped: ${STOP_WHY[why]}; ${plural(run.pings, 'ping')} cost ${money(run.usd)}.`)
 }
 
 /** On each status tick: ends a run at its limit or on a cold cache, and pings when the cache is in its last minutes. */
 export async function contextOnTick($: $, tick: HealthTick): Promise<void> {
   const run = tick.warmRun
-  if (run === null || session.isPinging) return
+  if (run === null) return
   const now = await nowOf($)
+  if (!tick.cfg.isContext) return stopWarm($, 'off')
+  if (tick.cfg.cacheTtlMinutes !== 60) return stopWarm($, 'ttl')
   if (now >= run.until) return stopWarm($, 'ceiling')
   if (tick.warmMinutes === 0) return stopWarm($, 'cold')
-  if (!shouldPing(run, tick.warmMinutes, now)) return
+  // Claimed with no await after the check, so a refresh running alongside can't send a second fork.
+  if (session.isPinging || session.isTurnRunning || !shouldPing(run, tick.warmMinutes, now)) return
   session.isPinging = true
   try {
-    const reply = await $.model.fork({ prompt: WARM_PROMPT })
+    // The tick's copy of the run may predate a Stop or a prompt.
+    if ((await warmRunOf($)) === null) return
+    // The fork takes no signal, so one that never settles is given up on rather than holding every later tick.
+    const reply = await Promise.race([$.model.fork({ prompt: WARM_PROMPT }), $.clock.sleep(FORK_TIMEOUT_MS).then(() => undefined)])
     // A fork that didn't answer (rate limit, overload, a turn in flight) is tried again on the next tick.
-    if (reply.isAnswered && (await noteWarmPing($, reply.usage)) === 'cold') await stopWarm($, 'cold')
+    if (reply?.isAnswered && (await noteWarmPing($, reply.usage)) === 'cold') await stopWarm($, 'cold')
   } finally {
     session.isPinging = false
   }

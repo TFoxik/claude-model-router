@@ -79,3 +79,14 @@ export function bandView(els: Els, { head: { cfg, now, pending }, parts }: { hea
   )
   return rows
 }
+
+/** One part on a row of its own, its segment and then its buttons: what the band shows of a keep-warm run while hidden. */
+export function warmLineView(els: Els, part: BandPart, { open }: { open: Open }) {
+  const { Box, Text } = els
+  return (
+    <Box key="band-warm" flexDirection="row" gap={1}>
+      <Text dimColor wrap="truncate-end">{part.segment?.(els)}</Text>
+      {part.buttons.map(b => buttonView(els, b, open))}
+    </Box>
+  )
+}

@@ -7,6 +7,8 @@ export const WARM_PROMPT = 'Reply with OK.'
 /** Early enough to land before the expiry lesson's (5) and auto-handoff's (3) last minutes on the 60-minute cache. */
 export const PING_AT_MINUTES = 6
 
+export const FORK_TIMEOUT_MS = 2 * 60_000
+
 export function shouldPing(run: WarmRun | null, warmMinutes: number, now: number): boolean {
   return run !== null && now < run.until && warmMinutes > 0 && warmMinutes <= PING_AT_MINUTES
 }

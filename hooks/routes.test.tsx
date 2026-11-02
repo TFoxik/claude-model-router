@@ -2659,3 +2659,72 @@ test('the Routes pane sets the keep-warm ceiling, greyed with Context off', asyn
   expect(await pane.findAll({ type: 'Text', text: 'needs Context' })).toHaveLength(3)
   await pane.unmount()
 })
+
+test('a keep-warm run stops when the cache lifetime is set to 5 minutes', async ($, on) => {
+  const { clock, forks, logs, isRunning } = await warmSession($, on)
+  await route($, 'warm')
+  await route($, 'ttl 5')
+  await clock.advance(10 * 60_000)
+  expect(forks).toEqual([])
+  expect(await isRunning()).toBe(false)
+  expect(logs.some(one => one.startsWith('model-router: keep-warm stopped'))).toBe(true)
+})
+
+test('with the band hidden a keep-warm run still shows above the prompt, with its Stop', async ($, on) => {
+  const { isRunning } = await warmSession($, on)
+  await route($, 'band off')
+  await route($, 'warm')
+  const band = await mountBand($, 'desktop')
+  expect(await band.find({ type: 'Text', text: /^warm ●/ })).toBeDefined()
+  expect(await band.find({ key: 'band-open' })).toBeUndefined()
+  await band.press({ key: 'warm-stop' })
+  await band.unmount()
+  expect(await isRunning()).toBe(false)
+})
+
+test('the fork\'s step under an agent no list names is not counted', async ($, on) => {
+  on('agent.list', () => ({ value: [] }) as never)
+  const { clock } = await warmSession($, on, [], {}, async () => {
+    await step($, 'fork', 'fork-agent')
+  })
+  await route($, 'warm')
+  await clock.advance(54 * 60_000)
+  const cost = await mountCost($, 'session')
+  expect(await cost.find({ type: 'Text', text: /Engine \(forks/ })).toBeUndefined()
+  expect(await cost.find({ type: 'Text', text: /keep-warm/ })).toBeDefined()
+  await cost.unmount()
+})
+
+test('a person\'s own turn while a ping is out is still routed', async ($, on) => {
+  mock.store(on, { config: { ...MINE, coldGuard: 'off', cacheTtlMinutes: 60 } })
+  const clock = mock.clock(on, { now: T0 })
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 200_000, window: 1_000_000, percent: 20 }, rateLimits: [] } }) as never)
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('ui.toast', () => ({ value: undefined }) as never)
+  const seen: string[] = []
+  on('turn.step', async function* (_$, e) {
+    seen.push(`${e.turnId}:${e.model}`)
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: usageOf(200_000) }
+  })
+  on('model.fork', async () => {
+    await $.turn.start({ text: 'back', turnId: 'p' })
+    await step($, 'p')
+    return { value: forkRead(200_000) } as never
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await step($, 'a')
+  await route($, 'warm')
+  await clock.advance(54 * 60_000)
+  expect(seen).toContain(`p:${MODELS.opus.id}`)
+})
+
+test('a fork that never answers is given up on, and the run still ends at its ceiling', async ($, on) => {
+  const { clock, forks, isRunning } = await warmSession($, on, [], {}, () => new Promise<void>(() => undefined))
+  await route($, 'warm 1h')
+  await clock.advance(54 * 60_000)
+  expect(forks).toHaveLength(1)
+  await clock.advance(10 * 60_000)
+  expect(await isRunning()).toBe(false)
+})

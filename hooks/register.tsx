@@ -6,7 +6,7 @@ import { EMPTY_PROMPT, sanitizeHistory, sumUsd, withoutText } from './core/ledge
 import { CACHE_TTLS, FEATURES, featureOf, isFeatureOn, offText, startingConfig } from './core/config'
 import type { Feature } from './core/config'
 import { backfillUsage, flushUsage, listCommands, noteCommand, startItems } from './core/items'
-import { USER_ORIGINS, noteSpawn, noteToolCall, promptTokens, recordPrompt, recordStep, refreshStatus, resetSignals } from './core/measure'
+import { USER_ORIGINS, noteSpawn, noteToolCall, promptTokens, recordPrompt, recordStep, refreshStatus, resetSignals, routeKeyOfAgent } from './core/measure'
 import type { StepOutcome } from './core/measure'
 import { hasHandoffCommand, isCorrection } from './core/signals'
 import { raisePane } from './core/panes'
@@ -18,7 +18,7 @@ import { lessonFromCompact } from './learn/lessons'
 import { ENGINE, asEffort, routeForSpawn } from './routing/routes'
 import { registerRouting, renderRoutesPane, routingBandHead, routingDecide, routingNoteApplied, routingOnSpawn, routingOnTurnStart, routingVerb } from './routing/feature'
 import { handoffsAfterPrompt, handoffsBand, handoffsOnFreshContext, handoffsOnOpen, handoffsOnSessionStart, handoffsOnTick, handoffsOnTurnComplete, handoffsOnTurnStart, handoffsOnUserPrompt, handoffsOnWrite, handoffsVerb, registerHandoffs, setAutoHandoff } from './handoffs/feature'
-import { bandView } from './ui/band'
+import { bandView, warmLineView } from './ui/band'
 import { closeContextPane, contextBand, contextNoteCommand, contextOnSessionStart, contextOnTick, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext, stopWarm, warmBand } from './context/feature'
 import { COST_TABS, COST_TAB_LABEL, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
@@ -83,6 +83,13 @@ async function renderBand($: $, e: Args<'ui.render'>) {
   const stop = () => void stopWarm($, 'stop')
   const parts = [handoffs, contextBand(head.cfg, health), warmBand(head.cfg, run, now, stop), costBand(head.cfg, health, sumUsd(Object.values(costs)))]
   return bandView($.ui.resolve(e), { head, parts: parts.filter(one => one !== undefined) }, { open: openPane($) })
+}
+
+/** A keep-warm run spends while it runs, so with the band hidden it still gets a line of its own. */
+async function renderWarmLine($: $, e: Args<'ui.render'>) {
+  const [cfg, run, now] = await Promise.all([configOf($), warmRunOf($), nowOf($)])
+  const part = warmBand(cfg, run, now, () => void stopWarm($, 'stop'))
+  return part === undefined ? null : warmLineView($.ui.resolve(e), part, { open: openPane($) })
 }
 
 async function afterStep($: $, agentId: string | undefined, key: string, s: StepOutcome) {
@@ -328,7 +335,9 @@ export const register: Register = on => {
   })
 
   on('turn.step', async function* ($, e, next) {
-    if (session.isPinging && e.agentId === undefined) return yield* next(e)
+    // A keep-warm fork's own request, if the engine raises one: under no agent, or one no list names, while no turn of
+    // the person's runs. Routing it would change the model the cache was written for.
+    if (session.isPinging && !session.isTurnRunning && (e.agentId === undefined || (await routeKeyOfAgent($, e.agentId)) === undefined)) return yield* next(e)
     const cfg = await configOf($)
     const { route, model, effort, isHeld, isAfterCompact } = await routingDecide($, e, cfg)
 
@@ -402,8 +411,8 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const [card, isShown] = await Promise.all([learnBandCard($, e), isBandShownOf($)])
-    if (card === null && !isShown) return next(e)
-    const band = isShown ? await renderBand($, e) : null
+    const band = isShown ? await renderBand($, e) : await renderWarmLine($, e)
+    if (card === null && band === null) return next(e)
     const others = await next(e)
     const { Box } = $.ui.resolve(e)
     return (
