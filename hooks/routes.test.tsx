@@ -228,6 +228,48 @@ test('subagents are routed by type at spawn and at every step', async ($, on) =>
   ])
 })
 
+test('with routing off subagents keep the session\'s model at spawn and at every step', async ($, on) => {
+  mock.store(on)
+  const sent: Sent[] = []
+  bottomStep(on, sent)
+  const spawned: Array<string | undefined> = []
+  on('agent.spawn', (_$, e) => {
+    spawned.push(e.model)
+    return { model: e.model ?? e.parentModel, agentId: `a-${spawned.length}` }
+  })
+  await useMine($)
+  await route($, 'off')
+  await $.agent.spawn({
+    tool_use_id: 'tu',
+    prompt: 'p',
+    description: 'd',
+    subagentType: 'Explore',
+    provider: { plugin: 'engine', tier: 'core' },
+    parentModel: opus,
+    background: false,
+    fork: false,
+  } as Args<'agent.spawn'>)
+  await step($, 's1', 'a-1')
+
+  expect(spawned).toEqual([undefined])
+  expect(sent).toEqual([{ model: sonnet, effort: 'max', agentId: 'a-1' }])
+})
+
+test('with routing off auto effort sends nothing to the classifier', async ($, on) => {
+  mock.store(on, { config: { ...DEFAULT_CONFIG, isEnabled: false, preset: 'balanced', routes: PRESETS.balanced!.routes } })
+  const classified: string[] = []
+  on('model.classify', (_$, e) => {
+    classified.push(e.text)
+    return { value: 'hard' }
+  })
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await $.turn.start({ text: 'refactor the autoupdate rollback', turnId: 'u1' })
+  expect(classified).toEqual([])
+})
+
 test('auto mode classifies the prompt and sets the main effort', async ($, on) => {
   mock.store(on, { config: { ...DEFAULT_CONFIG, preset: 'balanced', routes: PRESETS.balanced!.routes } })
   const sent: Sent[] = []
