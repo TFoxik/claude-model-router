@@ -170,12 +170,11 @@ export async function handoffsOnTick($: $, tick: HealthTick): Promise<void> {
   mem.handoff = pendingAfter(mem.handoff, { kind: 'submitted', isDropped: sent === undefined || sent.drop !== undefined })
 }
 
-/** A person's prompt re-arms the auto-handoff and drops the handoff path; the text is what a resume from a handoff is looked for in. */
-export function handoffsOnUserPrompt(text: string): string {
+/** A person's prompt re-arms the auto-handoff and drops the handoff path. */
+export function handoffsOnUserPrompt(): void {
   mem.handoff = pendingAfter(mem.handoff, { kind: 'user-prompt' })
   mem.handoffArmed = true
   session.handoffPath = undefined
-  return text
 }
 
 /** Marked once the prompt is through: a hook further down may still drop it. */

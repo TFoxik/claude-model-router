@@ -36,7 +36,7 @@ type Session = {
   tick?: Timer
 }
 
-/** Per-load memory shared by the core and the features: a hot reload starts it over, which only costs one unguarded turn. Core and register.tsx write it, and a feature the fields it owns (`handoffPath`, `isAfterCompact`). */
+/** Per-load memory shared by the core and the features: a hot reload starts it over, which only costs one unguarded turn. Core and register.tsx write it; a feature writes only the fields it owns (`handoffPath`, `isAfterCompact`). */
 export const session: Session = {
   repo: 'unknown',
   kept: { used: {}, isUncounted: true },

@@ -226,6 +226,7 @@ export const register: Register = on => {
 
   registerRouting(on)
 
+  // Hooks that pass events on fail open: if our own code throws, the event goes on as if we weren't here.
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
     if (ran.deny === undefined && !ran.isError) {
@@ -262,7 +263,8 @@ export const register: Register = on => {
       const held = await holdColdPrompt($, cfg, e, guardWhy(cfg))
       if (held !== undefined) return held
       if (USER_ORIGINS.has(e.origin.kind)) {
-        resumeText = handoffsOnUserPrompt(e.text)
+        handoffsOnUserPrompt()
+        resumeText = e.text
       }
       session.pendingPrompt = commandLabel(e.text)
       if (!e.text.trimStart().startsWith('/')) contextNoteCommand(undefined)

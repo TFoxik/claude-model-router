@@ -48,7 +48,7 @@ export type Loaded = {
 const LOADED_TTL_MS = 60_000
 
 /** MCP servers and plugins loaded now whose use the mod can see: plugins that serve a command, a skill or an MCP server. */
-export async function loadedItems($: $): Promise<Loaded> {
+async function loadedItems($: $): Promise<Loaded> {
   const now = await nowOf($)
   if (memory.loaded !== undefined && now - memory.loaded.at < LOADED_TTL_MS) return memory.loaded.value
   const value = fetchLoaded($)
@@ -59,7 +59,7 @@ export async function loadedItems($: $): Promise<Loaded> {
 }
 
 /** What was last loaded, however old, for hot paths that only need the plugin list or command names. */
-export function cachedLoaded($: $): Promise<Loaded> {
+function cachedLoaded($: $): Promise<Loaded> {
   return memory.loaded?.value ?? loadedItems($)
 }
 
@@ -211,7 +211,7 @@ export async function flushUsage($: $, canCount: boolean) {
 }
 
 /** The usage every session has saved, re-read at most once a minute: other sessions save too, but a pane redraws far more often. */
-export async function savedUsage($: $): Promise<UsageStore> {
+async function savedUsage($: $): Promise<UsageStore> {
   const now = await nowOf($)
   if (memory.savedUsage !== undefined && now - memory.savedUsage.at < LOADED_TTL_MS) return memory.savedUsage.value
   const stored = await load($, STORE.toolUse)

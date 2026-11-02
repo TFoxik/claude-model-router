@@ -193,7 +193,7 @@ export async function noteToolCall($: $, e: Args<'tool.call'>, result: unknown):
   return { handoffWritten }
 }
 
-export function recordOf(meta: { label: string; text: string; at: number }, p: PromptCost): PromptRecord {
+function recordOf(meta: { label: string; text: string; at: number }, p: PromptCost): PromptRecord {
   return {
     at: meta.at,
     repo: session.repo,
