@@ -257,8 +257,8 @@ test('the band is three rows with the route line alone on top, and has no Hide t
     const ui = await $.ui.mount({ plugin: 'model-router', surface, component: 'AbovePrompt', props: {} as never })
     const tree = await ui.drawn()
     expect(tree).toMatchObject({ type: 'Box', props: { flexDirection: 'column' } })
-    const rows = ((tree as { children?: unknown[] }).children ?? []) as { props?: { key?: string; justifyContent?: string } }[]
-    expect(rows.map(one => one.props?.key)).toEqual(['band-route', 'band-health', 'band-actions'])
+    const rows = ((tree as { children?: unknown[] }).children ?? []) as { props?: { key?: string; justifyContent?: string }; children?: unknown[] }[]
+    expect(rows.map(one => one.props?.key ?? one.children?.[0])).toEqual(['band-route', 'band-health', 'band-actions', 'engine'])
     expect(rows[2]!.props?.justifyContent).toBe('flex-end')
     expect(await ui.find({ type: 'Text', text: /Opus medium/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Sonnet high/ })).toBeDefined()
@@ -2216,4 +2216,54 @@ test('stats clear works with cost off', async ($, on) => {
   expect((await route($, 'stats text off')).text).toMatch(/^Stats keeps only labels/)
   expect((await route($, 'ttl 5')).text).toBe('Cache lifetime set to 5 minutes.')
   expect((await route($, 'band off')).text).toBe('Model router band hidden.')
+})
+
+const rowKeys = async (band: Awaited<ReturnType<typeof bandOf>>) => {
+  const tree = (await band.drawn()) as { children?: Array<{ props?: { key?: string }; children?: unknown[] }> }
+  return (tree.children ?? []).map(one => one.props?.key ?? one.children?.[0])
+}
+
+test('another plugin\'s band stays below ours while the band is shown', async ($, on) => {
+  mock.store(on, { bandShown: true, config: MINE })
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => { const { Text } = $.ui.resolve(e); return <Text key="engine-band">engine</Text> })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await step($, 'a')
+  const band = await bandOf($)
+  expect(await rowKeys(band)).toEqual(['band-route', 'band-health', 'band-actions', 'engine'])
+  expect(await band.find({ type: 'Text', text: 'engine' })).toBeDefined()
+  expect(await band.find({ key: 'band-open' })).toBeDefined()
+  await band.unmount()
+})
+
+test('with cost and context off the band drops its empty health row', async ($, on) => {
+  mock.store(on, { bandShown: true, config: MINE })
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await step($, 'a')
+  await route($, 'cost off')
+  await route($, 'context off')
+  const band = await bandOf($)
+  expect(await rowKeys(band)).toEqual(['band-route', 'band-actions'])
+  expect(await buttonKeys(band)).toEqual(['band-open'])
+  await band.unmount()
+})
+
+test('with cost off the health row keeps cache and context only', async ($, on) => {
+  mock.store(on, { bandShown: true, config: MINE })
+  guardSession(on, { context: 1000, usage: usageOf(1000) })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await step($, 'a')
+  await route($, 'cost off')
+  const band = await bandOf($)
+  expect(await band.find({ type: 'Text', text: /^cache .* · context \d+%$/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /last \$/ })).toBeUndefined()
+  expect(await buttonKeys(band)).toEqual(['ctx', 'band-open'])
+  await route($, 'cost on')
+  await route($, 'context off')
+  const back = await bandOf($)
+  expect(await back.find({ type: 'Text', text: /^last \$.* · session \$/ })).toBeDefined()
+  expect(await back.find({ type: 'Text', text: /cache/ })).toBeUndefined()
+  await band.unmount()
+  await back.unmount()
 })

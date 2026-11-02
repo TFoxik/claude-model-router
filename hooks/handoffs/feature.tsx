@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, On } from 'claude-code'
 
-import type { RouterConfig, Scope } from '../../types'
+import type { Scope } from '../../types'
 import type { HealthTick } from '../core/measure'
 import { setConfig } from '../core/measure'
 import { session } from '../core/session'
@@ -219,9 +219,9 @@ export function handoffsOnFreshContext(): void {
   mem.handoff = pendingAfter(mem.handoff, { kind: 'fresh-context' })
 }
 
-export async function handoffsBandCount($: $, cfg: RouterConfig): Promise<number> {
-  const records = await read($, handoffs)
-  return !cfg.isHandoffs ? 0 : bandCount(records, segment(session.repo), session.kept.sessionId, await nowOf($))
+export async function handoffsBandCount($: $): Promise<number> {
+  const [records, cfg, now] = await Promise.all([read($, handoffs), configOf($), nowOf($)])
+  return !cfg.isHandoffs ? 0 : bandCount(records, segment(session.repo), session.kept.sessionId, now)
 }
 
 export async function setHandoffsOn($: $, isOn: boolean): Promise<void> {

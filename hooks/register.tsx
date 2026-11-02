@@ -18,10 +18,10 @@ import { ENGINE, asEffort, routeForSpawn } from './routing/routes'
 import { registerRouting, renderRoutesPane, routingBandHead, routingDecide, routingNoteApplied, routingOnSpawn, routingOnTurnStart, routingVerb } from './routing/feature'
 import { handoffsAfterPrompt, handoffsBandCount, handoffsOnFreshContext, handoffsOnOpen, handoffsOnSessionStart, handoffsOnTick, handoffsOnTurnComplete, handoffsOnTurnStart, handoffsOnUserPrompt, handoffsOnWrite, handoffsVerb, registerHandoffs, setAutoHandoff, setHandoffsOn } from './handoffs/feature'
 import { bandView } from './ui/band'
-import { closeContextPane, contextNoteCommand, contextOnSessionStart, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext } from './context/feature'
+import { closeContextPane, contextNoteCommand, contextOnSessionStart, contextOnTurnStart, contextVerb, contextBandPart, holdColdCommand, holdColdPrompt, registerContext, setShowNext } from './context/feature'
 import { COST_TAB_LABEL, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
-import { closeCostPanes, costOnSessionStart, registerCost, registerCostFooter, setCostTab } from './cost/feature'
+import { closeCostPanes, costBandPart, costOnSessionStart, registerCost, registerCostFooter, setCostTab } from './cost/feature'
 
 type $ = EngineInterface
 
@@ -76,10 +76,14 @@ async function showPane($: $, target: Target) {
 const openPane = ($: $): Open => target => void showPane($, target)
 
 async function renderBand($: $, e: Args<'ui.render'>) {
-  const [{ cfg, now, pending }, costs, hp] = await Promise.all([routingBandHead($), spendOf($), healthOf($)])
-  const handoffsOpen = await handoffsBandCount($, cfg)
-  const data = { cfg, now, pending, total: sumUsd(Object.values(costs)), health: hp, handoffsOpen }
-  return bandView($.ui.resolve(e), data, { open: openPane($) })
+  const [head, costs, health, handoffsOpen] = await Promise.all([routingBandHead($), spendOf($), healthOf($), handoffsBandCount($)])
+  const parts = {
+    head,
+    context: contextBandPart(head.cfg, health),
+    cost: costBandPart(head.cfg, health, sumUsd(Object.values(costs))),
+    handoffsOpen,
+  }
+  return bandView($.ui.resolve(e), parts, { open: openPane($) })
 }
 
 /** Counts a finished request, and for the main loop puts the route and the band's facts up to date. */
@@ -396,13 +400,16 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const [card, isShown] = await Promise.all([learnBandCard($, e), isBandShownOf($)])
-    const below = isShown ? await renderBand($, e) : await next(e)
-    if (card === null) return below
+    if (card === null && !isShown) return next(e)
+    const band = isShown ? await renderBand($, e) : null
+    // What other plugins draw there stays below ours; a failure of theirs does not take ours down.
+    const others = await next(e).catch(() => undefined)
     const { Box } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
         {card}
-        {below}
+        {band}
+        {others}
       </Box>
     )
   })

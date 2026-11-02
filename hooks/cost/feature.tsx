@@ -1,12 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, On } from 'claude-code'
 
-import type { CostTab } from '../../types'
+import type { CostTab, Health, RouterConfig } from '../../types'
 import { todayUsd } from '../core/ledger'
 import { allRecords } from '../core/measure'
 import { closePanes, raisePane } from '../core/panes'
 import { session } from '../core/session'
 import { STORE, configOf, promptCostOf, save, spendOf } from '../core/state'
+import type { CostPart } from '../ui/band'
 import { OLD_COST_IDS, PANES } from '../ui/kit'
 import { costPaneView } from './cost-pane'
 import { statsFooterView } from './stats'
@@ -52,6 +53,13 @@ export function registerCostFooter(on: On): void {
 
 export async function closeCostPanes($: $): Promise<void> {
   await closePanes($, [PANES.cost.id, ...OLD_COST_IDS])
+}
+
+/** The band's money and plan limits, and the Cost button; `undefined` while this feature is off. */
+export function costBandPart(cfg: RouterConfig, health: Health | null, total: number): CostPart | null | undefined {
+  if (!cfg.isCost) return undefined
+  if (health === null) return null
+  return { last: health.last, total, fiveHour: health.fiveHour, sevenDay: health.sevenDay }
 }
 
 export async function costOnSessionStart($: $, scope: unknown): Promise<void> {

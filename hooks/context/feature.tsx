@@ -1,6 +1,6 @@
 import type { Args, EngineInterface, On } from 'claude-code'
 
-import type { ColdGuard, RouterConfig } from '../../types'
+import type { ColdGuard, Health, RouterConfig } from '../../types'
 import { offText } from '../core/config'
 import { plural, printable } from '../core/format'
 import { GUARD_MIN_TOKENS } from '../core/pricing'
@@ -15,6 +15,7 @@ import { adviseSession } from '../core/strategy'
 import { messagesOf, tokensByServer } from '../core/tips'
 import type { TipAction } from '../core/tips'
 import { awayOptions, awayText } from '../learn/lessons'
+import type { ContextPart } from '../ui/band'
 import { PANES } from '../ui/kit'
 import { contextMobileView, contextPaneView } from './context-pane'
 
@@ -126,6 +127,14 @@ export function registerContext(on: On): void {
 
 export async function closeContextPane($: $): Promise<void> {
   await closePanes($, [PANES.context.id])
+}
+
+/** The band's cache and context, and the advice button; `undefined` while this feature is off. */
+export function contextBandPart(cfg: RouterConfig, health: Health | null): ContextPart | null | undefined {
+  if (!cfg.isContext) return undefined
+  if (health === null) return null
+  const { cache, warmMinutes, coldUsd, ctx, ctxLevel, advice } = health
+  return { cache, warmMinutes, coldUsd, ctx, ctxLevel, advice }
 }
 
 export function contextOnSessionStart(learned: unknown): void {
