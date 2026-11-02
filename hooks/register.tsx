@@ -19,7 +19,7 @@ import { ENGINE, asEffort, routeForSpawn } from './routing/routes'
 import { registerRouting, renderRoutesPane, routingBandHead, routingDecide, routingNoteApplied, routingOnSpawn, routingOnTurnStart, routingVerb } from './routing/feature'
 import { handoffsAfterPrompt, handoffsBand, handoffsOnFreshContext, handoffsOnOpen, handoffsOnSessionStart, handoffsOnTick, handoffsOnTurnComplete, handoffsOnTurnStart, handoffsOnUserPrompt, handoffsOnWrite, handoffsVerb, registerHandoffs, setAutoHandoff } from './handoffs/feature'
 import { bandView, warmLineView } from './ui/band'
-import { closeContextPane, startWarm, contextBand, contextNoteCommand, contextOnSessionStart, contextOnTick, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext, stopWarm, warmBand } from './context/feature'
+import { closeContextPane, contextBand, contextOnUserInput, contextNoteCommand, contextOnSessionStart, contextOnTick, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext, startWarmWithToast, stopWarm, warmBand } from './context/feature'
 import { COST_TABS, COST_TAB_LABEL, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
 import { closeCostPanes, costBand, costOnSessionStart, registerCost, registerCostFooter, setCostTab } from './cost/feature'
@@ -80,21 +80,17 @@ const openPane = ($: $): Open => target => void showPane($, target)
 
 async function renderBand($: $, e: Args<'ui.render'>) {
   const [head, costs, health, handoffs, run, now] = await Promise.all([routingBandHead($), spendOf($), healthOf($), handoffsBand($), warmRunOf($), nowOf($)])
-  const stop = () => void stopWarm($, 'stop')
+  const stop = () => void stopWarm($).catch(() => undefined)
   const parts = [handoffs, contextBand(head.cfg, health), warmBand(head.cfg, run, now, stop), costBand(head.cfg, health, sumUsd(Object.values(costs)))]
   return bandView($.ui.resolve(e), { head, parts: parts.filter(one => one !== undefined) }, { open: openPane($) })
 }
 
-/** A pane button has nowhere to answer, so a start that can't help says why in a toast. */
-async function startWarmFromPane($: $) {
-  const { isStarted, text } = await startWarm($, (await configOf($)).warmHours)
-  if (!isStarted) $.ui.toast(text)
-}
-
 /** A keep-warm run spends while it runs, so with the band hidden it still gets a line of its own. */
 async function renderWarmLine($: $, e: Args<'ui.render'>) {
-  const [cfg, run, now] = await Promise.all([configOf($), warmRunOf($), nowOf($)])
-  const part = warmBand(cfg, run, now, () => void stopWarm($, 'stop'))
+  const run = await warmRunOf($)
+  if (run === null) return null
+  const [cfg, now] = await Promise.all([configOf($), nowOf($)])
+  const part = warmBand(cfg, run, now, () => void stopWarm($).catch(() => undefined))
   return part === undefined ? null : warmLineView($.ui.resolve(e), part, { open: openPane($) })
 }
 
@@ -109,7 +105,7 @@ async function afterStep($: $, agentId: string | undefined, key: string, s: Step
 async function afterSwitchOff($: $, f: Feature) {
   if (f === 'learn') await learnSwitchedOff($)
   if (f === 'cost') await closeCostPanes($)
-  if (f === 'context') await Promise.all([closeContextPane($), stopWarm($, 'off')])
+  if (f === 'context') await Promise.all([closeContextPane($), stopWarm($)])
 }
 
 async function switchFeature($: $, f: Feature, isOn: boolean) {
@@ -263,7 +259,7 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     let resumeText: string | undefined
     if (e.turnId === undefined) {
-      if (USER_ORIGINS.has(e.origin.kind)) await stopWarm($, 'back')
+      await contextOnUserInput($, e.origin.kind)
       const cfg = await configOf($)
       const held = await holdColdPrompt($, cfg, e, guardWhy(cfg))
       if (held !== undefined) return held
@@ -287,7 +283,7 @@ export const register: Register = on => {
   on('command.run', async ($, e, next) => {
     if (e.origin.kind === 'plugin' || e.command === 'route') return next(e)
     await noteCommand($, e.command).catch(() => undefined)
-    if (USER_ORIGINS.has(e.origin.kind)) await stopWarm($, 'back')
+    await contextOnUserInput($, e.origin.kind)
     const cfg = await configOf($)
     const held = await holdColdCommand($, cfg, e, guardWhy(cfg))
     if (held !== undefined) return held
@@ -401,7 +397,7 @@ export const register: Register = on => {
       setGuard: (mode: ColdGuard) => void setConfigAndRefresh($, c => ({ ...c, coldGuard: mode })),
       setTtl: minutes => void setConfigAndRefresh($, c => ({ ...c, cacheTtlMinutes: minutes })),
       setWarmHours: hours => void setConfigAndRefresh($, c => ({ ...c, warmHours: hours })),
-      setWarm: isOn => void (isOn ? startWarmFromPane($) : stopWarm($, 'stop')).catch(() => undefined),
+      setWarm: isOn => void (isOn ? startWarmWithToast($) : stopWarm($)).catch(() => undefined),
       setKeepText: keep => void setKeepText($, keep),
       openHandoffs: () => openPane($)('handoffs'),
     }),

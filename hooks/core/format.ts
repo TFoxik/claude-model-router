@@ -23,6 +23,12 @@ export function fmtAge(ms: number): string {
   return h > 0 ? `${h}h${String(minutes % 60).padStart(2, '0')}m` : `${minutes}m`
 }
 
+/** Time until a deadline, rounded up to the minute: `2h 40m left`. */
+export function fmtLeft(ms: number): string {
+  const m = Math.max(0, Math.ceil(ms / 60_000))
+  return `${Math.floor(m / 60)}h ${m % 60}m left`
+}
+
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 /** The `version` of a plugin.json, when it is a plain semver one: anything else is never shown. */

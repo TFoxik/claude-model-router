@@ -44,6 +44,9 @@ export type Usage = {
 
 export const DEFAULT_TTL = 60
 
+/** Keep-warm only pays on the 60-minute cache: on the 5-minute one a ping every few minutes costs more than the rewrite. */
+export const KEEP_WARM_TTL = 60
+
 /** Cache writes cost 2x input with the 1-hour TTL Claude Code uses, 1.25x with the 5-minute one. */
 function writePrice(p: ModelInfo, ttlMinutes = DEFAULT_TTL): number {
   return p.input * (ttlMinutes >= 60 ? 2 : 1.25)

@@ -3,7 +3,7 @@ import { contextLevel } from '../core/pricing'
 import { contextTips, tokensByServer } from '../core/tips'
 import type { Breakdown, Tip, TipAction } from '../core/tips'
 import type { Advice } from '../core/strategy'
-import type { Away } from '../learn/lessons'
+import type { Away, AwayRow } from '../learn/lessons'
 import { bulletSection, tipsSection } from '../ui/kit'
 import type { Els } from '../ui/kit'
 
@@ -54,8 +54,8 @@ function stackedCells(segments: readonly Segment[], whole: number, width: number
 /** `/route away` as a section: the ways to step away from this session, each priced now and on return. */
 function awaySection(els: Els, away: Away, warm: WarmOffer | undefined, actions: ContextActions | undefined) {
   const { Text, Button } = els
-  const warmButton = (name: string) =>
-    name !== 'Keep warm' || warm === undefined || actions === undefined ? null : warm === 'running' ? (
+  const warmButton = (act: AwayRow['act']) =>
+    act !== 'warm' || warm === undefined || actions === undefined ? null : warm === 'running' ? (
       <Button key="warm-stop-pane" label="Stop" onPress={actions.stopWarm} />
     ) : (
       <Button key="warm-start" label="Keep warm" onPress={actions.startWarm} />
@@ -69,7 +69,7 @@ function awaySection(els: Els, away: Away, warm: WarmOffer | undefined, actions:
         {` ${[one.now, one.back].filter(Boolean).map(squeeze).join(' · ')}`}
       </Text>,
       <Text key="how" dimColor wrap="wrap">{one.how}</Text>,
-      warmButton(one.name),
+      warmButton(one.act),
     ],
   }))
   return bulletSection(els, { title: 'BEFORE A BREAK', color: 'claude', lead: away.header, items, tail: away.notes })

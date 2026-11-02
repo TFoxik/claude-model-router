@@ -20,7 +20,7 @@ import type { BandPart } from '../ui/band'
 import { contextBandPart, warmBandPart } from './band-part'
 import { PANES } from '../ui/kit'
 import { contextMobileView, contextPaneView } from './context-pane'
-import { FORK_TIMEOUT_MS, WARM_PROMPT, parseWarmHours, shouldPing } from './warm'
+import { FORK_TIMEOUT_MS, PING_AT_MINUTES, WARM_PROMPT, parseWarmHours, warmBlock } from './warm'
 
 type $ = EngineInterface
 
@@ -112,12 +112,12 @@ async function renderContextPane($: $, e: Args<'ui.render'>) {
   const tokens = listingTokens(b?.skills?.skillFrontmatter ?? [])
   const tips = [...idleTips(idle, withServerNames(loaded.names, servers), tokensByServer(servers), { root: session.root, tokens }), ...skillTips(idle, only, loaded.own, session.root, tokens), ...claudeAiTips(idle, loaded.syncedCount, tokens)]
   const run = await warmRunOf($)
-  const warm = run !== null ? 'running' : facts !== undefined && facts.warmMinutes > 0 && cfg.cacheTtlMinutes === 60 ? 'offer' : undefined
+  const warm = run !== null ? 'running' : facts !== undefined && warmBlock(cfg, facts.warmMinutes) === undefined ? 'offer' : undefined
   const data = { breakdown: b, isTerminal: e.surface === 'terminal', columns, advice: advice || undefined, explored: session.explored, unused: tips, away, warm } as const
   const fill = (text: string) => void $.prompt.fill({ text, mode: 'replace' }).catch(() => undefined)
   // A menu such as /mcp opens as if typed; where the engine refuses, it is left in the prompt instead.
   const act = (action: TipAction) => (action.isSlash ? void $.command.run({ command: action.command }).catch(() => fill(`/${action.command}`)) : fill(action.command))
-  return contextPaneView($.ui.resolve(e), data, { act, startWarm: () => void startWarm($, cfg.warmHours), stopWarm: () => void stopWarm($, 'stop') })
+  return contextPaneView($.ui.resolve(e), data, { act, startWarm: () => void startWarmWithToast($).catch(() => undefined), stopWarm: () => void stopWarm($).catch(() => undefined) })
 }
 
 const GUARD_TEXT: Record<ColdGuard, string> = {
@@ -213,33 +213,49 @@ const WARM_USAGE = 'Usage: /route warm [1-6h] (keep the cache warm while you are
 
 async function warmVerb($: $, rest: string[]): Promise<string> {
   if (rest[0] === 'stop' && rest.length === 1) {
-    const run = await warmRunOf($)
-    if (run === null) return "Keep warm isn't running."
-    await stopWarm($, 'stop')
-    return `Keep warm stopped (${plural(run.pings, 'ping')}, ${money(run.usd)}).`
+    const run = await stopWarm($)
+    return run === null ? "Keep warm isn't running." : `Keep warm stopped (${plural(run.pings, 'ping')}, ${money(run.usd)}).`
   }
   if (rest.length > 1) return WARM_USAGE
-  const hours = parseWarmHours(rest[0], (await configOf($)).warmHours)
-  return hours === 'invalid' ? WARM_USAGE : (await startWarm($, hours)).text
+  const hours = rest[0] === undefined ? (await configOf($)).warmHours : parseWarmHours(rest[0])
+  return hours === undefined ? WARM_USAGE : (await startWarm($, hours)).text
 }
 
 /** Starts a run, or says why it can't help: Context off, the 5-minute cache, or a cache already cold. */
 export async function startWarm($: $, hours: number): Promise<{ isStarted: boolean; text: string }> {
   const [cfg, last, now] = await Promise.all([configOf($), lastUsageOf($), nowOf($)])
-  if (!cfg.isContext) return { isStarted: false, text: offText('context') }
-  if (cfg.cacheTtlMinutes !== 60) return { isStarted: false, text: 'Keep warm needs the 60-minute cache: /route ttl 60.' }
-  if (last === null || warmMinutesLeft(last.at, now, cfg.cacheTtlMinutes) === 0) return { isStarted: false, text: "Keep warm can't help: the cache is already cold." }
-  await setWarmRun($, () => ({ startedAt: now, until: now + hours * 3_600_000, usd: 0, pings: 0 }))
+  const why = warmBlock(cfg, last === null ? 0 : warmMinutesLeft(last.at, now, cfg.cacheTtlMinutes))
+  if (why !== undefined) return { isStarted: false, text: START_BLOCKED[why] }
+  await setWarmRun($, () => ({ until: now + hours * 3_600_000, usd: 0, pings: 0 }))
   return { isStarted: true, text: `Keeping the cache warm for up to ${hours} h; it stops when you send anything.` }
+}
+
+const START_BLOCKED = {
+  off: offText('context'),
+  ttl: 'Keep warm needs the 60-minute cache: /route ttl 60.',
+  cold: "Keep warm can't help: the cache is already cold.",
+} as const
+
+/** A button has nowhere to answer, so a start that can't help says why in a toast. */
+export async function startWarmWithToast($: $): Promise<void> {
+  const { isStarted, text } = await startWarm($, (await configOf($)).warmHours)
+  if (!isStarted) $.ui.toast(text)
 }
 
 const STOP_WHY = { ceiling: 'it reached its limit', cold: 'the cache went cold anyway', ttl: 'the cache lifetime is 5 minutes now' } as const
 
-export async function stopWarm($: $, why: 'back' | 'stop' | 'off' | keyof typeof STOP_WHY): Promise<void> {
+/** Ends the run, if any, and returns it; a stop the person didn't ask for is logged with what the run cost. */
+export async function stopWarm($: $, why?: keyof typeof STOP_WHY): Promise<WarmRun | null> {
   const run = await warmRunOf($)
-  if (run === null) return
+  if (run === null) return null
   await setWarmRun($, () => null)
-  if (why === 'ceiling' || why === 'cold' || why === 'ttl') $.ui.log(`model-router: keep-warm stopped: ${STOP_WHY[why]}; ${plural(run.pings, 'ping')} cost ${money(run.usd)}.`)
+  if (why !== undefined) $.ui.log(`model-router: keep-warm stopped: ${STOP_WHY[why]}; ${plural(run.pings, 'ping')} cost ${money(run.usd)}.`)
+  return run
+}
+
+/** A person's prompt or command ends a run before it goes out, so it finds the cache warm. */
+export async function contextOnUserInput($: $, origin: string): Promise<void> {
+  if (USER_ORIGINS.has(origin)) await stopWarm($)
 }
 
 /** On each status tick: ends a run at its limit or on a cold cache, and pings when the cache is in its last minutes. */
@@ -247,12 +263,13 @@ export async function contextOnTick($: $, tick: HealthTick): Promise<void> {
   const run = tick.warmRun
   if (run === null) return
   const now = await nowOf($)
-  if (!tick.cfg.isContext) return stopWarm($, 'off')
-  if (tick.cfg.cacheTtlMinutes !== 60) return stopWarm($, 'ttl')
-  if (now >= run.until) return stopWarm($, 'ceiling')
-  if (tick.warmMinutes === 0) return stopWarm($, 'cold')
+  const why = warmBlock(tick.cfg, tick.warmMinutes) ?? (now >= run.until ? 'ceiling' : undefined)
+  if (why !== undefined) {
+    await stopWarm($, why === 'off' ? undefined : why)
+    return
+  }
   // Claimed with no await after the check, so a refresh running alongside can't send a second fork.
-  if (session.isPinging || session.isTurnRunning || !shouldPing(run, tick.warmMinutes, now)) return
+  if (session.isPinging || session.isTurnRunning || tick.warmMinutes > PING_AT_MINUTES) return
   session.isPinging = true
   try {
     // The tick's copy of the run may predate a Stop or a prompt.

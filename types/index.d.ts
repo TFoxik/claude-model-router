@@ -26,7 +26,7 @@ export type RouterConfig = {
 }
 export type WarmHours = 1 | 2 | 4 | 6
 /** A keep-warm run: when it started, when it stops at the latest, and what its pings cost so far. */
-export type WarmRun = { startedAt: number; until: number; usd: number; pings: number }
+export type WarmRun = { until: number; usd: number; pings: number }
 export type ColdGuard = 'refuse' | 'warn' | 'off'
 export type Scope = 'repo' | 'all'
 

@@ -1,7 +1,7 @@
 import type { Effort, Health, LearnCard, Lesson, LessonKind, PromptCost, PromptItem, Rewrite } from '../../types'
 import type { Advice } from '../core/strategy'
 import { fmtAge, kTokens, money, plural, printable } from '../core/format'
-import { GUARD_MIN_TOKENS, MODELS, PRICES_AS_OF, costOf, labelOf, modelKeyOf, rewritePrice } from '../core/pricing'
+import { GUARD_MIN_TOKENS, KEEP_WARM_TTL, MODELS, PRICES_AS_OF, costOf, labelOf, modelKeyOf, rewritePrice } from '../core/pricing'
 import { isSub, sumUsd } from '../core/ledger'
 import { isLessonKind } from '../core/config'
 import { ENGINE, FORK, isRouteKey, routeText } from '../routing/routes'
@@ -292,7 +292,8 @@ const SUMMARY_TOKENS = 4_000
 
 export type AwayFacts = { tokens: number; model: string; ttlMinutes: number; warmMinutes: number }
 
-export type AwayRow = { name: string; now: string; back: string; how: string }
+/** `act`: the row's own button in the Context pane. */
+export type AwayRow = { name: string; now: string; back: string; how: string; act?: 'warm' }
 
 /** One way to step away per row; none when the cache is cold or the model has no prices, which `header` and `notes` then explain. */
 export type Away = { header: string; rows: readonly AwayRow[]; notes: readonly string[] }
@@ -324,8 +325,8 @@ export function awayOptions(f: AwayFacts): Away {
         how: 'Say what to keep: /compact keep the plan, open TODOs and touched files. Only while warm: cold, it reads everything at full price.',
       },
       { name: '/rename, /resume', now: 'now   $0.00', back: 'on return: summary', how: 'On Pro and Max, /resume of a big session offers to continue from a summary.' },
-      f.ttlMinutes === 60
-        ? { name: 'Keep warm', now: `${money(warm)} an hour`, back: '', how: 'An idle ping before each expiry, until you send anything or the limit in Settings; pays off for a few hours, not overnight.' }
+      f.ttlMinutes === KEEP_WARM_TTL
+        ? { name: 'Keep warm', act: 'warm', now: `${money(warm)} an hour`, back: '', how: 'An idle ping before each expiry, until you send anything or the limit in Settings; pays off for a few hours, not overnight.' }
         : { name: 'Keep warm', now: 'needs the 60-min cache', back: '', how: '/route ttl 60 first; on the 5-minute cache a ping every few minutes costs more than the rewrite.' },
       { name: 'Do nothing', now: 'now   $0.00', back: `on return   ${money(write)}`, how: 'The first send re-writes the whole context.' },
     ],

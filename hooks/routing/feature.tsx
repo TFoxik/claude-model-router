@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, On } from 'claude-code'
 
 import type { ActiveRoute, ColdGuard, Effort, RouterConfig, WarmHours } from '../../types'
+import { fmtLeft } from '../core/format'
 import { sumUsd } from '../core/ledger'
 import { mainRoute, routeKeyOfAgent, setConfig, setPlan } from '../core/measure'
 import { session } from '../core/session'
@@ -90,7 +91,7 @@ export async function renderRoutesPane($: $, e: Args<'ui.render'>, links: Routes
     nowOf($),
   ])
   const sessionModel = now?.model ?? (await $.session.model())
-  const data = { cfg, total: sumUsd(Object.values(costs)), now, isPlanning, pending, lastPrompt, contextTokens: usage.context.tokens ?? 0, sessionModel, isBand, warmLeftMinutes: run === null ? undefined : Math.max(0, Math.ceil((run.until - at) / 60_000)) }
+  const data = { cfg, total: sumUsd(Object.values(costs)), now, isPlanning, pending, lastPrompt, contextTokens: usage.context.tokens ?? 0, sessionModel, isBand, warmLeft: run === null ? undefined : fmtLeft(run.until - at) }
   return routesPaneView(els, data, {
     editDraft: fn =>
       void update($, draft, d => {

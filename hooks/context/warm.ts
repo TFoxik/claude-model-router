@@ -1,5 +1,6 @@
-import type { WarmHours, WarmRun } from '../../types'
+import type { RouterConfig } from '../../types'
 import { WARM_HOURS } from '../core/config'
+import { KEEP_WARM_TTL } from '../core/pricing'
 
 /** One word back keeps the fork's output, and its price, near zero. */
 export const WARM_PROMPT = 'Reply with OK.'
@@ -9,13 +10,13 @@ export const PING_AT_MINUTES = 6
 
 export const FORK_TIMEOUT_MS = 2 * 60_000
 
-export function shouldPing(run: WarmRun | null, warmMinutes: number, now: number): boolean {
-  return run !== null && now < run.until && warmMinutes > 0 && warmMinutes <= PING_AT_MINUTES
+/** Why keep-warm can't help now, or undefined when it can. */
+export function warmBlock(cfg: RouterConfig, warmMinutes: number): 'off' | 'ttl' | 'cold' | undefined {
+  return !cfg.isContext ? 'off' : cfg.cacheTtlMinutes !== KEEP_WARM_TTL ? 'ttl' : warmMinutes === 0 ? 'cold' : undefined
 }
 
-/** `2h` or `2` as a ceiling within the picker's range; no word is the setting. */
-export function parseWarmHours(word: string | undefined, fallback: WarmHours): number | 'invalid' {
-  if (word === undefined) return fallback
+/** `2h` or `2` as a ceiling within the picker's range. */
+export function parseWarmHours(word: string): number | undefined {
   const hours = Number(word.replace(/h$/, ''))
-  return Number.isInteger(hours) && hours >= 1 && hours <= Math.max(...WARM_HOURS) ? hours : 'invalid'
+  return Number.isInteger(hours) && hours >= 1 && hours <= Math.max(...WARM_HOURS) ? hours : undefined
 }
