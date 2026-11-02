@@ -1,5 +1,11 @@
 # Release notes
 
+## Unreleased
+
+### Added
+
+- **Keep the cache warm while you step away.** **Keep warm** in the Context pane's Before a break box, or `/route warm`, sends one tiny ping about six minutes before each expiry, so you come back to a warm cache instead of paying to re-write the whole context. It re-sends the session's last request from the cache with `Reply with OK.`, adds nothing to the conversation and can't run a tool. It stops when you send anything, after 4 hours (set 1, 2, 4 or 6 in Routes › Keep warm for at most, or `/route warm 2h` once), with **Stop warm** in the band, or if the cache goes cold anyway. While it runs the band shows `warm ●` with the time left and what the pings have cost, and auto-handoff waits. On the 60-minute cache only; on the 5-minute cache a ping every few minutes costs more than the rewrite.
+
 ## 1.8.0 — 2026-11-02
 
 ### Added

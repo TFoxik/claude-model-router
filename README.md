@@ -85,6 +85,7 @@ Then restart or run `/reload-plugins`. Saved settings carry over. See [CHANGELOG
 | `/route handoffs` / `handoffs on\|off` | Open the Handoffs pane: open handoffs to resume, mark done or not relevant / turn handoffs on or off: the band's count and auto-handoff (default on) |
 | `/route handoffs auto on\|off` | Save a handoff while the cache is still warm, before it goes cold with work open (default off) |
 | `/route away` | Before a break: the ways to step away, priced for this session; also in the Context pane |
+| `/route warm [<n>h]` / `warm stop` | Keep the prompt cache warm while you are away: one tiny ping before each expiry, until you send anything or after `<n>` hours (default 4, at most 6; the Routes pane's **Keep warm for at most**); 60-minute cache only. Also the **Keep warm** button in the Context pane's Before a break box |
 | `/route unused` | MCP servers, plugins and skills this repo has long left unused, and the command that turns each off |
 | `/route guard refuse\|warn\|off` | What a send onto a cold cache does (default `refuse`: held once with its price); also the Routes pane's **Cold-cache guard** row |
 | `/route ttl 5\|60` | Prompt-cache lifetime for the warm/cold timer (default 60); also the Routes pane's **Cache lifetime** row |
@@ -102,9 +103,10 @@ Routes: `main`, `plan`, `sub:*`, `sub:<agent-type>` (such as `sub:Explore`), `wo
 ## Overhead and privacy
 
 - **No tokens added**: no system prompt or attachments. Toasts, the band and the panes stay in the UI.
-- **Two optional model calls**, both off unless you pick them:
+- **Three optional model calls**, all off unless you pick them:
   - `auto` effort (presets `balanced` and `frugal`) sends the first 4,000 characters of each prompt you type to Haiku to classify it, about $0.0001 and a few hundred milliseconds. Fixed efforts make no call.
   - Auto-handoff (`/route handoffs auto on`) sends one prompt asking for a handoff, at most once per prompt, when the cache is about to go cold with work open. It is a normal turn: it reads the context at the warm cache price and pays for the handoff it writes.
+  - Keep warm (`/route warm`, or its button) sends `Reply with OK.` after the session's own last request, from the cache, about once an hour until you send anything or its limit runs out. It adds nothing to the conversation and every tool is denied in it. Each ping is a cache read of the whole context, billed to you (on a subscription it counts against your limits), and the band shows the run with what it has cost.
 - **Stored locally** in the plugin store, across repos: prompt history for Cost › History (the first 120 characters of each prompt, repo name, cost, models; last 2,000 prompts), learn mode lessons (numbers and model names, never prompt text; last 20 per topic, kept to count how often each topic was shown), handoff records (path, title, a line or two of what it is about, status), per repo which MCP servers, plugins, personal skills and claude.ai skills were loaded and used (names, counts and dates, never tool arguments), and the name behind each connector id the desktop app uses.
 - **Files: it writes only under `~/.claude/handoffs/`.** It lists and reads the handoffs there and, with auto-handoff on, writes new ones. It also reads the `.md.closed` markers other tools may leave beside a handoff, to show it as done. It never writes, edits or deletes a file it didn't write.
 - **Other reads.** It lists `~/.claude/skills` and `~/.claude/commands` and reads `~/.agents/.skill-lock.json`, to know your personal skills and where the `skills` CLI installed them from. It never reads your transcripts.
