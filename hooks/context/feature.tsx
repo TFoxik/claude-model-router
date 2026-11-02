@@ -1,6 +1,6 @@
 import type { Args, EngineInterface, On } from 'claude-code'
 
-import type { ColdGuard, Health, RouterConfig } from '../../types'
+import type { ColdGuard, Health, RouterConfig, WarmRun } from '../../types'
 import { offText } from '../core/config'
 import { money, plural, printable } from '../core/format'
 import { GUARD_MIN_TOKENS, warmMinutesLeft } from '../core/pricing'
@@ -17,7 +17,7 @@ import { messagesOf, tokensByServer } from '../core/tips'
 import type { TipAction } from '../core/tips'
 import { awayOptions, awayText } from '../learn/lessons'
 import type { BandPart } from '../ui/band'
-import { contextBandPart } from './band-part'
+import { contextBandPart, warmBandPart } from './band-part'
 import { PANES } from '../ui/kit'
 import { contextMobileView, contextPaneView } from './context-pane'
 import { WARM_PROMPT, parseWarmHours, shouldPing } from './warm'
@@ -111,11 +111,13 @@ async function renderContextPane($: $, e: Args<'ui.render'>) {
   const away = facts && awayOptions(facts)
   const tokens = listingTokens(b?.skills?.skillFrontmatter ?? [])
   const tips = [...idleTips(idle, withServerNames(loaded.names, servers), tokensByServer(servers), { root: session.root, tokens }), ...skillTips(idle, only, loaded.own, session.root, tokens), ...claudeAiTips(idle, loaded.syncedCount, tokens)]
-  const data = { breakdown: b, isTerminal: e.surface === 'terminal', columns, advice: advice || undefined, explored: session.explored, unused: tips, away }
+  const run = await warmRunOf($)
+  const warm = run !== null ? 'running' : facts !== undefined && facts.warmMinutes > 0 && cfg.cacheTtlMinutes === 60 ? 'offer' : undefined
+  const data = { breakdown: b, isTerminal: e.surface === 'terminal', columns, advice: advice || undefined, explored: session.explored, unused: tips, away, warm } as const
   const fill = (text: string) => void $.prompt.fill({ text, mode: 'replace' }).catch(() => undefined)
   // A menu such as /mcp opens as if typed; where the engine refuses, it is left in the prompt instead.
   const act = (action: TipAction) => (action.isSlash ? void $.command.run({ command: action.command }).catch(() => fill(`/${action.command}`)) : fill(action.command))
-  return contextPaneView($.ui.resolve(e), data, { act })
+  return contextPaneView($.ui.resolve(e), data, { act, startWarm: () => void startWarm($, cfg.warmHours), stopWarm: () => void stopWarm($, 'stop') })
 }
 
 const GUARD_TEXT: Record<ColdGuard, string> = {
@@ -134,6 +136,10 @@ export async function closeContextPane($: $): Promise<void> {
 
 export function contextBand(cfg: RouterConfig, health: Health | null): BandPart | undefined {
   return cfg.isContext ? contextBandPart(health) : undefined
+}
+
+export function warmBand(cfg: RouterConfig, run: WarmRun | null, now: number, stop: () => void): BandPart | undefined {
+  return cfg.isContext && run !== null ? warmBandPart(run, now, stop) : undefined
 }
 
 export function contextOnSessionStart(learned: unknown): void {

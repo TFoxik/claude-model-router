@@ -11,7 +11,7 @@ import type { StepOutcome } from './core/measure'
 import { hasHandoffCommand, isCorrection } from './core/signals'
 import { raisePane } from './core/panes'
 import { session } from './core/session'
-import { STORE, UNREADABLE, carriedOf, carry, configOf, healthOf, initBand, initConfig, initHistory, isBandShownOf, lastUsageOf, load, nowOf, save, setBand, setHistory, spendOf, updatePromptCost, writeConfig } from './core/state'
+import { STORE, UNREADABLE, carriedOf, carry, configOf, healthOf, initBand, initConfig, initHistory, isBandShownOf, lastUsageOf, load, nowOf, save, setBand, setHistory, spendOf, updatePromptCost, warmRunOf, writeConfig } from './core/state'
 import { pushLesson, takeUrgent } from './learn/drafts'
 import { closeOldLearnPane, guardWhy, learnBandCard, learnOnSessionStart, learnSwitchedOff, learnVerb, flushLessons, clearCard, teach } from './learn/feature'
 import { lessonFromCompact } from './learn/lessons'
@@ -19,7 +19,7 @@ import { ENGINE, asEffort, routeForSpawn } from './routing/routes'
 import { registerRouting, renderRoutesPane, routingBandHead, routingDecide, routingNoteApplied, routingOnSpawn, routingOnTurnStart, routingVerb } from './routing/feature'
 import { handoffsAfterPrompt, handoffsBand, handoffsOnFreshContext, handoffsOnOpen, handoffsOnSessionStart, handoffsOnTick, handoffsOnTurnComplete, handoffsOnTurnStart, handoffsOnUserPrompt, handoffsOnWrite, handoffsVerb, registerHandoffs, setAutoHandoff } from './handoffs/feature'
 import { bandView } from './ui/band'
-import { closeContextPane, contextBand, contextNoteCommand, contextOnSessionStart, contextOnTick, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext, stopWarm } from './context/feature'
+import { closeContextPane, contextBand, contextNoteCommand, contextOnSessionStart, contextOnTick, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext, stopWarm, warmBand } from './context/feature'
 import { COST_TABS, COST_TAB_LABEL, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
 import { closeCostPanes, costBand, costOnSessionStart, registerCost, registerCostFooter, setCostTab } from './cost/feature'
@@ -79,8 +79,9 @@ async function showPane($: $, target: Target) {
 const openPane = ($: $): Open => target => void showPane($, target)
 
 async function renderBand($: $, e: Args<'ui.render'>) {
-  const [head, costs, health, handoffs] = await Promise.all([routingBandHead($), spendOf($), healthOf($), handoffsBand($)])
-  const parts = [handoffs, contextBand(head.cfg, health), costBand(head.cfg, health, sumUsd(Object.values(costs)))]
+  const [head, costs, health, handoffs, run, now] = await Promise.all([routingBandHead($), spendOf($), healthOf($), handoffsBand($), warmRunOf($), nowOf($)])
+  const stop = () => void stopWarm($, 'stop')
+  const parts = [handoffs, contextBand(head.cfg, health), warmBand(head.cfg, run, now, stop), costBand(head.cfg, health, sumUsd(Object.values(costs)))]
   return bandView($.ui.resolve(e), { head, parts: parts.filter(one => one !== undefined) }, { open: openPane($) })
 }
 
@@ -384,6 +385,7 @@ export const register: Register = on => {
       setContext: isOn => void switchFeature($, 'context', isOn),
       setGuard: (mode: ColdGuard) => void setConfigAndRefresh($, c => ({ ...c, coldGuard: mode })),
       setTtl: minutes => void setConfigAndRefresh($, c => ({ ...c, cacheTtlMinutes: minutes })),
+      setWarmHours: hours => void setConfigAndRefresh($, c => ({ ...c, warmHours: hours })),
       setKeepText: keep => void setKeepText($, keep),
       openHandoffs: () => openPane($)('handoffs'),
     }),

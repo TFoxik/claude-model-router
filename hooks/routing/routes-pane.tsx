@@ -1,7 +1,7 @@
 
 import type { RenderChildren } from 'claude-code'
 
-import type { ActiveRoute, ColdGuard, PromptCost, RouteSetting, RouterConfig } from '../../types'
+import type { ActiveRoute, ColdGuard, PromptCost, RouterConfig, RouteSetting, WarmHours } from '../../types'
 import {
   kTokens,
   money,
@@ -16,10 +16,7 @@ import {
 import {
   subagentCount,
 } from '../core/ledger'
-import {
-  CACHE_TTLS,
-  GUARDS,
-} from '../core/config'
+import { CACHE_TTLS, GUARDS, WARM_HOURS, featureOf } from '../core/config'
 import {
   PRESETS,
   ROUTES,
@@ -31,7 +28,6 @@ import {
   withPreset,
   withRoute,
 } from './routes'
-import { featureOf } from '../core/config'
 import type { Feature } from '../core/config'
 import { colorOf } from '../ui/kit'
 import type { Els } from '../ui/kit'
@@ -93,6 +89,7 @@ type PaneActions = {
   setContext: (isOn: boolean) => void
   setGuard: (mode: ColdGuard) => void
   setTtl: (minutes: number) => void
+  setWarmHours: (hours: WarmHours) => void
   setKeepText: (keep: boolean) => void
   apply: (next: RouterConfig) => void
   discard: () => void
@@ -100,6 +97,8 @@ type PaneActions = {
 
 const GUARD_OPTIONS = GUARDS.map(value => ({ value, label: value }))
 const TTL_OPTIONS = CACHE_TTLS.map(minutes => ({ value: String(minutes), label: `${minutes} min` }))
+
+const WARM_OPTIONS = WARM_HOURS.map(hours => ({ value: String(hours), label: `${hours} h` }))
 const SELECT_W = 12
 
 type Setting = {
@@ -178,6 +177,13 @@ function settingsSection(els: InputEls, { cfg, isBand }: PaneData, a: PaneAction
           name: 'Cache lifetime',
           note: 'the prompt-cache TTL the warm/cold timer counts down',
           controls: select('ttl', TTL_OPTIONS, String(cfg.cacheTtlMinutes), value => a.setTtl(Number(value))),
+        })}
+        {settingRow(els, {
+          key: 'set-warm',
+          name: 'Keep warm for at most',
+          note: 'pings stop after this, or when you send anything; 60-minute cache only',
+          controls: select('warm-hours', WARM_OPTIONS, String(cfg.warmHours), value => a.setWarmHours(Number(value) as WarmHours)),
+          needs: unless(cfg.isContext, 'context'),
         })}
         {settingRow(els, {
           key: 'set-text',

@@ -19,7 +19,7 @@ function bandHead(cfg: RouterConfig, now: ActiveRoute | null): string {
 
 export type BandHead = { cfg: RouterConfig; now: ActiveRoute | null; pending: RouterConfig | null }
 
-export type BandButton = { key: string; label: string; target: Target; look: 'plain' | 'dim' | 'primary' }
+export type BandButton = { key: string; label: string; look: 'plain' | 'dim' | 'primary' } & ({ target: Target } | { press: () => void })
 
 /**
  * `segment` is `null` while nothing is measured yet, which keeps the row so the band does not grow when the first request is counted.
@@ -37,12 +37,14 @@ function healthRowView(els: Els, parts: readonly BandPart[]) {
   return <Text dimColor wrap="truncate-end">{drawn.flatMap((node, i) => (i === 0 ? [node] : [' · ', node]))}</Text>
 }
 
-const buttonView = ({ Button }: Els, b: BandButton, open: Open) =>
-  b.look === 'primary' ? (
-    <Button key={b.key} label={b.label} variant="primary" onPress={() => open(b.target)} />
+const buttonView = ({ Button }: Els, b: BandButton, open: Open) => {
+  const onPress = 'press' in b ? b.press : () => open(b.target)
+  return b.look === 'primary' ? (
+    <Button key={b.key} label={b.label} variant="primary" onPress={onPress} />
   ) : (
-    <Button key={b.key} label={b.label} plain dimColor={b.look === 'dim'} onPress={() => open(b.target)} />
+    <Button key={b.key} label={b.label} plain dimColor={b.look === 'dim'} onPress={onPress} />
   )
+}
 
 /**
  * Every button sits right-aligned on the last row, where a desktop's native button padding can't break the left edge.

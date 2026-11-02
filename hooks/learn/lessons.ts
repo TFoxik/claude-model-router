@@ -324,7 +324,9 @@ export function awayOptions(f: AwayFacts): Away {
         how: 'Say what to keep: /compact keep the plan, open TODOs and touched files. Only while warm: cold, it reads everything at full price.',
       },
       { name: '/rename, /resume', now: 'now   $0.00', back: 'on return: summary', how: 'On Pro and Max, /resume of a big session offers to continue from a summary.' },
-      { name: 'Keep warm', now: `${money(warm * Math.ceil(60 / f.ttlMinutes))} an hour`, back: '', how: 'An idle ping before each expiry; pays off for a few hours, not overnight.' },
+      f.ttlMinutes === 60
+        ? { name: 'Keep warm', now: `${money(warm)} an hour`, back: '', how: 'An idle ping before each expiry, until you send anything or the limit in Settings; pays off for a few hours, not overnight.' }
+        : { name: 'Keep warm', now: 'needs the 60-min cache', back: '', how: '/route ttl 60 first; on the 5-minute cache a ping every few minutes costs more than the rewrite.' },
       { name: 'Do nothing', now: 'now   $0.00', back: `on return   ${money(write)}`, how: 'The first send re-writes the whole context.' },
     ],
     notes: [`Prices as of ${PRICES_AS_OF}, estimates; ≈ also guesses the note (${kTokens(NOTE_TOKENS)}) and summary (${kTokens(SUMMARY_TOKENS)}) sizes.`],

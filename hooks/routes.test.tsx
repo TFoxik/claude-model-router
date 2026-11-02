@@ -2439,7 +2439,7 @@ test('with context or handoffs off their sub-settings stay greyed with no contro
   expect(await pane.find({ key: 'guard' })).toBeUndefined()
   expect(await pane.find({ key: 'next-toggle' })).toBeUndefined()
   expect(await pane.find({ key: 'handoff-toggle' })).toBeUndefined()
-  expect(await pane.findAll({ type: 'Text', text: 'needs Context' })).toHaveLength(2)
+  expect(await pane.findAll({ type: 'Text', text: 'needs Context' })).toHaveLength(3)
   expect(await pane.findAll({ type: 'Text', text: 'needs Handoffs' })).toHaveLength(1)
   expect(await pane.find({ type: 'Text', text: /saves a handoff while the cache is warm/ })).toBeDefined()
   expect(await pane.find({ key: 'ttl' })).toBeDefined()
@@ -2468,11 +2468,28 @@ test('the keep-warm ceiling is read from the config, anything else falls back to
 type ForkReply = { isAnswered: true; text: string; usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number } } | { isAnswered: false; reason: string; status?: number }
 const forkRead = (read: number): ForkReply => ({ isAnswered: true, text: 'OK', usage: { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: read, cache_creation_input_tokens: 0 } })
 
+const WARM_BREAKDOWN = {
+  categories: [{ name: 'Messages', tokens: 190_000, color: 'claude', isDeferred: false, kind: 'used' }],
+  totalTokens: 200_000,
+  maxTokens: 1_000_000,
+  rawMaxTokens: 1_000_000,
+  autocompactSource: 'model-default',
+  percentage: 20,
+  gridRows: [],
+  model: opus,
+  memoryFiles: [],
+  mcpTools: [],
+  agents: [],
+  autoCompactThreshold: 800_000,
+  isAutoCompactEnabled: true,
+  apiUsage: null,
+}
+
 /** A 200k session on the 60-minute cache, one main request at T0; forks answer from `replies` in turn, then read the whole cache. */
 async function warmSession($: Engine, on: On, replies: ForkReply[] = [], config: Record<string, unknown> = {}, onFork?: () => Promise<void>) {
   mock.store(on, { config: { ...MINE, coldGuard: 'refuse', cacheTtlMinutes: 60, ...config } })
   const clock = mock.clock(on, { now: T0 })
-  guardSession(on, { context: 200_000, usage: usageOf(200_000) })
+  guardSession(on, { context: 200_000, usage: usageOf(200_000), breakdown: WARM_BREAKDOWN })
   on('ui.toast', () => ({ value: undefined }) as never)
   const forks: string[] = []
   on('model.fork', async (_$, e) => {
@@ -2596,4 +2613,49 @@ test('the fork\'s own main-loop step passes through unrouted', async ($, on) => 
   await route($, 'warm')
   await clock.advance(54 * 60_000)
   expect(seen).toEqual([MODELS.opus.id, sonnet])
+})
+
+test('the band shows a keep-warm run with its spend, even with Cost off, and Stop ends it', async ($, on) => {
+  const { clock, isRunning } = await warmSession($, on)
+  await route($, 'warm')
+  await clock.advance(54 * 60_000)
+  await route($, 'cost off')
+  let band = await mountBand($, 'desktop')
+  expect(await band.find({ type: 'Text', text: /^warm ● 3h \d+m left · \$0\.\d+/ })).toBeDefined()
+  await band.press({ key: 'warm-stop' })
+  await band.unmount()
+  expect(await isRunning()).toBe(false)
+  band = await mountBand($, 'desktop')
+  expect(await band.find({ type: 'Text', text: /^warm ●/ })).toBeUndefined()
+  expect(await band.find({ key: 'warm-stop' })).toBeUndefined()
+  await band.unmount()
+})
+
+test('the Away section starts and stops keep-warm, and offers it only on the 60-minute cache', async ($, on) => {
+  const { isRunning } = await warmSession($, on)
+  let pane = await mountPane($, 'context')
+  expect(await pane.find({ key: 'warm-stop-pane' })).toBeUndefined()
+  await pane.press({ key: 'warm-start' })
+  await pane.unmount()
+  pane = await mountPane($, 'context')
+  expect(await pane.find({ key: 'warm-start' })).toBeUndefined()
+  await pane.press({ key: 'warm-stop-pane' })
+  await pane.unmount()
+  expect(await isRunning()).toBe(false)
+  await route($, 'ttl 5')
+  pane = await mountPane($, 'context')
+  expect(await pane.find({ key: 'warm-start' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /needs the 60-min cache/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('the Routes pane sets the keep-warm ceiling, greyed with Context off', async ($, on) => {
+  await warmSession($, on)
+  const pane = await mountPane($, 'route')
+  await pane.select({ key: 'warm-hours', value: '2' })
+  expect((await route($, 'warm')).text).toBe('Keeping the cache warm for up to 2 h; it stops when you send anything.')
+  await route($, 'warm stop')
+  await pane.press({ key: 'context-toggle' })
+  expect(await pane.findAll({ type: 'Text', text: 'needs Context' })).toHaveLength(3)
+  await pane.unmount()
 })

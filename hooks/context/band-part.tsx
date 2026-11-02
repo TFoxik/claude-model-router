@@ -1,4 +1,4 @@
-import type { Health } from '../../types'
+import type { Health, WarmRun } from '../../types'
 import { money } from '../core/format'
 import type { BandPart } from '../ui/band'
 
@@ -25,5 +25,19 @@ export function contextBandPart(health: Health | null): BandPart {
       ...(advice === undefined ? [] : [{ key: 'advice', label: `next ${advice.command}`, target: 'context' as const, look: 'primary' as const }]),
       { key: 'ctx', label: 'Context', target: 'context', look: 'dim' },
     ],
+  }
+}
+
+/** A keep-warm run: the time it may still ping and what its pings cost so far, on screen whether or not Cost is on. */
+export function warmBandPart(run: WarmRun, now: number, stop: () => void): BandPart {
+  const left = Math.max(0, Math.ceil((run.until - now) / 60_000))
+  return {
+    segment: ({ Text }) => (
+      <Text key="h-warm">
+        <Text color="success">warm ●</Text>
+        {` ${Math.floor(left / 60)}h ${left % 60}m left · ${money(run.usd)}`}
+      </Text>
+    ),
+    buttons: [{ key: 'warm-stop', label: 'Stop warm', press: stop, look: 'plain' }],
   }
 }

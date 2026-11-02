@@ -52,8 +52,14 @@ function stackedCells(segments: readonly Segment[], whole: number, width: number
 }
 
 /** `/route away` as a section: the ways to step away from this session, each priced now and on return. */
-function awaySection(els: Els, away: Away) {
-  const { Text } = els
+function awaySection(els: Els, away: Away, warm: WarmOffer | undefined, actions: ContextActions | undefined) {
+  const { Text, Button } = els
+  const warmButton = (name: string) =>
+    name !== 'Keep warm' || warm === undefined || actions === undefined ? null : warm === 'running' ? (
+      <Button key="warm-stop-pane" label="Stop" onPress={actions.stopWarm} />
+    ) : (
+      <Button key="warm-start" label="Keep warm" onPress={actions.startWarm} />
+    )
   const squeeze = (text: string) => text.replace(/ {2,}/g, ' ')
   const items = away.rows.map(one => ({
     key: one.name,
@@ -63,6 +69,7 @@ function awaySection(els: Els, away: Away) {
         {` ${[one.now, one.back].filter(Boolean).map(squeeze).join(' · ')}`}
       </Text>,
       <Text key="how" dimColor wrap="wrap">{one.how}</Text>,
+      warmButton(one.name),
     ],
   }))
   return bulletSection(els, { title: 'BEFORE A BREAK', color: 'claude', lead: away.header, items, tail: away.notes })
@@ -73,7 +80,7 @@ export function contextMobileView({ Text }: Els) {
 }
 
 /** `unused`: idle MCP servers, plugins and skills, each with its fix, listed in full below the tips; each one's `replaces` drops the size tip it says more than. */
-type ContextData = { breakdown: Breakdown | undefined; isTerminal: boolean; columns: number; advice?: Pick<Advice, 'verdict' | 'text'>; unused?: readonly Tip[]; explored?: number; away?: Away }
+type ContextData = { breakdown: Breakdown | undefined; isTerminal: boolean; columns: number; advice?: Pick<Advice, 'verdict' | 'text'>; unused?: readonly Tip[]; explored?: number; away?: Away; warm?: WarmOffer }
 // Beyond this many, the section points at /route unused for the rest.
 const UNUSED_SHOWN = 6
 
@@ -84,9 +91,12 @@ function dropped(unused: readonly Tip[]): Set<string> {
   return keys
 }
 /** `act` does what a tip's button says: puts its command in the prompt, or runs the slash command it names. */
-export type ContextActions = { act: (action: TipAction) => void }
+export type ContextActions = { act: (action: TipAction) => void; startWarm: () => void; stopWarm: () => void }
 
-export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, advice, unused = [], explored, away }: ContextData, act?: ContextActions) {
+/** Whether the Away section's Keep-warm row offers a start, or a stop for the run going on; absent where it can't help. */
+type WarmOffer = 'offer' | 'running'
+
+export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, advice, unused = [], explored, away, warm }: ContextData, act?: ContextActions) {
   const { Box, Text } = els
   const Svg = 'Svg' in els ? els.Svg : undefined
   if (b === undefined) return <Text dimColor>No context breakdown available yet.</Text>
@@ -169,7 +179,7 @@ export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, a
         lead: 'Each loads into every session in this repo and takes context, but none was called lately. A fix button puts its command in your prompt; nothing changes until you press Enter.',
         ...(unused.length > UNUSED_SHOWN ? { tail: [`+${unused.length - UNUSED_SHOWN} more in /route unused`] } : {}),
       })}
-      {away === undefined ? null : awaySection(els, away)}
+      {away === undefined ? null : awaySection(els, away, warm, act)}
       <Text dimColor>
         {b.skills ? `skills listing ${kTokens(b.skills.tokens)} (${b.skills.includedSkills}/${b.skills.totalSkills}) · ` : ''}
         {b.model} · estimated locally, as /context does

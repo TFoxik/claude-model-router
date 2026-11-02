@@ -203,7 +203,7 @@ test('awayText prices the ways to step away for this session', () => {
   expect(warm).toMatch(/Keep warm +\$0\.04 an hour/)
   expect(warm).toMatch(/Do nothing +now +\$0\.00 +on return +\$1\.60/)
   const short = awayText({ tokens: 200_000, model: opus, ttlMinutes: 5, warmMinutes: 3 })
-  expect(short).toMatch(/Keep warm +\$0\.48 an hour/)
+  expect(short).toMatch(/Keep warm +needs the 60-min cache/)
   const cold = awayText({ tokens: 200_000, model: opus, ttlMinutes: 60, warmMinutes: 0 })
   expect(cold).toContain('The cache is already cold: anything sent now re-writes the 200k tokens for $1.60, so /clear (free) is the cheapest way out.')
   expect(awayText({ tokens: 200_000, model: 'gpt-x', ttlMinutes: 60, warmMinutes: 10 })).toMatch(/^No prices for gpt-x\./)
