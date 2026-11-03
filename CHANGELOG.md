@@ -8,6 +8,10 @@ A smaller local store, and the right context size right after a compaction.
 
 - **After a compaction, the band, the Routes pane and the cold-send guard kept the old context size** until the next request. They now use the new size at once.
 
+### ⬆️ Upgrade notes
+
+- The local store stays smaller: prompt history keeps costs to the micro-dollar (about 6% smaller), and usage for repos with no session in 90 days is dropped, so throwaway folders no longer pile up. `/route unused` no longer counts those repos as evidence.
+
 ## 1.9.0 — 2026-11-02
 
 Keep the prompt cache warm while you step away, so you come back without paying to rebuild it.

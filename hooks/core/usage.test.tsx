@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { DEV_PATIENCE, applyUsage, archiveFix, claudeAiReport, claudeAiTips, connectedServers, connectorAliases, listingTokens, mergeAliases, sanitizeAliases, sourcesOfLock, syncedSkillNames, idleItems, idleName, idleReport, idleText, idleTips, itemOfCommand, itemOfToolCall, mcpKey, moveFix, onlyHere, patienceText, pluginFix, pluginName, pluginOfMcpTool, pluginServer, sanitizeUsage, skillReport, skillTips } from './usage'
+import { DEV_PATIENCE, applyUsage, archiveFix, claudeAiReport, claudeAiTips, connectedServers, connectorAliases, listingTokens, mergeAliases, sanitizeAliases, sourcesOfLock, syncedSkillNames, idleItems, idleName, idleReport, idleText, idleTips, itemOfCommand, pruneUsage, itemOfToolCall, mcpKey, moveFix, onlyHere, patienceText, pluginFix, pluginName, pluginOfMcpTool, pluginServer, sanitizeUsage, skillReport, skillTips } from './usage'
 import type { OwnSkill, UsageStore } from './usage'
 
 const DAY = 86_400_000
@@ -40,6 +40,7 @@ test('usage merges into what is stored: sessions and calls add up, first seen ke
   store = applyUsage(store, 'app', { at: T0 + 2 * DAY, isNewSession: false, seen: [], used: { 'mcp:jira': { calls: 1, lastUsed: T0 + 2 * DAY }, 'mcp:new': { calls: 1, lastUsed: T0 + 2 * DAY } } })
   expect(store.app).toEqual({
     sessions: 2,
+    lastAt: T0 + 2 * DAY,
     items: {
       'mcp:jira': { firstSeen: T0, sessionsSeen: 2, calls: 3, lastUsed: T0 + 2 * DAY },
       'plugin:superpowers': { firstSeen: T0, sessionsSeen: 1, calls: 0 },
@@ -53,8 +54,16 @@ test('usage merges into what is stored: sessions and calls add up, first seen ke
 test('stored usage keeps only well-formed entries', () => {
   const good = { sessions: 3, items: { 'mcp:jira': { firstSeen: 1, sessionsSeen: 3, calls: 0 } } }
   expect(sanitizeUsage({ app: good, bad: { sessions: 'x' }, other: { sessions: 1, items: { 'mcp:x': { firstSeen: 'no' } } } })).toEqual({ app: good, other: { sessions: 1, items: {} } })
+  expect(sanitizeUsage({ app: { ...good, lastAt: 5 }, old: { ...good, lastAt: 'x' } })).toEqual({ app: { ...good, lastAt: 5 }, old: good })
   expect(sanitizeUsage(null)).toEqual({})
   expect(sanitizeUsage([1, 2])).toEqual({})
+})
+
+test('a repo with no session in ninety days is dropped from the saved usage, the one open now never', () => {
+  const at = (days: number) => ({ sessions: 1, lastAt: T0 - days * DAY, items: { 'mcp:jira': { firstSeen: T0 - 200 * DAY, sessionsSeen: 1, calls: 0 } } })
+  const legacy = { sessions: 1, items: { 'mcp:jira': { firstSeen: T0 - 200 * DAY, sessionsSeen: 1, calls: 0 } } }
+  const pruned = pruneUsage({ recent: at(89), stale: at(91), here: at(400), legacy }, 'here', T0)
+  expect(pruned).toEqual({ recent: at(89), here: at(400), legacy: { ...legacy, lastAt: T0 } })
 })
 
 /** A repo seen for `days` over `sessions` sessions, with the given items' last use. */

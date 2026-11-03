@@ -17,7 +17,7 @@ const UNKNOWN_WEIGHT = 1000
 /** `mcp:<server>` as tool names spell it, `plugin:<name>` without the marketplace, `skill:<name>` for one of your own skills or commands, or `claudeai:<name>` for a skill synced from claude.ai. */
 export type ItemKey = string
 export type ItemUse = { firstSeen: number; sessionsSeen: number; calls: number; lastUsed?: number }
-export type RepoUsage = { sessions: number; items: Record<ItemKey, ItemUse> }
+export type RepoUsage = { sessions: number; lastAt?: number; items: Record<ItemKey, ItemUse> }
 export type UsageStore = Record<string, RepoUsage>
 /** What a session saw loaded and used since its last save. */
 export type UsageDelta = { at: number; isNewSession: boolean; seen: readonly ItemKey[]; used: Record<ItemKey, { calls: number; lastUsed: number }> }
@@ -189,7 +189,18 @@ export function applyUsage(store: UsageStore, repo: string, d: UsageDelta): Usag
     const lastUsed = Math.max(one.lastUsed ?? -Infinity, use.lastUsed)
     items[key] = { ...one, calls: one.calls + use.calls, lastUsed }
   }
-  return { ...store, [repo]: { sessions: was.sessions + (d.isNewSession ? 1 : 0), items } }
+  return { ...store, [repo]: { sessions: was.sessions + (d.isNewSession ? 1 : 0), lastAt: Math.max(was.lastAt ?? d.at, d.at), items } }
+}
+
+const STALE_REPO_DAYS = 90
+
+/**
+ * Drops repos with no session in three idle windows, so throwaway folders don't fill the store the engine caps for
+ * the whole mod. A repo saved before `lastAt` existed is stamped now, so it gets the full window.
+ */
+export function pruneUsage(store: UsageStore, repo: string, now: number): UsageStore {
+  const kept = Object.entries(store).filter(([name, r]) => name === repo || r.lastAt === undefined || now - r.lastAt <= STALE_REPO_DAYS * DAY)
+  return Object.fromEntries(kept.map(([name, r]) => [name, r.lastAt === undefined ? { ...r, lastAt: now } : r]))
 }
 
 const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n)
@@ -204,7 +215,7 @@ export function sanitizeUsage(stored: unknown): UsageStore {
   for (const [repo, r] of Object.entries(stored as Record<string, unknown>)) {
     const x = r as Partial<RepoUsage> | null
     if (typeof x !== 'object' || x === null || !isNum(x.sessions) || typeof x.items !== 'object' || x.items === null) continue
-    out[repo] = { sessions: x.sessions, items: Object.fromEntries(Object.entries(x.items).filter(([, use]) => isUse(use))) }
+    out[repo] = { sessions: x.sessions, ...(isNum(x.lastAt) ? { lastAt: x.lastAt } : {}), items: Object.fromEntries(Object.entries(x.items).filter(([, use]) => isUse(use))) }
   }
   return out
 }

@@ -1,7 +1,7 @@
 import type { EngineInterface } from 'claude-code'
 import { UNREADABLE, STORE, carry, load, nowOf, save } from './state'
 import { session } from './session'
-import { DEV_PATIENCE, PATIENCE, applyUsage, claudeAiKey, connectedServers, connectorAliases, idleItems, itemOfCommand, itemOfToolCall, mergeAliases, onlyHere, pluginKey, pluginName, pluginOfMcpTool, pluginServer, sanitizeAliases, sanitizeUsage, skillKey, sourcesOfLock, syncedSkillNames } from './usage'
+import { DEV_PATIENCE, PATIENCE, applyUsage, claudeAiKey, connectedServers, connectorAliases, idleItems, itemOfCommand, itemOfToolCall, mergeAliases, onlyHere, pluginKey, pluginName, pluginOfMcpTool, pluginServer, pruneUsage, sanitizeAliases, sanitizeUsage, skillKey, sourcesOfLock, syncedSkillNames } from './usage'
 import type { ItemKey, OwnSkill, Patience, UsageStore } from './usage'
 
 type $ = EngineInterface
@@ -197,7 +197,8 @@ export async function flushUsage($: $, canCount: boolean) {
   if (stored === UNREADABLE) return
   const used = session.kept.used
   session.kept = { ...session.kept, used: {}, isUncounted: session.kept.isUncounted && !isNewSession }
-  const next = applyUsage(mergeAliases(sanitizeUsage(stored), loaded?.aliases ?? {}), session.repo, { at: now, isNewSession, seen: isNewSession ? (loaded?.keys ?? []) : [], used })
+  const merged = applyUsage(mergeAliases(sanitizeUsage(stored), loaded?.aliases ?? {}), session.repo, { at: now, isNewSession, seen: isNewSession ? (loaded?.keys ?? []) : [], used })
+  const next = isNewSession ? pruneUsage(merged, session.repo, now) : merged
   const isSaved = await $.store.set(STORE.toolUse, next).then(() => true, () => false)
   if (isSaved) {
     memory.savedUsage = { at: now, value: next }

@@ -10,10 +10,20 @@ const isRecord = (r: unknown): r is PromptRecord => {
     typeof x.text === 'string' && typeof x.usd === 'number' && typeof x.requests === 'number' && typeof x.agents === 'number'
 }
 
+const micro = (usd: number) => Math.round(usd * 1e6) / 1e6
+
+/** Costs cut to the micro-dollar: summed float costs carry 17 digits, which history would store 2000 times over. */
+export const compactRecord = (r: PromptRecord): PromptRecord => ({
+  ...r,
+  usd: micro(r.usd),
+  ...(r.models ? { models: Object.fromEntries(Object.entries(r.models).map(([key, usd]) => [key, micro(usd)])) } : {}),
+  ...(r.rewrites ? { rewrites: r.rewrites.map(one => ({ ...one, usd: micro(one.usd) })) } : {}),
+})
+
 /** Also cleans the names the panes show, for history saved before they were cleaned at record time. */
 export const sanitizeHistory = (stored: unknown): PromptRecord[] =>
   Array.isArray(stored)
-    ? stored.filter(isRecord).slice(-HISTORY_LIMIT).map(r => ({ ...r, repo: printable(r.repo), label: printable(r.label), text: printable(r.text) }))
+    ? stored.filter(isRecord).slice(-HISTORY_LIMIT).map(r => compactRecord({ ...r, repo: printable(r.repo), label: printable(r.label), text: printable(r.text) }))
     : []
 
 export const EMPTY_SPEND: RouteSpend = { requests: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, usd: 0 }
