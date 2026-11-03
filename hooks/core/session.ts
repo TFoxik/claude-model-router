@@ -32,6 +32,8 @@ type Session = {
   hasHandoffSkill: boolean
   // An auto-handoff saved since the person last prompted.
   handoffPath?: string
+  // The context's size after a compaction, until the next main-loop request measures it.
+  compactedTokens?: number
   compactAt?: number
   compactCheckedAt?: number
   messagesShare?: number

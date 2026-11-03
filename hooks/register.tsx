@@ -239,11 +239,14 @@ export const register: Register = on => {
   on('session.compact', async ($, e, next) => {
     const before = (await configOf($)).isLearning ? await lastUsageOf($) : undefined
     const done = await next(e)
-    if (e.agentId === undefined) {
+    if (e.agentId === undefined && done.skip === undefined && e.trigger !== 'precompute') {
       session.isAfterCompact = true
       session.boundary = undefined
       resetSignals(false)
       if (before !== undefined) pushLesson(lessonFromCompact(before === null ? 0 : promptTokens(before)))
+      session.compactedTokens = done.tokensAfter ?? (await $.session.usage({ breakdown: 'summary' }).catch(() => undefined))?.context.breakdown?.totalTokens
+      session.compactCheckedAt = undefined
+      await refresh($).catch(() => undefined)
     }
     return done
   }).catch(($, e, next) => next(e))

@@ -4,7 +4,7 @@ import type { Args, EngineInterface, On } from 'claude-code'
 import type { ActiveRoute, ColdGuard, Effort, RouterConfig, WarmHours } from '../../types'
 import { fmtLeft } from '../core/format'
 import { sumUsd } from '../core/ledger'
-import { mainRoute, routeKeyOfAgent, setConfig, setPlan } from '../core/measure'
+import { contextTokensNow, contextTokensOf, mainRoute, routeKeyOfAgent, setConfig, setPlan } from '../core/measure'
 import { session } from '../core/session'
 import { configOf, isBandShownOf, isPlanOf, nowOf, promptCostOf, setBand, spendOf, warmRunOf } from '../core/state'
 import { AUTO_LABELS, FORK, PRESETS, ROUTES, asEffort, effortForLabel, parseSetting, presetOf, resolve, routeForSpawn, routeText, shouldSwitch, withPreset, withRoute } from './routes'
@@ -60,7 +60,7 @@ async function decideMain(
   let isHeld = false
   const last = session.lastMain
   if (want.effort === 'auto' && last !== undefined && last.route === route) {
-    const contextTokens = (await $.session.usage()).context.tokens ?? 0
+    const contextTokens = (await contextTokensNow($)) ?? 0
     const from = { model: last.model, effort: last.effort }
     const to = { model: toModel, effort: toEffort }
     if (!shouldSwitch({ contextTokens, isAfterCompact, from, to, ttlMinutes: cfg.cacheTtlMinutes })) {
@@ -91,7 +91,7 @@ export async function renderRoutesPane($: $, e: Args<'ui.render'>, links: Routes
     nowOf($),
   ])
   const sessionModel = now?.model ?? (await $.session.model())
-  const data = { cfg, total: sumUsd(Object.values(costs)), now, isPlanning, pending, lastPrompt, contextTokens: usage.context.tokens ?? 0, sessionModel, isBand, warmLeft: run === null ? undefined : fmtLeft(run.until - at) }
+  const data = { cfg, total: sumUsd(Object.values(costs)), now, isPlanning, pending, lastPrompt, contextTokens: contextTokensOf(usage.context.tokens) ?? 0, sessionModel, isBand, warmLeft: run === null ? undefined : fmtLeft(run.until - at) }
   return routesPaneView(els, data, {
     editDraft: fn =>
       void update($, draft, d => {

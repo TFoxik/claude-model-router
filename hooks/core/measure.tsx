@@ -55,11 +55,18 @@ export async function setPlan($: $, isOn: boolean) {
   const cfg = await configOf($)
   if (was || !isOn || !cfg.isLearning) return
   const running = session.lastMain ?? { model: await $.session.model() }
-  const tokens = (await $.session.usage()).context.tokens ?? 0
+  const tokens = (await contextTokensNow($)) ?? 0
   pushLesson(lessonFromPlanToggle(loopRoute(cfg, 'plan', running), loopRoute(cfg, 'main', running), tokens, cfg.cacheTtlMinutes))
 }
 
 export const promptTokens = (last: LastUsage) => last.input + last.cacheRead + last.cacheWrite
+
+/** The engine reports the context the last response was answered over, which right after a compaction is still the old one. */
+export const contextTokensOf = (reported: number | undefined) => session.compactedTokens ?? reported
+
+export async function contextTokensNow($: $): Promise<number | undefined> {
+  return contextTokensOf((await $.session.usage()).context.tokens)
+}
 
 /** The price of the next main-loop send when the cache has gone cold over a big context. */
 export async function coldSend($: $, cfg: RouterConfig): Promise<{ at: number; text: string } | undefined> {
@@ -68,7 +75,7 @@ export async function coldSend($: $, cfg: RouterConfig): Promise<{ at: number; t
   const ttl = cfg.cacheTtlMinutes
   const coldFor = coldForMs(last.at, await nowOf($), ttl)
   if (coldFor < 0) return undefined
-  const context = (await $.session.usage()).context.tokens ?? promptTokens(last)
+  const context = (await contextTokensNow($)) ?? promptTokens(last)
   if (context < GUARD_MIN_TOKENS) return undefined
   const model = await routedMainModel($, cfg, last.model)
   const { write, warm } = rewritePrice(model, context, ttl)
@@ -82,7 +89,7 @@ export async function coldSend($: $, cfg: RouterConfig): Promise<{ at: number; t
 export async function awayFacts($: $, cfg: RouterConfig, tokens?: number): Promise<AwayFacts | undefined> {
   const last = await lastUsageOf($)
   if (last === null) return undefined
-  tokens ??= (await $.session.usage()).context.tokens ?? promptTokens(last)
+  tokens ??= (await contextTokensNow($)) ?? promptTokens(last)
   const warmMinutes = warmMinutesLeft(last.at, await nowOf($), cfg.cacheTtlMinutes)
   return { tokens, model: await routedMainModel($, cfg, last.model), ttlMinutes: cfg.cacheTtlMinutes, warmMinutes }
 }
@@ -91,7 +98,7 @@ export async function refreshStatus($: $): Promise<HealthTick | undefined> {
   const last = await lastUsageOf($)
   if (last === null) return undefined
   const { context, rateLimits } = await $.session.usage()
-  const tokens = context.tokens ?? promptTokens(last)
+  const tokens = contextTokensOf(context.tokens) ?? promptTokens(last)
   const prompt = promptTokens(last)
   const five = rateLimits.find(one => one.kind === 'five_hour')
   const seven = rateLimits.find(one => one.kind === 'seven_day')
@@ -111,7 +118,7 @@ export async function refreshStatus($: $): Promise<HealthTick | undefined> {
   const next: Health = {
     cache: prompt > 0 ? Math.round((last.cacheRead / prompt) * 100) : 0,
     warmMinutes,
-    ctx: context.percent ?? Math.round((tokens / context.window) * 100),
+    ctx: (session.compactedTokens === undefined && context.percent) || Math.round((tokens / context.window) * 100),
     ctxLevel: contextLevel(tokens, context.window, session.compactAt),
     last: (await promptCostOf($))?.usd ?? last.usd,
     ...(warmMinutes === 0 && tokens >= GUARD_MIN_TOKENS ? { coldUsd: rewritePrice(model, tokens, ttl).write } : {}),
@@ -138,6 +145,7 @@ export function resetSignals(isClear: boolean) {
   if (isClear) {
     session.steps = NO_STEPS
     session.editsSinceCommit = 0
+    session.compactedTokens = undefined
   }
   session.planPath = undefined
   session.corrections = 0
@@ -158,7 +166,7 @@ export function signalFacts() {
 /** The first time reads and searches fill the main context this session, learn mode explains subagents. */
 async function noteExploration($: $) {
   if (session.isExploreTaught || session.explored < EXPLORE_MIN || !(await configOf($)).isLearning) return
-  const total = (await $.session.usage()).context.tokens ?? 0
+  const total = (await contextTokensNow($)) ?? 0
   if (!isExplorationHeavy(session.explored, total)) return
   session.isExploreTaught = true
   pushLesson(lessonFromExploration(session.explored, total))
@@ -282,6 +290,7 @@ export async function recordStep($: $, agentId: string | undefined, key: string,
       await updatePromptCost($, p => addStep(p ?? EMPTY_PROMPT, { id: agentId ?? key, route: key, label, effort: s.effort, usage, ttlMinutes: ttl, rewrite }))
     }
     if (isMain) {
+      session.compactedTokens = undefined
       await setLastUsage($, {
         model: usage.model,
         input: usage.input_tokens,

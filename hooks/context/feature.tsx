@@ -7,7 +7,7 @@ import { GUARD_MIN_TOKENS, warmMinutesLeft } from '../core/pricing'
 import { DEV_PATIENCE, claudeAiReport, claudeAiTips, idleReport, idleTips, listingTokens, mcpKey, patienceText, skillReport, skillTips } from '../core/usage'
 import type { ItemKey } from '../core/usage'
 import { idleHere, listCommands } from '../core/items'
-import { USER_ORIGINS, awayFacts, coldSend, noteWarmPing, routedMainModel, setConfig, signalFacts } from '../core/measure'
+import { USER_ORIGINS, awayFacts, coldSend, contextTokensOf, noteWarmPing, routedMainModel, setConfig, signalFacts } from '../core/measure'
 import type { HealthTick } from '../core/measure'
 import { closePanes } from '../core/panes'
 import { session } from '../core/session'
@@ -107,7 +107,8 @@ async function renderContextPane($: $, e: Args<'ui.render'>) {
     ...signalFacts(),
   })
   // Only once there is enough cached to be worth planning a break around: the cold guard's threshold.
-  const facts = (context.tokens ?? 0) >= GUARD_MIN_TOKENS ? await awayFacts($, cfg, context.tokens) : undefined
+  const tokensNow = contextTokensOf(context.tokens)
+  const facts = (tokensNow ?? 0) >= GUARD_MIN_TOKENS ? await awayFacts($, cfg, tokensNow) : undefined
   const away = facts && awayOptions(facts)
   const tokens = listingTokens(b?.skills?.skillFrontmatter ?? [])
   const tips = [...idleTips(idle, withServerNames(loaded.names, servers), tokensByServer(servers), { root: session.root, tokens }), ...skillTips(idle, only, loaded.own, session.root, tokens), ...claudeAiTips(idle, loaded.syncedCount, tokens)]

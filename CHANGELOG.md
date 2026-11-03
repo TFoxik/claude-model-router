@@ -1,5 +1,13 @@
 # Release notes
 
+## 1.9.1 — 2026-11-03
+
+A smaller local store, and the right context size right after a compaction.
+
+### 🐛 Bug fixes
+
+- **After a compaction, the band, the Routes pane and the cold-send guard kept the old context size** until the next request. They now use the new size at once.
+
 ## 1.9.0 — 2026-11-02
 
 Keep the prompt cache warm while you step away, so you come back without paying to rebuild it.

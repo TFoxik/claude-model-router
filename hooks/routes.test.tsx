@@ -645,6 +645,28 @@ test('the guard skips small contexts, and can warn or be switched off', async ($
   }
 })
 
+test('a compaction shows its new size on the band at once, until the next request measures it', async ($, on) => {
+  mock.store(on)
+  mock.clock(on, { now: T0 })
+  const facts = { context: 300_000, usage: usageOf(300_000) }
+  guardSession(on, facts)
+  on('session.compact', (_$, e) => ({ messages: e.messages, tokensBefore: 300_000, tokensAfter: 30_000 }))
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await step($, 'a')
+  const contextText = async () => {
+    const band = await mountBand($, 'desktop')
+    const text = (await band.find({ type: 'Text', text: /context \d+%/ }))?.text
+    await band.unmount()
+    return text?.match(/context (\d+)%/)?.[1]
+  }
+  expect(await contextText()).toBe('20')
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'summary', toolUses: [] }] } as unknown as Args<'session.compact'>)
+  expect(await contextText()).toBe('3')
+  facts.usage = usageOf(32_000)
+  await step($, 'b')
+  expect(await contextText()).toBe('20')
+})
+
 test('cache rewrites are tallied by cause and shown in Last and Stats', async ($, on) => {
   mock.store(on, { config: { ...MINE, coldGuard: 'off' } })
   const clock = mock.clock(on, { now: T0 })
