@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="820" height="452" viewBox="0 0 820 452" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12">
-  <rect width="820" height="452" rx="12" fill="#1f1e1d"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="500" viewBox="0 0 820 500" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12">
+  <rect width="820" height="500" rx="12" fill="#1f1e1d"/>
   <text x="28" y="40" fill="#d97757" font-weight="700" font-size="14">⚙ Routes</text>
   <text x="626" y="40" fill="#5fb36b" font-size="13">● on</text>
   <rect x="682" y="24" width="114" height="24" rx="7" fill="#34332f"/>
@@ -27,7 +27,7 @@
     <rect x="696" y="224" width="96" height="18" rx="5" fill="#2a2927" stroke="#4a4946"/>
     <text x="706" y="237">high <tspan fill="#8b8a86">⌄</tspan></text>
   </g>
-  <rect x="16" y="278" width="788" height="160" rx="10" fill="none" stroke="#4a4946"/>
+  <rect x="16" y="278" width="788" height="208" rx="10" fill="none" stroke="#4a4946"/>
   <text x="30" y="300" fill="#8b8a86" font-weight="700">SETTINGS</text>
   <text x="30" y="324" fill="#d97757" font-weight="700">Coaching</text>
   <text x="30" y="346" font-size="13"><tspan fill="#e9e7e2">Learn mode </tspan><tspan fill="#8b8a86">○ off</tspan></text>
@@ -37,5 +37,7 @@
   <text x="758" y="346" fill="#e9e7e2" font-size="13" text-anchor="middle">Open</text>
   <text x="30" y="364" fill="#8b8a86">explains cache misses and model costs with your own numbers, when they happen</text>
   <text x="30" y="388" fill="#d97757" font-weight="700">Handoffs <tspan fill="#8b8a86" font-weight="400">· Handoffs, Auto-handoff</tspan></text>
-  <text x="30" y="412" fill="#d97757" font-weight="700">Cache and display <tspan fill="#8b8a86" font-weight="400">· Cold-cache guard, Cache lifetime, Keep prompt text, Band</tspan></text>
+  <text x="30" y="412" fill="#d97757" font-weight="700">Cost and context <tspan fill="#8b8a86" font-weight="400">· Cost, Context</tspan></text>
+  <text x="30" y="436" fill="#d97757" font-weight="700">Band colours <tspan fill="#8b8a86" font-weight="400">· Cache, Context, 5h and 7d: an amber and a red picker each</tspan></text>
+  <text x="30" y="460" fill="#d97757" font-weight="700">Cache and display <tspan fill="#8b8a86" font-weight="400">· Cold-cache guard, Cache lifetime, Keep warm, Keep prompt text, Band</tspan></text>
 </svg>

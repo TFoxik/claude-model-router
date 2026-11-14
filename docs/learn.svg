@@ -10,7 +10,7 @@
   <rect x="620" y="126" width="64" height="20" rx="4" fill="#d97757"/>
   <text x="652" y="140" fill="#1f1e1d" text-anchor="middle" font-weight="700">Got it</text>
   <text x="788" y="140" fill="#e9e7e2" text-anchor="end">Mute topic</text>
-  <text x="28" y="186"><tspan fill="#d97757" font-weight="700">▸ main · Opus 5.5 medium</tspan><tspan fill="#8b8a86"> │ </tspan><tspan fill="#5fb36b">plan</tspan><tspan fill="#8b8a86"> Opus high · </tspan><tspan fill="#d97757">main</tspan><tspan fill="#8b8a86"> Opus medium · </tspan><tspan fill="#6ea8e0">sub</tspan><tspan fill="#8b8a86"> Sonnet high</tspan></text>
+  <text x="28" y="186"><tspan fill="#d97757" font-weight="700">▸ main · Opus 5.5 med</tspan><tspan fill="#8b8a86"> │ </tspan><tspan fill="#5fb36b">plan</tspan><tspan fill="#8b8a86"> Opus high · </tspan><tspan fill="#d97757">main</tspan><tspan fill="#8b8a86"> Opus med · </tspan><tspan fill="#6ea8e0">sub</tspan><tspan fill="#8b8a86"> Sonnet high</tspan></text>
   <text x="28" y="208"><tspan fill="#8b8a86">cache </tspan><tspan fill="#5fb36b">100%</tspan><tspan fill="#8b8a86"> 60m · context </tspan><tspan fill="#5fb36b">31%</tspan><tspan fill="#8b8a86"> · last $1.72 · session $3.68</tspan></text>
   <text x="792" y="236" text-anchor="end"><tspan fill="#8b8a86">Context</tspan><tspan fill="#8b8a86" dx="16">Cost</tspan><tspan fill="#e9e7e2" dx="16">Routes</tspan></text>
 </svg>
