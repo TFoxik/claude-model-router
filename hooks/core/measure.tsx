@@ -258,6 +258,7 @@ export type StepOutcome = {
   isHeld: boolean
   isAfterCompact: boolean
   usage: (Parameters<typeof costOf>[0] & { model: string }) | null | undefined
+  appModel?: string
 }
 
 /** Counts one finished request: per-route spend, the prompt's breakdown, and, for the main loop, the facts behind the band. Gives back the route the main loop was on before. */

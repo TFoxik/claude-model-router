@@ -1,20 +1,29 @@
 import type { RenderChildren } from 'claude-code'
 
 import type { ActiveRoute, RouterConfig } from '../../types'
-import { labelOf, shortLabel } from '../core/pricing'
+import { labelOf, modelKeyOf, shortLabel } from '../core/pricing'
 import { resolve, routeText } from '../routing/routes'
 import { colorOf } from './kit'
 import type { Els, Open, Target } from './kit'
 
+const shortEffort = (effort: string | undefined) => (effort === 'medium' ? 'med' : effort)
+
 const shortRoute = (cfg: RouterConfig, route: string) => {
   const r = resolve(cfg, route)
-  return `${r.model ? shortLabel(labelOf(r.model)) : 'inherit'}${r.effort ? ` ${r.effort}` : ''}`
+  return `${r.model ? shortLabel(labelOf(r.model)) : 'inherit'}${r.effort ? ` ${shortEffort(r.effort)}` : ''}`
 }
 
 function bandHead(cfg: RouterConfig, now: ActiveRoute | null): string {
   if (!cfg.isEnabled) return 'router off'
   if (now === null) return '▸ waiting for first request'
-  return `▸ ${now.route} · ${routeText(now.model, now.effort)}${now.isHeld ? ' (held)' : ''}`
+  return `▸ ${now.route} · ${routeText(now.model, shortEffort(now.effort))}${now.isHeld ? ' (held)' : ''}`
+}
+
+/** The app's model when the route replaced it, as a short family name: the version is the picker's to show. */
+function overriddenApp(cfg: RouterConfig, now: ActiveRoute | null): string | undefined {
+  if (!cfg.isEnabled || now?.appModel === undefined) return undefined
+  const isSame = (modelKeyOf(now.appModel) ?? now.appModel) === (modelKeyOf(now.model) ?? now.model)
+  return isSame ? undefined : shortLabel(labelOf(now.appModel))
 }
 
 export type BandHead = { cfg: RouterConfig; now: ActiveRoute | null; pending: RouterConfig | null }
@@ -52,11 +61,13 @@ const buttonView = ({ Button }: Els, b: BandButton, open: Open) => {
  */
 export function bandView(els: Els, { head: { cfg, now, pending }, parts }: { head: BandHead; parts: readonly BandPart[] }, { open }: { open: Open }) {
   const { Box, Text, Button } = els
+  const overridden = overriddenApp(cfg, now)
   const rows = [
     <Box key="band-route" flexDirection="row" gap={1}>
       <Text bold={cfg.isEnabled} dimColor={!cfg.isEnabled} color={cfg.isEnabled && now ? colorOf(now.route) : undefined}>
         {bandHead(cfg, now)}
       </Text>
+      {overridden === undefined ? null : <Text color="warning">(app: {overridden})</Text>}
       <Text dimColor wrap="truncate-end">
         │ <Text color="planMode">plan</Text> {shortRoute(cfg, 'plan')} · <Text color="claude">main</Text> {shortRoute(cfg, 'main')} ·{' '}
         <Text color="suggestion">sub</Text> {shortRoute(cfg, 'sub:*')}

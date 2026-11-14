@@ -1,5 +1,14 @@
 # Release notes
 
+## 1.10.0 — 2026-11-14
+
+Know when the router overrides the model you picked, and choose where the band's colours change.
+
+### ✨ What's new
+
+- **The band says when a route overrides the app's model.** When a route replaces the model the app would use, an amber `(app: Fable)` follows it: `▸ main · Opus 5.5 med (app: Fable)` means you're on Opus. To let the app decide, set that route to `inherit` or turn routing off. [Docs](https://tfoxik.github.io/claude-model-router/#band)
+- **Shorter efforts in the band.** `medium` shows as `med`.
+
 ## 1.9.1 — 2026-11-03
 
 A smaller local store, and the right context size right after a compaction.

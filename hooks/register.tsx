@@ -97,7 +97,7 @@ async function renderWarmLine($: $, e: Args<'ui.render'>) {
 async function afterStep($: $, agentId: string | undefined, key: string, s: StepOutcome) {
   const { prevMainRoute } = await recordStep($, agentId, key, s)
   if (agentId !== undefined) return
-  await routingNoteApplied($, { route: key, model: s.model, effort: s.effort, isHeld: s.isHeld, prevRoute: prevMainRoute, cfg: s.cfg })
+  await routingNoteApplied($, { route: key, model: s.model, effort: s.effort, isHeld: s.isHeld, prevRoute: prevMainRoute, cfg: s.cfg, appModel: s.appModel })
   await refresh($)
 }
 
@@ -350,7 +350,7 @@ export const register: Register = on => {
     const result = yield* next(isChanged ? { ...e, model, ...(effort ? { effort } : {}) } : e)
 
     // Bookkeeping never fails the request it is counting.
-    await afterStep($, e.agentId, route ?? ENGINE, { cfg, model, effort, isHeld, isAfterCompact, usage: result.usage }).catch(() => undefined)
+    await afterStep($, e.agentId, route ?? ENGINE, { cfg, model, effort, isHeld, isAfterCompact, usage: result.usage, appModel: e.model }).catch(() => undefined)
     return result
   })
 

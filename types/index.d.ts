@@ -86,6 +86,8 @@ export type ActiveRoute = {
   model: string
   effort?: Effort
   isHeld: boolean
+  /** The model the app asked for before routing; differs from `model` when the route overrode it. */
+  appModel?: string
 }
 export type LessonKind =
   | 'cold-rewrite'

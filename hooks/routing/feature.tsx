@@ -180,9 +180,9 @@ export async function routingDecide($: $, e: Args<'turn.step'>, cfg: RouterConfi
   return { route, model, effort, isHeld, isAfterCompact }
 }
 
-export async function routingNoteApplied($: $, a: { route: string; model: string; effort?: Effort; isHeld: boolean; prevRoute?: string; cfg: RouterConfig }): Promise<void> {
+export async function routingNoteApplied($: $, a: { route: string; model: string; effort?: Effort; isHeld: boolean; prevRoute?: string; cfg: RouterConfig; appModel?: string }): Promise<void> {
   if (a.prevRoute !== undefined && a.prevRoute !== a.route && a.cfg.isEnabled) $.ui.toast(`Route ${a.route}: ${routeText(a.model, a.effort)}`)
-  await update($, active, () => ({ route: a.route, model: a.model, effort: a.effort, isHeld: a.isHeld }))
+  await update($, active, () => ({ route: a.route, model: a.model, effort: a.effort, isHeld: a.isHeld, appModel: a.appModel }))
 }
 
 export async function routingBandHead($: $): Promise<{ cfg: RouterConfig; now: ActiveRoute | null; pending: RouterConfig | null }> {
