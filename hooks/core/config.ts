@@ -1,5 +1,7 @@
-import type { ColdGuard, LessonKind, RouteSetting, RouterConfig, WarmHours } from '../../types'
+import type { ColdGuard, LessonKind, LevelBand, LevelKind, Levels, RouteSetting, RouterConfig, WarmHours } from '../../types'
 import { isEffort, isModel, isRouteKey, withPreset } from '../routing/routes'
+import { CONTEXT_CRITICAL, CONTEXT_WARN, bandLevel } from './pricing'
+import type { Level } from './pricing'
 
 /** A fresh install changes no model until a preset is picked; costs, the band and the guard still work. */
 export const DEFAULT_CONFIG: RouterConfig = {
@@ -17,6 +19,36 @@ export const DEFAULT_CONFIG: RouterConfig = {
   autoHandoff: false,
   showNext: true,
   warmHours: 4,
+  levels: {
+    cache: { warn: 80, bad: 50 },
+    context: { warn: CONTEXT_WARN * 100, bad: CONTEXT_CRITICAL * 100 },
+    limits: { warn: 70, bad: 90 },
+  },
+}
+
+export const LEVEL_KINDS: readonly LevelKind[] = ['cache', 'context', 'limits']
+
+export const isHighGood = (kind: LevelKind) => kind === 'cache'
+
+/** A usable pair: whole percents from 1 to 100, ordered so amber comes before red. */
+export function isLevelBand(kind: LevelKind, band: unknown): band is LevelBand {
+  if (typeof band !== 'object' || band === null) return false
+  const { warn, bad } = band as Partial<LevelBand>
+  const isPct = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 100
+  if (!isPct(warn) || !isPct(bad)) return false
+  return isHighGood(kind) ? warn > bad : warn < bad
+}
+
+export const levelOf = (kind: LevelKind, pct: number, levels: Levels): Level => bandLevel(pct, levels[kind], isHighGood(kind))
+
+export const levelText = (kind: LevelKind, { warn, bad }: LevelBand) =>
+  isHighGood(kind) ? `amber below ${warn}%, red below ${bad}%` : `amber from ${warn}%, red from ${bad}%`
+
+function sanitizeLevels(stored: unknown): Levels {
+  const s = (typeof stored === 'object' && stored !== null ? stored : {}) as Partial<Record<LevelKind, unknown>>
+  const out = { ...DEFAULT_CONFIG.levels }
+  for (const kind of LEVEL_KINDS) if (isLevelBand(kind, s[kind])) out[kind] = { warn: s[kind].warn, bad: s[kind].bad }
+  return out
 }
 
 /**
@@ -138,5 +170,6 @@ export function sanitizeConfig(stored: unknown): RouterConfig {
     autoHandoff: typeof s.autoHandoff === 'boolean' ? s.autoHandoff : DEFAULT_CONFIG.autoHandoff,
     showNext: typeof s.showNext === 'boolean' ? s.showNext : DEFAULT_CONFIG.showNext,
     warmHours: WARM_HOURS.includes(s.warmHours as WarmHours) ? (s.warmHours as WarmHours) : DEFAULT_CONFIG.warmHours,
+    levels: sanitizeLevels(s.levels),
   }
 }

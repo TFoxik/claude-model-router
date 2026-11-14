@@ -23,7 +23,16 @@ export type RouterConfig = {
   showNext: boolean
   /** The longest a keep-warm run pings before it stops on its own. */
   warmHours: WarmHours
+  /** Where the band's cache, context and plan-limit percentages turn amber and red. */
+  levels: Levels
 }
+/**
+ * Percent thresholds for one band reading. Cache is good when high, so it turns amber below `warn` and red below `bad`;
+ * context and the plan limits are good when low, so they turn amber at `warn` and red at `bad`.
+ */
+export type LevelBand = { warn: number; bad: number }
+export type Levels = { cache: LevelBand; context: LevelBand; limits: LevelBand }
+export type LevelKind = keyof Levels
 export type WarmHours = 1 | 2 | 4 | 6
 /** A keep-warm run: when it started, when it stops at the latest, and what its pings cost so far. */
 export type WarmRun = { until: number; usd: number; pings: number }

@@ -1,3 +1,4 @@
+import type { LevelBand } from '../../types'
 import { kTokens, printable, shortPath } from '../core/format'
 import { contextLevel } from '../core/pricing'
 import { contextTips, tokensByServer } from '../core/tips'
@@ -80,7 +81,7 @@ export function contextMobileView({ Text }: Els) {
 }
 
 /** `unused`: idle MCP servers, plugins and skills, each with its fix, listed in full below the tips; each one's `replaces` drops the size tip it says more than. */
-type ContextData = { breakdown: Breakdown | undefined; isTerminal: boolean; columns: number; advice?: Pick<Advice, 'verdict' | 'text'>; unused?: readonly Tip[]; explored?: number; away?: Away; warm?: WarmOffer }
+type ContextData = { breakdown: Breakdown | undefined; isTerminal: boolean; columns: number; advice?: Pick<Advice, 'verdict' | 'text'>; unused?: readonly Tip[]; explored?: number; away?: Away; warm?: WarmOffer; levels: LevelBand }
 // Beyond this many, the section points at /route unused for the rest.
 const UNUSED_SHOWN = 6
 
@@ -96,7 +97,7 @@ export type ContextActions = { act: (action: TipAction) => void; startWarm: () =
 /** Whether the Away section's Keep-warm row offers a start, or a stop for the run going on; absent where it can't help. */
 type WarmOffer = 'offer' | 'running'
 
-export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, advice, unused = [], explored, away, warm }: ContextData, act?: ContextActions) {
+export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, advice, unused = [], explored, away, warm, levels }: ContextData, act?: ContextActions) {
   const { Box, Text } = els
   const Svg = 'Svg' in els ? els.Svg : undefined
   if (b === undefined) return <Text dimColor>No context breakdown available yet.</Text>
@@ -130,7 +131,7 @@ export function contextPaneView(els: Els, { breakdown: b, isTerminal, columns, a
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="row" justifyContent="space-between">
         <Text bold color="claude">Context</Text>
-        <Text bold color={contextLevel(b.totalTokens, b.rawMaxTokens, b.isAutoCompactEnabled ? b.autoCompactThreshold : undefined)}>
+        <Text bold color={contextLevel(b.totalTokens, b.rawMaxTokens, b.isAutoCompactEnabled ? b.autoCompactThreshold : undefined, levels)}>
           {kTokens(b.totalTokens)} / {kTokens(b.rawMaxTokens)} · {b.percentage}%
         </Text>
       </Box>

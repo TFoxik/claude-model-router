@@ -1,4 +1,4 @@
-import type { Effort, ModelKey, Rewrite } from '../../types'
+import type { Effort, LevelBand, ModelKey, Rewrite } from '../../types'
 import { printable } from './format'
 
 export const PRICES_AS_OF = '2026-10-06'
@@ -116,11 +116,17 @@ export const SMALL_CONTEXT = 20_000
 
 /**
  * Colour for context use, measured against where auto-compaction fires when
- * known (else the whole window): green below 60%, amber to 85%, red after.
+ * known (else the whole window): green below `band.warn` percent, amber to `band.bad`, red after.
  */
-export function contextLevel(tokens: number, window: number, compactAt?: number): 'success' | 'warning' | 'error' {
-  const toward = contextFill(tokens, window, compactAt)
-  return toward >= CONTEXT_CRITICAL ? 'error' : toward >= CONTEXT_WARN ? 'warning' : 'success'
+export function contextLevel(tokens: number, window: number, compactAt: number | undefined, band: LevelBand): Level {
+  return bandLevel(contextFill(tokens, window, compactAt) * 100, band, false)
+}
+
+export type Level = 'success' | 'warning' | 'error'
+
+export function bandLevel(pct: number, { warn, bad }: LevelBand, isHighGood: boolean): Level {
+  if (isHighGood) return pct < bad ? 'error' : pct < warn ? 'warning' : 'success'
+  return pct >= bad ? 'error' : pct >= warn ? 'warning' : 'success'
 }
 
 export const CONTEXT_WARN = 0.6

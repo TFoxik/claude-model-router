@@ -57,7 +57,7 @@ export async function closeCostPanes($: $): Promise<void> {
 }
 
 export function costBand(cfg: RouterConfig, health: Health | null, total: number): BandPart | undefined {
-  return cfg.isCost ? costBandPart(health, total) : undefined
+  return cfg.isCost ? costBandPart(health, total, cfg.levels) : undefined
 }
 
 export async function costOnSessionStart($: $, scope: unknown): Promise<void> {

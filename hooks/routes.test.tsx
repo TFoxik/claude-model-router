@@ -1,7 +1,8 @@
 import type { Args, EngineInterface, On } from 'claude-code'
 import { expect, mock, test as engineTest } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { CostTab, Lesson } from '../types'
+import type { CostTab, Lesson, LevelBand, LevelKind } from '../types'
+import { levelOptions } from './routing/routes-pane'
 import { HANDOFF_PROMPT } from './handoffs/handoff'
 import { paneOf } from './ui/kit'
 
@@ -30,6 +31,7 @@ import {
 } from './core/ledger'
 import {
   DEFAULT_CONFIG,
+  levelOf,
   sanitizeConfig,
   startingConfig,
 } from './core/config'
@@ -427,6 +429,27 @@ test('footer shows cache, context and the 5h window', async ($, on) => {
   await ui.unmount()
 })
 
+test('the band colours cache, context and the 5h window by the configured levels, not the defaults', async ($, on) => {
+  mock.store(on, { config: { ...DEFAULT_CONFIG, levels: { cache: { warn: 99, bad: 97 }, context: { warn: 5, bad: 9 }, limits: { warn: 30, bad: 35 } } } })
+  on('session.usage', () => ({
+    value: { startedAt: 0, context: { tokens: 100_000, window: 1_000_000, percent: 10 }, rateLimits: [{ kind: 'five_hour', percentUsed: 38.4 }, { kind: 'seven_day', percentUsed: 12 }] },
+  }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: { model: opus, input_tokens: 1000, cache_read_input_tokens: 96_000, cache_creation_input_tokens: 3000, output_tokens: 500 } }
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await step($, 'h1')
+  const band = await bandOf($)
+  const colorOf = async (text: RegExp) => (await band.find({ type: 'Text', text }))?.props.color
+  expect(await colorOf(/^96%$/)).toBe('error')
+  expect(await colorOf(/^10%$/)).toBe('error')
+  expect(await colorOf(/^38%$/)).toBe('error')
+  expect(await colorOf(/^12%$/)).toBe('success')
+  await band.unmount()
+})
+
 test('last is the whole prompt: main steps and its subagents, reset on the next prompt', async ($, on) => {
   mock.store(on)
   const usage = { model: opus, input_tokens: 1000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 0 }
@@ -514,12 +537,28 @@ test('the context pane breaks the window down', async ($, on) => {
   }
 })
 
+const CTX = DEFAULT_CONFIG.levels.context
+
 test('context colour follows distance to auto-compaction', () => {
-  expect(contextLevel(500_000, 1_000_000)).toBe('success')
-  expect(contextLevel(700_000, 1_000_000)).toBe('warning')
-  expect(contextLevel(900_000, 1_000_000)).toBe('error')
-  expect(contextLevel(500_000, 1_000_000, 800_000)).toBe('warning')
-  expect(contextLevel(700_000, 1_000_000, 800_000)).toBe('error')
+  expect(contextLevel(500_000, 1_000_000, undefined, CTX)).toBe('success')
+  expect(contextLevel(700_000, 1_000_000, undefined, CTX)).toBe('warning')
+  expect(contextLevel(900_000, 1_000_000, undefined, CTX)).toBe('error')
+  expect(contextLevel(500_000, 1_000_000, 800_000, CTX)).toBe('warning')
+  expect(contextLevel(700_000, 1_000_000, 800_000, CTX)).toBe('error')
+  expect(contextLevel(500_000, 1_000_000, undefined, { warn: 40, bad: 70 })).toBe('warning')
+  expect(contextLevel(700_000, 1_000_000, undefined, { warn: 40, bad: 70 })).toBe('error')
+  expect(contextLevel(300_000, 1_000_000, undefined, { warn: 40, bad: 70 })).toBe('success')
+})
+
+test('band colours: cache is good high, context and limits good low, and only ordered whole percents are kept', () => {
+  const levels = DEFAULT_CONFIG.levels
+  expect([80, 79, 50, 49].map(pct => levelOf('cache', pct, levels))).toEqual(['success', 'warning', 'warning', 'error'])
+  expect([59, 60, 85].map(pct => levelOf('context', pct, levels))).toEqual(['success', 'warning', 'error'])
+  expect([69, 70, 90].map(pct => levelOf('limits', pct, levels))).toEqual(['success', 'warning', 'error'])
+  expect(sanitizeConfig({ levels: { context: { warn: 50, bad: 75 } } }).levels).toEqual({ ...levels, context: { warn: 50, bad: 75 } })
+  expect(sanitizeConfig({ levels: { context: { warn: 75, bad: 50 }, cache: { warn: 50, bad: 80 }, limits: { warn: 0, bad: 101 } } }).levels).toEqual(levels)
+  expect(sanitizeConfig({ levels: { cache: { warn: 90, bad: 60 }, limits: { warn: 50.5, bad: 80 } } }).levels).toEqual({ ...levels, cache: { warn: 90, bad: 60 } })
+  expect(sanitizeConfig({}).levels).toEqual(levels)
 })
 
 test('commands are labelled and ranked by average cost', () => {
@@ -2461,7 +2500,7 @@ test('with context or handoffs off their sub-settings stay greyed with no contro
   expect(await pane.find({ key: 'guard' })).toBeUndefined()
   expect(await pane.find({ key: 'next-toggle' })).toBeUndefined()
   expect(await pane.find({ key: 'handoff-toggle' })).toBeUndefined()
-  expect(await pane.findAll({ type: 'Text', text: 'needs Context' })).toHaveLength(3)
+  expect(await pane.findAll({ type: 'Text', text: 'needs Context' })).toHaveLength(5)
   expect(await pane.findAll({ type: 'Text', text: 'needs Handoffs' })).toHaveLength(1)
   expect(await pane.find({ type: 'Text', text: /saves a handoff while the cache is warm/ })).toBeDefined()
   expect(await pane.find({ key: 'ttl' })).toBeDefined()
@@ -2470,7 +2509,8 @@ test('with context or handoffs off their sub-settings stay greyed with no contro
   expect(await pane.find({ key: 'guard' })).toBeDefined()
   expect(await pane.find({ key: 'next-toggle' })).toBeDefined()
   expect(await pane.find({ key: 'handoff-toggle' })).toBeDefined()
-  expect(await pane.findAll({ type: 'Text', text: /^needs / })).toHaveLength(0)
+  expect(await pane.findAll({ type: 'Text', text: /^needs / })).toHaveLength(1)
+  expect(await pane.find({ type: 'Text', text: 'needs Cost' })).toBeDefined()
   await pane.unmount()
 })
 
@@ -2678,7 +2718,7 @@ test('the Routes pane sets the keep-warm ceiling, greyed with Context off', asyn
   expect((await route($, 'warm')).text).toBe('Keeping the cache warm for up to 2 h; it stops when you send anything.')
   await route($, 'warm stop')
   await pane.press({ key: 'context-toggle' })
-  expect(await pane.findAll({ type: 'Text', text: 'needs Context' })).toHaveLength(3)
+  expect(await pane.findAll({ type: 'Text', text: 'needs Context' })).toHaveLength(5)
   await pane.unmount()
 })
 
@@ -2767,6 +2807,39 @@ test('the Routes pane turns keep-warm on and off next to its ceiling, and says w
   await pane.press({ key: 'warm-toggle' })
   await pane.unmount()
   expect(await isRunning()).toBe(false)
+})
+
+test('/route levels sets, shows and resets the band colours, and refuses a pair in the wrong order', async ($, on) => {
+  mock.store(on)
+  guardSession(on, { context: 40_000, usage: usageOf(40_000) })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  expect((await route($, 'levels context 50 75')).text).toMatch(/context amber from 50%, red from 75%/)
+  expect((await route($, 'levels cache 90 60')).text).toMatch(/cache amber below 90%, red below 60%/)
+  expect((await route($, 'levels context 75 50')).text).toMatch(/^context needs whole percents from 1 to 100, amber below red/)
+  expect((await route($, 'levels cache 50 90')).text).toMatch(/^cache needs whole percents from 1 to 100, amber above red/)
+  expect((await route($, 'levels limits 60')).text).toMatch(/^Usage: \/route levels/)
+  expect((await route($, 'levels')).text).toMatch(/context amber from 50%, red from 75% · limits amber from 70%, red from 90%/)
+  expect((await route($, 'levels reset')).text).toMatch(/cache amber below 80%, red below 50% · context amber from 60%, red from 85%/)
+})
+
+test('the Routes pane sets band colours, offers only values that keep amber before red, and greys them with their feature off', async ($, on) => {
+  mock.store(on)
+  guardSession(on, { context: 40_000, usage: usageOf(40_000) })
+  on('session.model', () => ({ value: opus }))
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  const pane = await mountPane($, 'route')
+  expect(await pane.find({ type: 'Text', text: 'amber from 60%, red from 85%, toward auto-compact' })).toBeDefined()
+  await pane.select({ key: 'level-context-warn', value: '50' })
+  await pane.select({ key: 'level-cache-bad', value: '40' })
+  expect((await route($, 'levels')).text).toMatch(/cache amber below 80%, red below 40% · context amber from 50%, red from 85%/)
+  const offered = (kind: LevelKind, band: LevelBand, side: keyof LevelBand) => levelOptions(kind, band, side).map(one => one.value)
+  expect(offered('context', { warn: 50, bad: 85 }, 'warn')).toContain('80')
+  expect(offered('context', { warn: 50, bad: 85 }, 'warn')).not.toContain('85')
+  expect(offered('cache', { warn: 80, bad: 40 }, 'bad')).not.toContain('80')
+  expect(offered('cache', { warn: 80, bad: 43 }, 'bad')).toContain('43')
+  await route($, 'cost off')
+  expect(await pane.find({ key: 'level-limits-warn' })).toBeUndefined()
+  await pane.unmount()
 })
 
 test('the band names the app model the route overrides, and says nothing when the route inherits it', async ($, on) => {

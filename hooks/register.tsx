@@ -1,9 +1,9 @@
 import type { Args, EngineInterface, Register } from 'claude-code'
 
-import type { ColdGuard, RouterConfig } from '../types'
+import type { ColdGuard, LevelBand, LevelKind, Levels, RouterConfig } from '../types'
 import { commandLabel, printable, typedText, versionOf } from './core/format'
 import { EMPTY_PROMPT, sanitizeHistory, sumUsd, withoutText } from './core/ledger'
-import { CACHE_TTLS, FEATURES, featureOf, isFeatureOn, offText, startingConfig } from './core/config'
+import { CACHE_TTLS, DEFAULT_CONFIG, FEATURES, LEVEL_KINDS, featureOf, isFeatureOn, isHighGood, isLevelBand, levelText, offText, startingConfig } from './core/config'
 import type { Feature } from './core/config'
 import { backfillUsage, flushUsage, listCommands, noteCommand, startItems } from './core/items'
 import { USER_ORIGINS, noteSpawn, noteToolCall, promptTokens, recordPrompt, recordStep, refreshStatus, resetSignals, routeKeyOfAgent } from './core/measure'
@@ -139,6 +139,28 @@ function aliased(words: readonly string[]): string[] {
   return [...words]
 }
 
+const levelsText = (levels: Levels) => LEVEL_KINDS.map(kind => `${kind} ${levelText(kind, levels[kind])}`).join(' · ')
+
+async function setLevel($: $, kind: LevelKind, band: LevelBand): Promise<RouterConfig | undefined> {
+  return isLevelBand(kind, band) ? setConfigAndRefresh($, c => ({ ...c, levels: { ...c.levels, [kind]: band } })) : undefined
+}
+
+const LEVELS_USAGE = 'Usage: /route levels [cache|context|limits <amber> <red> | reset]. Cache turns amber below <amber>; context and the 5h/7d limits turn amber at <amber>.'
+
+async function levelsVerb($: $, rest: string[]): Promise<string> {
+  const [kind, amber, red] = rest
+  if (kind === undefined) return `Band colours: ${levelsText((await configOf($)).levels)}. ${LEVELS_USAGE}`
+  if (kind === 'reset' && amber === undefined) {
+    const next = await setConfigAndRefresh($, c => ({ ...c, levels: DEFAULT_CONFIG.levels }))
+    return `Band colours reset: ${levelsText(next.levels)}.`
+  }
+  const k = LEVEL_KINDS.find(one => one === kind)
+  if (k === undefined || red === undefined) return LEVELS_USAGE
+  const next = await setLevel($, k, { warn: Number(amber), bad: Number(red) })
+  if (next === undefined) return `${kind} needs whole percents from 1 to 100, amber ${isHighGood(k) ? 'above' : 'below'} red. ${LEVELS_USAGE}`
+  return `Band colours: ${levelsText(next.levels)}.`
+}
+
 async function shellVerb($: $, verb: string, rest: string[]): Promise<{ text: string } | undefined> {
   if (verb === 'stats' && rest[0] === 'clear') {
     await setHistory($, () => [])
@@ -155,6 +177,7 @@ async function shellVerb($: $, verb: string, rest: string[]): Promise<{ text: st
     await setConfigAndRefresh($, c => ({ ...c, cacheTtlMinutes: minutes }))
     return { text: `Cache lifetime set to ${minutes} minutes.` }
   }
+  if (verb === 'levels') return { text: await levelsVerb($, rest) }
   if (verb === 'band') {
     const isShown = rest[0] !== 'off'
     await setBand($, isShown)
@@ -163,7 +186,7 @@ async function shellVerb($: $, verb: string, rest: string[]): Promise<{ text: st
   return undefined
 }
 
-const USAGE = `[features | ${FEATURES.map(one => one.key).join('|')} on|off | on | off | cost [last|session|history] | last | stats [clear | text on|off] | context | learn [mute|unmute <topic>] | handoffs [auto on|off] | next on|off | away | unused | preset <name> | set <route> <model> [effort] | band on|off | guard refuse|warn|off | ttl 5|60]`
+const USAGE = `[features | ${FEATURES.map(one => one.key).join('|')} on|off | on | off | cost [last|session|history] | last | stats [clear | text on|off] | context | learn [mute|unmute <topic>] | handoffs [auto on|off] | next on|off | away | unused | preset <name> | set <route> <model> [effort] | band on|off | guard refuse|warn|off | ttl 5|60 | levels [cache|context|limits <amber> <red> | reset]]`
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -402,6 +425,7 @@ export const register: Register = on => {
       setWarmHours: hours => void setConfigAndRefresh($, c => ({ ...c, warmHours: hours })),
       setWarm: isOn => void (isOn ? startWarmWithToast($) : stopWarm($)).catch(() => undefined),
       setKeepText: keep => void setKeepText($, keep),
+      setLevels: (kind, band) => void setLevel($, kind, band),
       openHandoffs: () => openPane($)('handoffs'),
     }),
   )

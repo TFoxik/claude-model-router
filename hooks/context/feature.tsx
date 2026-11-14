@@ -114,7 +114,7 @@ async function renderContextPane($: $, e: Args<'ui.render'>) {
   const tips = [...idleTips(idle, withServerNames(loaded.names, servers), tokensByServer(servers), { root: session.root, tokens }), ...skillTips(idle, only, loaded.own, session.root, tokens), ...claudeAiTips(idle, loaded.syncedCount, tokens)]
   const run = await warmRunOf($)
   const warm = run !== null ? 'running' : facts !== undefined && warmBlock(cfg, facts.warmMinutes) === undefined ? 'offer' : undefined
-  const data = { breakdown: b, isTerminal: e.surface === 'terminal', columns, advice: advice || undefined, explored: session.explored, unused: tips, away, warm } as const
+  const data = { breakdown: b, isTerminal: e.surface === 'terminal', columns, advice: advice || undefined, explored: session.explored, unused: tips, away, warm, levels: cfg.levels.context } as const
   const fill = (text: string) => void $.prompt.fill({ text, mode: 'replace' }).catch(() => undefined)
   // A menu such as /mcp opens as if typed; where the engine refuses, it is left in the prompt instead.
   const act = (action: TipAction) => (action.isSlash ? void $.command.run({ command: action.command }).catch(() => fill(`/${action.command}`)) : fill(action.command))
@@ -136,7 +136,7 @@ export async function closeContextPane($: $): Promise<void> {
 }
 
 export function contextBand(cfg: RouterConfig, health: Health | null): BandPart | undefined {
-  return cfg.isContext ? contextBandPart(health) : undefined
+  return cfg.isContext ? contextBandPart(health, cfg.levels) : undefined
 }
 
 export function warmBand(cfg: RouterConfig, run: WarmRun | null, now: number, stop: () => void): BandPart | undefined {

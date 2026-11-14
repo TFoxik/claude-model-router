@@ -90,6 +90,7 @@ Then restart or run `/reload-plugins`. Saved settings carry over. See [CHANGELOG
 | `/route guard refuse\|warn\|off` | What a send onto a cold cache does (default `refuse`: held once with its price); also the Routes pane's **Cold-cache guard** row |
 | `/route ttl 5\|60` | Prompt-cache lifetime for the warm/cold timer (default 60); also the Routes pane's **Cache lifetime** row |
 | `/route band on\|off` | Show or hide the band; also the Routes pane's **Band** row. Routing works either way |
+| `/route levels [cache\|context\|limits <amber> <red> \| reset]` | Where the band's percentages turn amber and red. Cache turns amber below `<amber>` (default 80, red below 50); context (default 60/85, measured toward auto-compact) and the 5h/7d limits (default 70/90) turn amber from `<amber>`. Bare `levels` shows them; also the Routes pane's **Band colours** rows |
 
 Routes: `main`, `plan`, `sub:*`, `sub:<agent-type>` (such as `sub:Explore`), `workflow`, `teammate`. Models: `opus`, `sonnet`, `haiku`, `fable`, `inherit`. Efforts: `low` through `max`, `auto` (main and plan only), `inherit`.
 

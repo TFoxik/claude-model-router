@@ -1,10 +1,9 @@
-import type { Health } from '../../types'
+import type { Health, Levels } from '../../types'
+import { levelOf } from '../core/config'
 import { money } from '../core/format'
 import type { BandPart } from '../ui/band'
 
-const level = (value: number, warn: number, bad: number) => (value >= bad ? 'error' : value >= warn ? 'warning' : undefined)
-
-export function costBandPart(health: Health | null, total: number): BandPart {
+export function costBandPart(health: Health | null, total: number, levels: Levels): BandPart {
   return {
     segment: ({ Text }) => {
       if (health === null) return null
@@ -15,7 +14,7 @@ export function costBandPart(health: Health | null, total: number): BandPart {
           {limits.map(([name, pct]) => (
             <Text key={`l:${name}`}>
               {` · ${name} `}
-              <Text color={level(pct, 70, 90)}>{pct}%</Text>
+              <Text color={levelOf('limits', pct, levels)}>{pct}%</Text>
             </Text>
           ))}
         </Text>

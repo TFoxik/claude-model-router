@@ -119,7 +119,7 @@ export async function refreshStatus($: $): Promise<HealthTick | undefined> {
     cache: prompt > 0 ? Math.round((last.cacheRead / prompt) * 100) : 0,
     warmMinutes,
     ctx: (session.compactedTokens === undefined && context.percent) || Math.round((tokens / context.window) * 100),
-    ctxLevel: contextLevel(tokens, context.window, session.compactAt),
+    ctxLevel: contextLevel(tokens, context.window, session.compactAt, cfg.levels.context),
     last: (await promptCostOf($))?.usd ?? last.usd,
     ...(warmMinutes === 0 && tokens >= GUARD_MIN_TOKENS ? { coldUsd: rewritePrice(model, tokens, ttl).write } : {}),
     ...(five ? { fiveHour: Math.round(five.percentUsed) } : {}),
@@ -130,7 +130,7 @@ export async function refreshStatus($: $): Promise<HealthTick | undefined> {
   await setHealth($, next)
   const tick: HealthTick = { cfg, warmMinutes, tokens, model, warmRun }
   if (!cfg.isLearning) return tick
-  for (const draft of [lessonFromContext(prev?.ctxLevel, next.ctxLevel, tokens, model, ttl, session.compactAt !== undefined), ...(cfg.showNext && cfg.isContext ? [lessonFromAdvice(prev?.advice, advice)] : [])]) {
+  for (const draft of [lessonFromContext(prev?.ctxLevel, next.ctxLevel, tokens, model, ttl, session.compactAt !== undefined, cfg.levels.context), ...(cfg.showNext && cfg.isContext ? [lessonFromAdvice(prev?.advice, advice)] : [])]) {
     pushLesson(draft)
   }
   // The one lesson that can't wait for a turn to end: by then the cache has gone cold. Queued, because a refresh that

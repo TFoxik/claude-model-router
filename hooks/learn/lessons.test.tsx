@@ -102,17 +102,19 @@ test('subagents lesson: share, the busiest route, and a reroute hint only for su
 })
 
 test('context lesson: a heads-up when the level rises, never on the first reading or an unknown model', () => {
-  expect(cents([lessonFromContext('success', 'warning', 300_000, opus, 60, true)!])[0]).toEqual({
+  expect(cents([lessonFromContext('success', 'warning', 300_000, opus, 60, true, { warn: 60, bad: 85 })!])[0]).toEqual({
     kind: 'context-high',
     usd: 0.06,
     fact: 'Context reached 300k tokens, past 60% of the way to auto-compact. From here every turn re-reads all of it: about $0.06 a turn on Opus 5.5 while the cache is warm, $2.40 if it goes cold. Finishing this task and running /clear brings that back down.',
   })
-  expect(lessonFromContext('warning', 'error', 300_000, opus, 60, true)!.fact).toMatch(/^Context reached 300k tokens, past 85% of the way to auto-compact\./)
-  expect(lessonFromContext('success', 'warning', 300_000, opus, 60, false)!.fact).toMatch(/^Context reached 300k tokens, past 60% of the context window\./)
-  expect(lessonFromContext(undefined, 'error', 300_000, opus, 60, true)).toBeUndefined()
-  expect(lessonFromContext('warning', 'warning', 300_000, opus, 60, true)).toBeUndefined()
-  expect(lessonFromContext('error', 'warning', 300_000, opus, 60, true)).toBeUndefined()
-  expect(lessonFromContext('success', 'warning', 300_000, 'gpt-something', 60, true)).toBeUndefined()
+  expect(lessonFromContext('warning', 'error', 300_000, opus, 60, true, { warn: 60, bad: 85 })!.fact).toMatch(/^Context reached 300k tokens, past 85% of the way to auto-compact\./)
+  expect(lessonFromContext('success', 'warning', 300_000, opus, 60, false, { warn: 60, bad: 85 })!.fact).toMatch(/^Context reached 300k tokens, past 60% of the context window\./)
+  expect(lessonFromContext('success', 'warning', 300_000, opus, 60, true, { warn: 40, bad: 70 })!.fact).toMatch(/^Context reached 300k tokens, past 40% of the way to auto-compact\./)
+  expect(lessonFromContext('warning', 'error', 300_000, opus, 60, true, { warn: 40, bad: 70 })!.fact).toMatch(/^Context reached 300k tokens, past 70% of the way to auto-compact\./)
+  expect(lessonFromContext(undefined, 'error', 300_000, opus, 60, true, { warn: 60, bad: 85 })).toBeUndefined()
+  expect(lessonFromContext('warning', 'warning', 300_000, opus, 60, true, { warn: 60, bad: 85 })).toBeUndefined()
+  expect(lessonFromContext('error', 'warning', 300_000, opus, 60, true, { warn: 60, bad: 85 })).toBeUndefined()
+  expect(lessonFromContext('success', 'warning', 300_000, 'gpt-something', 60, true, { warn: 60, bad: 85 })).toBeUndefined()
 })
 
 test('expiry lesson: once, as the warm time crosses the warning mark, over a big context', () => {

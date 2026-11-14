@@ -1,4 +1,4 @@
-import type { Effort, Health, LearnCard, Lesson, LessonKind, PromptCost, PromptItem, Rewrite } from '../../types'
+import type { Effort, Health, LearnCard, Lesson, LessonKind, LevelBand, PromptCost, PromptItem, Rewrite } from '../../types'
 import type { Advice } from '../core/strategy'
 import { fmtAge, kTokens, money, plural, printable } from '../core/format'
 import { GUARD_MIN_TOKENS, KEEP_WARM_TTL, MODELS, PRICES_AS_OF, costOf, labelOf, modelKeyOf, rewritePrice } from '../core/pricing'
@@ -166,10 +166,11 @@ export function lessonFromContext(
   model: string,
   ttlMinutes: number,
   hasAutoCompact: boolean,
+  band: LevelBand,
 ): LessonDraft | undefined {
   if (prev === undefined || RANK[next] <= RANK[prev] || next === 'success' || modelKeyOf(model) === undefined) return undefined
   const { write, warm } = rewritePrice(model, tokens, ttlMinutes)
-  const share = next === 'error' ? '85%' : '60%'
+  const share = `${next === 'error' ? band.bad : band.warn}%`
   const how = hasAutoCompact ? `past ${share} of the way to auto-compact` : `past ${share} of the context window`
   return {
     kind: 'context-high',

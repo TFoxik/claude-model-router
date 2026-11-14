@@ -1,8 +1,9 @@
-import type { Health, WarmRun } from '../../types'
+import type { Health, Levels, WarmRun } from '../../types'
+import { levelOf } from '../core/config'
 import { fmtLeft, money } from '../core/format'
 import type { BandPart } from '../ui/band'
 
-export function contextBandPart(health: Health | null): BandPart {
+export function contextBandPart(health: Health | null, levels: Levels): BandPart {
   const advice = health?.advice
   return {
     segment: ({ Text }) =>
@@ -13,7 +14,7 @@ export function contextBandPart(health: Health | null): BandPart {
             <Text color="error">{health.coldUsd === undefined ? 'cold' : `cold ${money(health.coldUsd)}`}</Text>
           ) : (
             <Text>
-              <Text color={health.cache < 50 ? 'error' : health.cache < 80 ? 'warning' : 'success'}>{health.cache}%</Text>{' '}
+              <Text color={levelOf('cache', health.cache, levels)}>{health.cache}%</Text>{' '}
               <Text color={health.warmMinutes <= 5 ? 'warning' : undefined}>{health.warmMinutes}m</Text>
             </Text>
           )}

@@ -1,7 +1,7 @@
 
 import type { RenderChildren } from 'claude-code'
 
-import type { ActiveRoute, ColdGuard, PromptCost, RouterConfig, RouteSetting, WarmHours } from '../../types'
+import type { ActiveRoute, ColdGuard, LevelBand, LevelKind, PromptCost, RouterConfig, RouteSetting, WarmHours } from '../../types'
 import {
   kTokens,
   money,
@@ -16,7 +16,7 @@ import {
 import {
   subagentCount,
 } from '../core/ledger'
-import { CACHE_TTLS, GUARDS, WARM_HOURS, featureOf } from '../core/config'
+import { CACHE_TTLS, GUARDS, WARM_HOURS, featureOf, isFeatureOn, isLevelBand, levelText } from '../core/config'
 import {
   PRESETS,
   ROUTES,
@@ -94,6 +94,7 @@ type PaneActions = {
   setWarmHours: (hours: WarmHours) => void
   setWarm: (isOn: boolean) => void
   setKeepText: (keep: boolean) => void
+  setLevels: (kind: LevelKind, band: LevelBand) => void
   apply: (next: RouterConfig) => void
   discard: () => void
 }
@@ -103,6 +104,24 @@ const TTL_OPTIONS = CACHE_TTLS.map(minutes => ({ value: String(minutes), label: 
 
 const WARM_OPTIONS = WARM_HOURS.map(hours => ({ value: String(hours), label: `${hours} h` }))
 const SELECT_W = 12
+const LEVEL_W = 9
+
+const LEVEL_STEPS = Array.from({ length: 20 }, (_, i) => (i + 1) * 5)
+
+const LEVEL_ROWS: ReadonlyArray<{ kind: LevelKind; name: string; needs: Feature }> = [
+  { kind: 'cache', name: 'Cache colour', needs: 'context' },
+  { kind: 'context', name: 'Context colour', needs: 'context' },
+  { kind: 'limits', name: '5h and 7d colour', needs: 'cost' },
+]
+
+/** Only values that keep amber and red in order, plus the current one if a command set it off the 5% grid. */
+export function levelOptions(kind: LevelKind, band: LevelBand, side: keyof LevelBand) {
+  const current = band[side]
+  const values = [...new Set([...LEVEL_STEPS, current])].sort((x, y) => x - y)
+  return values.filter(value => isLevelBand(kind, { ...band, [side]: value })).map(value => ({ value: String(value), label: `${value}%` }))
+}
+
+const levelNote = (kind: LevelKind, band: LevelBand) => `${levelText(kind, band)}${kind === 'context' ? ', toward auto-compact' : ''}`
 
 type Setting = {
   key: string
@@ -143,8 +162,8 @@ function settingsSection(els: InputEls, { cfg, isBand, warmLeft }: PaneData, a: 
   const toggle = (key: string, name: string, isOn: boolean, set: (isOn: boolean) => void, note: string, more: { extra?: RenderChildren; isChild?: boolean; needs?: Feature } = {}) =>
     settingRow(els, { key: `set-${key}`, name, state: { isOn }, note, controls: [more.extra, turn(`${key}-toggle`, isOn, set)], isChild: more.isChild, needs: more.needs })
   const unless = (isOn: boolean, f: Feature) => (isOn ? undefined : f)
-  const select = (key: string, options: Array<{ value: string; label: string }>, value: string, onSelect: (value: string) => void) => (
-    <Box width={SELECT_W}>
+  const select = (key: string, options: Array<{ value: string; label: string }>, value: string, onSelect: (value: string) => void, width = SELECT_W) => (
+    <Box width={width}>
       <Select key={key} options={options} value={value} onSelect={onSelect} />
     </Box>
   )
@@ -165,6 +184,21 @@ function settingsSection(els: InputEls, { cfg, isBand, warmLeft }: PaneData, a: 
         {group('Cost and context')}
         {toggle('cost', 'Cost', cfg.isCost, a.setCost, 'shows what each prompt costs: the Cost pane, the footer and the band\'s money; history keeps recording')}
         {toggle('context', 'Context', cfg.isContext, a.setContext, 'shows cache and context in the band, guards cold sends and advises the next step; measuring keeps running')}
+      </Box>
+      <Box flexDirection="column" gap={1}>
+        {group('Band colours')}
+        {LEVEL_ROWS.map(({ kind, name, needs }) => {
+          const band = cfg.levels[kind]
+          const pick = (side: keyof LevelBand) =>
+            select(`level-${kind}-${side}`, levelOptions(kind, band, side), String(band[side]), value => a.setLevels(kind, { ...band, [side]: Number(value) }), LEVEL_W)
+          return settingRow(els, {
+            key: `set-level-${kind}`,
+            name,
+            note: levelNote(kind, band),
+            controls: [pick('warn'), pick('bad')],
+            needs: unless(isFeatureOn(cfg, needs), needs),
+          })
+        })}
       </Box>
       <Box flexDirection="column" gap={1}>
         {group('Cache and display')}

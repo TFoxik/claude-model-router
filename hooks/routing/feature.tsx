@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Args, EngineInterface, On } from 'claude-code'
 
-import type { ActiveRoute, ColdGuard, Effort, RouterConfig, WarmHours } from '../../types'
+import type { ActiveRoute, ColdGuard, Effort, LevelBand, LevelKind, RouterConfig, WarmHours } from '../../types'
 import { fmtLeft } from '../core/format'
 import { sumUsd } from '../core/ledger'
 import { contextTokensNow, contextTokensOf, mainRoute, routeKeyOfAgent, setConfig, setPlan } from '../core/measure'
@@ -38,6 +38,7 @@ type RoutesPaneLinks = {
   setWarmHours: (hours: WarmHours) => void
   setWarm: (isOn: boolean) => void
   setKeepText: (keep: boolean) => void
+  setLevels: (kind: LevelKind, band: LevelBand) => void
   openHandoffs: () => void
 }
 

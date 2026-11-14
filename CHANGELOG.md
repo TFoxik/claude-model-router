@@ -8,6 +8,12 @@ Know when the router overrides the model you picked, and choose where the band's
 
 - **The band says when a route overrides the app's model.** When a route replaces the model the app would use, an amber `(app: Fable)` follows it: `▸ main · Opus 5.5 med (app: Fable)` means you're on Opus. To let the app decide, set that route to `inherit` or turn routing off. [Docs](https://tfoxik.github.io/claude-model-router/#band)
 - **Shorter efforts in the band.** `medium` shows as `med`.
+- **Choose where the band turns amber and red.** Routes › Band colours has an amber and a red picker for cache, context and the 5h / 7d limits, or use `/route levels context 50 75`. `/route levels` shows them, and `/route levels reset` restores the defaults. [Docs](https://tfoxik.github.io/claude-model-router/#routes)
+
+### ⬆️ Upgrade notes
+
+- The 5h and 7d limits now show green below their amber threshold, instead of no colour.
+- The defaults are unchanged: cache is amber below 80% and red below 50%; context is amber from 60% and red from 85% (measured toward auto-compact); the limits are amber from 70% and red from 90%.
 
 ## 1.9.1 — 2026-11-03
 
