@@ -446,14 +446,18 @@ export const register: Register = on => {
     const [card, isShown] = await Promise.all([learnBandCard($, e), isBandShownOf($)])
     const band = isShown ? await renderBand($, e) : await renderWarmLine($, e)
     if (card === null && band === null) return next(e)
-    const others = await next(e)
     const { Box } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
         {card}
         {band}
-        {others}
       </Box>
     )
+  })
+
+  on('ui.render', { component: 'AbovePromptList' }, ($, e, next) => {
+    const isOurs = (row: { plugin: string }) => row.plugin === 'model-router'
+    const { rows } = e.props
+    return next({ ...e, props: { ...e.props, rows: [...rows.filter(isOurs), ...rows.filter(row => !isOurs(row))] } })
   })
 }

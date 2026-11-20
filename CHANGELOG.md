@@ -8,6 +8,10 @@ Keep warm can now start by itself, so you don't have to remember it before a bre
 
 - **Keep warm by itself.** Turn on **Auto** in Routes › Keep warm, or `/route warm auto on`: an idle session starts keeping its cache warm 6 minutes before it expires, for up to the hours set after your last message. A break gets one run; your next message re-arms it. Auto-handoff still saves a handoff once the run ends. [Docs](https://tfoxik.github.io/claude-model-router/#routes)
 
+### 🐛 Bug fixes
+
+- **Another plugin's row could sit above the band** on Claude Code 2.1.329, which gives each plugin its own row above the prompt. The router's band is on top again.
+
 ### ⬆️ Upgrade notes
 
 - Auto is off by default, and it applies to every session once on. Sessions under 50k tokens of context are left alone, since rebuilding their cache costs less than keeping it warm.

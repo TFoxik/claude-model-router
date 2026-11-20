@@ -79,6 +79,14 @@ const mountCost = async ($: Engine, tab: CostTab) => {
 const mountBand = ($: Engine, surface: 'terminal' | 'desktop' = 'desktop', props: Record<string, unknown> = {}) =>
   $.ui.mount({ plugin: 'model-router', surface, component: 'AbovePrompt', props: props as never })
 const bandOf = ($: Engine) => mountBand($)
+type Drawn = { type?: string; props?: { key?: string; justifyContent?: string }; children?: unknown[] }
+/** Our row's own rows, then any other plugin's row the engine stacked below it. */
+const bandRows = async (band: Awaited<ReturnType<typeof bandOf>>) => {
+  const top = (((await band.drawn()) as Drawn).children ?? []) as Drawn[]
+  const isStack = top[0]?.type === 'Box' && top[0].props?.key === undefined
+  return isStack ? [...((top[0]!.children ?? []) as Drawn[]), ...top.slice(1)] : top
+}
+const rowKeys = async (band: Awaited<ReturnType<typeof bandOf>>) => (await bandRows(band)).map(one => one.props?.key ?? one.children?.[0])
 const buttonKeys = async (band: Awaited<ReturnType<typeof bandOf>>) => (await band.findAll({ type: 'Button' })).map(one => one.key)
 const useMine = ($: Engine) => $.command.run({ command: 'route', args: 'preset mine', origin: { kind: 'composer' } } as unknown as Args<'command.run'>)
 
@@ -316,9 +324,8 @@ test('the band is three rows with the route line alone on top, and has no Hide t
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'model-router', surface, component: 'AbovePrompt', props: {} as never })
-    const tree = await ui.drawn()
-    expect(tree).toMatchObject({ type: 'Box', props: { flexDirection: 'column' } })
-    const rows = ((tree as { children?: unknown[] }).children ?? []) as { props?: { key?: string; justifyContent?: string }; children?: unknown[] }[]
+    expect(await ui.drawn()).toMatchObject({ type: 'Box', props: { flexDirection: 'column' } })
+    const rows = await bandRows(ui)
     expect(rows.map(one => one.props?.key ?? one.children?.[0])).toEqual(['band-route', 'band-health', 'band-actions', 'engine'])
     expect(rows[2]!.props?.justifyContent).toBe('flex-end')
     expect(await ui.find({ type: 'Text', text: /Opus med\b/ })).toBeDefined()
@@ -1263,8 +1270,7 @@ test('with the band hidden the card still shows, above what else sits over the p
   await route($, 'band off')
   await prompt('cold', usageOf(0, 100_000))
   const band = await bandOf($)
-  const tree = (await band.drawn()) as { children?: Array<{ type?: string; props?: { key?: string }; children?: unknown[] }> }
-  expect(tree.children?.map(one => one.props?.key ?? one.children?.[0])).toEqual(['learn-card', 'engine'])
+  expect(await rowKeys(band)).toEqual(['learn-card', 'engine'])
   expect(await band.find({ key: 'band-open' })).toBeUndefined()
   await band.unmount()
 })
@@ -2429,10 +2435,6 @@ test('stats clear works with cost off', async ($, on) => {
   expect((await route($, 'band off')).text).toBe('Model router band hidden.')
 })
 
-const rowKeys = async (band: Awaited<ReturnType<typeof bandOf>>) => {
-  const tree = (await band.drawn()) as { children?: Array<{ props?: { key?: string }; children?: unknown[] }> }
-  return (tree.children ?? []).map(one => one.props?.key ?? one.children?.[0]).filter(key => key !== '')
-}
 
 test('another plugin\'s band stays below ours while the band is shown', async ($, on) => {
   mock.store(on, { bandShown: true, config: MINE })
@@ -2479,14 +2481,17 @@ test('with cost off the health row keeps cache and context only', async ($, on) 
   await back.unmount()
 })
 
-test('a failure of a plugin below the band reaches the engine; the band is not drawn over it', async ($, on) => {
+test('another plugin whose band row fails leaves ours drawn', async ($, on) => {
   mock.store(on, { bandShown: true, config: MINE })
   guardSession(on, { context: 1000, usage: usageOf(1000) })
   on('ui.render', { component: 'AbovePrompt' }, () => {
     throw new Error('below boom')
   })
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
-  await expect(bandOf($)).rejects.toThrow()
+  await step($, 'a')
+  const band = await bandOf($)
+  expect(await rowKeys(band)).toEqual(['band-route', 'band-health', 'band-actions'])
+  await band.unmount()
 })
 
 test('with context or handoffs off their sub-settings stay greyed with no control; a stale Cost or Context pane is closed at start', async ($, on) => {
