@@ -93,6 +93,7 @@ type PaneActions = {
   setTtl: (minutes: number) => void
   setWarmHours: (hours: WarmHours) => void
   setWarm: (isOn: boolean) => void
+  setAutoWarm: (isOn: boolean) => void
   setKeepText: (keep: boolean) => void
   setLevels: (kind: LevelKind, band: LevelBand) => void
   apply: (next: RouterConfig) => void
@@ -219,9 +220,10 @@ function settingsSection(els: InputEls, { cfg, isBand, warmLeft }: PaneData, a: 
           key: 'set-warm',
           name: 'Keep warm',
           state: { isOn: warmLeft !== undefined, on: `on · ${warmLeft}` },
-          note: 'pings the cache before it expires, for at most the hours set; stops when you send anything; 60-minute cache only',
+          note: `${cfg.autoWarm ? "starts by itself 6 min before an idle session's cache expires, for at most the hours set after your last message" : 'pings the cache before it expires, for at most the hours set'}; stops when you send anything; 60-minute cache only`,
           controls: [
             select('warm-hours', WARM_OPTIONS, String(cfg.warmHours), value => a.setWarmHours(Number(value) as WarmHours)),
+            <Button key="warm-auto" label={cfg.autoWarm ? 'Auto: on' : 'Auto: off'} onPress={() => a.setAutoWarm(!cfg.autoWarm)} />,
             turn('warm-toggle', warmLeft !== undefined, a.setWarm),
           ],
           needs: unless(cfg.isContext, 'context'),

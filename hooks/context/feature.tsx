@@ -3,7 +3,7 @@ import type { Args, EngineInterface, On } from 'claude-code'
 import type { ColdGuard, Health, RouterConfig, WarmRun } from '../../types'
 import { offText } from '../core/config'
 import { money, plural, printable } from '../core/format'
-import { GUARD_MIN_TOKENS, warmMinutesLeft } from '../core/pricing'
+import { GUARD_MIN_TOKENS, KEEP_WARM_TTL, warmMinutesLeft } from '../core/pricing'
 import { DEV_PATIENCE, claudeAiReport, claudeAiTips, idleReport, idleTips, listingTokens, mcpKey, patienceText, skillReport, skillTips } from '../core/usage'
 import type { ItemKey } from '../core/usage'
 import { idleHere, listCommands } from '../core/items'
@@ -11,7 +11,7 @@ import { USER_ORIGINS, awayFacts, coldSend, contextTokensOf, noteWarmPing, route
 import type { HealthTick } from '../core/measure'
 import { closePanes } from '../core/panes'
 import { session } from '../core/session'
-import { STORE, UNREADABLE, configOf, healthOf, lastUsageOf, load, nowOf, save, setWarmRun, warmRunOf } from '../core/state'
+import { STORE, UNREADABLE, configOf, healthOf, lastSendOf, lastUsageOf, load, nowOf, save, setLastSend, setWarmRun, warmRunOf } from '../core/state'
 import { adviseSession } from '../core/strategy'
 import { messagesOf, tokensByServer } from '../core/tips'
 import type { TipAction } from '../core/tips'
@@ -30,6 +30,7 @@ const mem = {
   // Slash commands seen to start a model turn, and the command that ran last, until a turn shows whether it did.
   modelCommands: new Set<string>(),
   lastCommand: undefined as string | undefined,
+  isLastCommandPerson: false,
 }
 
 /**
@@ -178,14 +179,16 @@ export async function holdColdCommand($: $, cfg: RouterConfig, e: Args<'command.
 }
 
 /** The command that ran last, until a turn shows whether it reached the model; a plain prompt clears it. */
-export function contextNoteCommand(name: string | undefined): void {
+export function contextNoteCommand(name: string | undefined, isPerson = false): void {
   mem.lastCommand = name
+  mem.isLastCommandPerson = isPerson
 }
 
 export async function contextOnTurnStart($: $): Promise<void> {
   if (mem.lastCommand === undefined) return
   const name = mem.lastCommand
   mem.lastCommand = undefined
+  if (mem.isLastCommandPerson) await contextOnPersonSend($)
   await learnModelCommand($, name).catch(() => undefined)
 }
 
@@ -210,16 +213,38 @@ export async function contextVerb($: $, verb: string, rest: string[], isPerson: 
   return undefined
 }
 
-const WARM_USAGE = 'Usage: /route warm [1-6h] (keep the cache warm while you are away) or /route warm stop'
+const HOUR_MS = 3_600_000
+
+const WARM_USAGE = 'Usage: /route warm [1-6h] (keep the cache warm while you are away), /route warm stop, or /route warm auto on|off (start it by itself when a session sits idle)'
 
 async function warmVerb($: $, rest: string[]): Promise<string> {
   if (rest[0] === 'stop' && rest.length === 1) {
     const run = await stopWarm($)
     return run === null ? "Keep warm isn't running." : `Keep warm stopped (${plural(run.pings, 'ping')}, ${money(run.usd)}).`
   }
+  if (rest[0] === 'auto') {
+    const isValid = rest.length === 2 && (rest[1] === 'on' || rest[1] === 'off')
+    return isValid ? (await autoWarmVerb($, rest[1] === 'on')).text : WARM_USAGE
+  }
   if (rest.length > 1) return WARM_USAGE
   const hours = rest[0] === undefined ? (await configOf($)).warmHours : parseWarmHours(rest[0])
   return hours === undefined ? WARM_USAGE : (await startWarm($, hours)).text
+}
+
+async function autoWarmVerb($: $, isOn: boolean): Promise<{ isArmed: boolean; text: string }> {
+  if (!(await configOf($)).isContext) return { isArmed: false, text: offText('context') }
+  const cfg = await setConfig($, c => ({ ...c, autoWarm: isOn }))
+  if (!isOn) return { isArmed: false, text: 'Auto keep warm off: start it with /route warm before a break.' }
+  if (cfg.cacheTtlMinutes !== KEEP_WARM_TTL) return { isArmed: false, text: 'Auto keep warm on, but it needs the 60-minute cache: /route ttl 60.' }
+  return { isArmed: true, text: `Auto keep warm on: an idle session starts keeping its cache warm ${PING_AT_MINUTES} min before it expires, for up to ${cfg.warmHours} h after your last message.` }
+}
+
+/** Every run, manual or auto, serves the idle stretch it starts in, so auto keep warm leaves that stretch alone. */
+async function beginRun($: $, until: number): Promise<WarmRun> {
+  const run = { until, usd: 0, pings: 0 }
+  await setLastSend($, s => (s === null ? null : { ...s, hasRun: true }))
+  await setWarmRun($, () => run)
+  return run
 }
 
 /** Starts a run, or says why it can't help: Context off, the 5-minute cache, or a cache already cold. */
@@ -227,7 +252,7 @@ export async function startWarm($: $, hours: number): Promise<{ isStarted: boole
   const [cfg, last, now] = await Promise.all([configOf($), lastUsageOf($), nowOf($)])
   const why = warmBlock(cfg, last === null ? 0 : warmMinutesLeft(last.at, now, cfg.cacheTtlMinutes))
   if (why !== undefined) return { isStarted: false, text: START_BLOCKED[why] }
-  await setWarmRun($, () => ({ until: now + hours * 3_600_000, usd: 0, pings: 0 }))
+  await beginRun($, now + hours * HOUR_MS)
   return { isStarted: true, text: `Keeping the cache warm for up to ${hours} h; it stops when you send anything.` }
 }
 
@@ -259,9 +284,46 @@ export async function contextOnUserInput($: $, origin: string): Promise<void> {
   if (USER_ORIGINS.has(origin)) await stopWarm($)
 }
 
+/** A person's prompt, or command, that reached the model opens a new idle stretch for auto keep warm. */
+export async function contextOnPersonSend($: $): Promise<void> {
+  const now = await nowOf($)
+  await setLastSend($, () => ({ at: now, hasRun: false }))
+}
+
+/** With Auto on, an idle session big enough to be worth it starts its own run as the ping window opens. */
+async function autoStartWarm($: $, tick: HealthTick): Promise<WarmRun | null> {
+  const { cfg } = tick
+  if (!cfg.autoWarm || session.isTurnRunning || tick.tokens < GUARD_MIN_TOKENS) return null
+  if (tick.warmMinutes > PING_AT_MINUTES || warmBlock(cfg, tick.warmMinutes) !== undefined) return null
+  const [sent, now] = await Promise.all([lastSendOf($), nowOf($)])
+  const until = sent === null ? 0 : sent.at + cfg.warmHours * HOUR_MS
+  if (sent === null || sent.hasRun || until <= now) return null
+  let isClaimed = false
+  await setLastSend($, s => {
+    if (s?.at !== sent.at || s.hasRun) return s
+    isClaimed = true
+    return { ...s, hasRun: true }
+  })
+  if (!isClaimed) return null
+  const run = await beginRun($, until)
+  // A send that landed during the awaits found no run to stop.
+  if ((await lastSendOf($))?.at !== sent.at) {
+    await setWarmRun($, () => null)
+    return null
+  }
+  $.ui.log(`model-router: keep-warm started on its own; it stops ${cfg.warmHours} h after your last message.`)
+  return run
+}
+
+/** The Routes pane's Auto button: a button has nowhere to answer, so a switch that can't act says why in a toast. */
+export async function setAutoWarmWithToast($: $, isOn: boolean): Promise<void> {
+  const { isArmed, text } = await autoWarmVerb($, isOn)
+  if (isOn && !isArmed) $.ui.toast(text)
+}
+
 /** On each status tick: ends a run at its limit or on a cold cache, and pings when the cache is in its last minutes. */
 export async function contextOnTick($: $, tick: HealthTick): Promise<void> {
-  const run = tick.warmRun
+  const run = tick.warmRun ?? (await autoStartWarm($, tick))
   if (run === null) return
   const now = await nowOf($)
   const why = warmBlock(tick.cfg, tick.warmMinutes) ?? (now >= run.until ? 'ceiling' : undefined)

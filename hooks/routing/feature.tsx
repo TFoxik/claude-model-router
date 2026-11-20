@@ -37,6 +37,7 @@ type RoutesPaneLinks = {
   setTtl: (minutes: number) => void
   setWarmHours: (hours: WarmHours) => void
   setWarm: (isOn: boolean) => void
+  setAutoWarm: (isOn: boolean) => void
   setKeepText: (keep: boolean) => void
   setLevels: (kind: LevelKind, band: LevelBand) => void
   openHandoffs: () => void

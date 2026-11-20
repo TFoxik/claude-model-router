@@ -1697,8 +1697,8 @@ test('the Context pane advises compacting from its own breakdown, before any req
 })
 
 /** An auto-handoff session: 200k tokens on a 60m cache, two steps open, the writes and plugin prompts collected. */
-async function handoffSession($: Engine, on: On, data: Record<string, unknown> = {}) {
-  data.config = { ...MINE, coldGuard: 'off', autoHandoff: true, cacheTtlMinutes: 60 }
+async function handoffSession($: Engine, on: On, data: Record<string, unknown> = {}, config: Record<string, unknown> = {}) {
+  data.config = { ...MINE, coldGuard: 'off', autoHandoff: true, cacheTtlMinutes: 60, ...config }
   sharedStore(on, data)
   const clock = mock.clock(on, { now: T0 })
   const usage = usageOf(200_000)
@@ -2527,6 +2527,12 @@ test('the keep-warm ceiling is read from the config, anything else falls back to
   expect(sanitizeConfig(old).warmHours).toBe(4)
 })
 
+test('autoWarm is read from the config, anything else falls back to off', () => {
+  expect(DEFAULT_CONFIG.autoWarm).toBe(false)
+  expect(sanitizeConfig({ ...DEFAULT_CONFIG, autoWarm: true }).autoWarm).toBe(true)
+  expect(sanitizeConfig({ ...DEFAULT_CONFIG, autoWarm: 'yes' }).autoWarm).toBe(false)
+})
+
 type ForkReply = { isAnswered: true; text: string; usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number } } | { isAnswered: false; reason: string; status?: number }
 const forkRead = (read: number): ForkReply => ({ isAnswered: true, text: 'OK', usage: { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: read, cache_creation_input_tokens: 0 } })
 
@@ -2548,11 +2554,15 @@ const WARM_BREAKDOWN = {
 }
 
 /** A 200k session on the 60-minute cache, one main request at T0; forks answer from `replies` in turn, then read the whole cache. */
-async function warmSession($: Engine, on: On, replies: ForkReply[] = [], config: Record<string, unknown> = {}, onFork?: () => Promise<void>) {
+async function warmSession($: Engine, on: On, replies: ForkReply[] = [], config: Record<string, unknown> = {}, onFork?: () => Promise<void>, tokens = 200_000) {
   mock.store(on, { config: { ...MINE, coldGuard: 'refuse', cacheTtlMinutes: 60, ...config } })
   const clock = mock.clock(on, { now: T0 })
-  guardSession(on, { context: 200_000, usage: usageOf(200_000), breakdown: WARM_BREAKDOWN })
-  on('ui.toast', () => ({ value: undefined }) as never)
+  guardSession(on, { context: tokens, usage: usageOf(tokens), breakdown: { ...WARM_BREAKDOWN, totalTokens: tokens } })
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined } as never
+  })
   const forks: string[] = []
   on('model.fork', async (_$, e) => {
     forks.push(e.prompt)
@@ -2565,9 +2575,10 @@ async function warmSession($: Engine, on: On, replies: ForkReply[] = [], config:
     return { value: undefined } as never
   })
   await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await submit($, 'a')
   await step($, 'a')
   const isRunning = async () => (await route($, 'warm stop')).text !== "Keep warm isn't running."
-  return { clock, forks, logs, isRunning }
+  return { clock, forks, logs, isRunning, toasts }
 }
 
 test('/route warm keeps the cache warm with a fork before each expiry until the ceiling', async ($, on) => {
@@ -2858,4 +2869,119 @@ test('the band names the app model the route overrides, and says nothing when th
   expect(await band.find({ type: 'Text', text: /^\(app:/ })).toBeUndefined()
   expect(await band.find({ type: 'Text', text: /^▸ main · Sonnet 5\.5/ })).toBeDefined()
   await band.unmount()
+})
+
+test('/route warm auto on|off sets auto keep warm and says when it cannot act', async ($, on) => {
+  await warmSession($, on, [], { warmHours: 2 })
+  expect((await route($, 'warm auto on')).text).toBe('Auto keep warm on: an idle session starts keeping its cache warm 6 min before it expires, for up to 2 h after your last message.')
+  expect((await route($, 'warm auto off')).text).toBe('Auto keep warm off: start it with /route warm before a break.')
+  await route($, 'ttl 5')
+  expect((await route($, 'warm auto on')).text).toBe('Auto keep warm on, but it needs the 60-minute cache: /route ttl 60.')
+  expect((await route($, 'warm auto')).text).toBe('Usage: /route warm [1-6h] (keep the cache warm while you are away), /route warm stop, or /route warm auto on|off (start it by itself when a session sits idle)')
+})
+
+test('the Routes pane Auto button turns auto keep warm on and off', async ($, on) => {
+  await warmSession($, on)
+  let pane = await mountPane($, 'route')
+  expect((await pane.find({ key: 'warm-auto' }))?.props.label).toBe('Auto: off')
+  await pane.press({ key: 'warm-auto' })
+  await pane.unmount()
+  pane = await mountPane($, 'route')
+  expect((await pane.find({ key: 'warm-auto' }))?.props.label).toBe('Auto: on')
+  await pane.press({ key: 'warm-auto' })
+  await pane.unmount()
+  pane = await mountPane($, 'route')
+  expect((await pane.find({ key: 'warm-auto' }))?.props.label).toBe('Auto: off')
+  await pane.unmount()
+})
+
+test('auto keep warm starts by itself in the last 6 minutes and logs it', async ($, on) => {
+  const { clock, forks, logs } = await warmSession($, on, [], { autoWarm: true, warmHours: 2 })
+  await clock.advance(53 * 60_000)
+  expect(forks).toEqual([])
+  await clock.advance(60_000)
+  expect(forks).toEqual(['Reply with OK.'])
+  expect(logs).toContain('model-router: keep-warm started on its own; it stops 2 h after your last message.')
+})
+
+test('an auto run stops at the limit counted from the last request and does not start again', async ($, on) => {
+  const { clock, forks, logs } = await warmSession($, on, [], { autoWarm: true, warmHours: 1 })
+  await clock.advance(54 * 60_000)
+  expect(forks).toHaveLength(1)
+  await clock.advance(7 * 60_000)
+  expect(logs.some(one => one.startsWith('model-router: keep-warm stopped: it reached its limit'))).toBe(true)
+  await clock.advance(60 * 60_000)
+  expect(forks).toHaveLength(1)
+})
+
+test('Stop warm keeps auto keep warm off until the next send, which re-arms it', async ($, on) => {
+  const { clock, forks } = await warmSession($, on, [], { autoWarm: true, warmHours: 4 })
+  await clock.advance(54 * 60_000)
+  await route($, 'warm stop')
+  await clock.advance(55 * 60_000)
+  expect(forks).toHaveLength(1)
+  await submit($, 'back')
+  await step($, 'b')
+  await clock.advance(54 * 60_000)
+  expect(forks).toHaveLength(2)
+})
+
+test('auto keep warm leaves the 5-minute cache alone', async ($, on) => {
+  const { clock, forks, logs } = await warmSession($, on, [], { autoWarm: true, cacheTtlMinutes: 5 })
+  await clock.advance(10 * 60_000)
+  expect(forks).toEqual([])
+  expect(logs.filter(one => one.includes('keep-warm'))).toEqual([])
+})
+
+test('auto keep warm leaves small sessions alone', async ($, on) => {
+  const { clock, forks } = await warmSession($, on, [], { autoWarm: true }, undefined, 40_000)
+  await clock.advance(55 * 60_000)
+  expect(forks).toEqual([])
+})
+
+test('auto keep warm waits while a turn is running', async ($, on) => {
+  const { clock, forks, logs } = await warmSession($, on, [], { autoWarm: true })
+  await $.turn.start({ text: 'long', turnId: 'long' })
+  await clock.advance(55 * 60_000)
+  expect(forks).toEqual([])
+  expect(logs.filter(one => one.includes('keep-warm'))).toEqual([])
+})
+
+test('auto-handoff fires after an auto run reaches its limit', async ($, on) => {
+  on('model.fork', () => ({ value: forkRead(200_000) }) as never)
+  const { clock, asked } = await handoffSession($, on, {}, { autoWarm: true, warmHours: 1 })
+  await clock.advance(59 * 60_000)
+  expect(asked).toEqual([])
+  await clock.advance(53 * 60_000)
+  expect(asked).toEqual([expect.stringContaining(HANDOFF_PROMPT)])
+})
+
+test('a command that never reaches the model does not bring back a stopped auto run', async ($, on) => {
+  const { clock, forks } = await warmSession($, on, [], { autoWarm: true, warmHours: 4 })
+  await clock.advance(54 * 60_000)
+  await route($, 'warm stop')
+  await $.command.run({ command: 'help', args: '', origin: { kind: 'composer' } } as unknown as Args<'command.run'>).catch(() => undefined)
+  await clock.advance(55 * 60_000)
+  expect(forks).toHaveLength(1)
+})
+
+test('the Routes pane Auto button says why it cannot act on the 5-minute cache', async ($, on) => {
+  const { toasts } = await warmSession($, on)
+  await route($, 'ttl 5')
+  const pane = await mountPane($, 'route')
+  await pane.press({ key: 'warm-auto' })
+  await pane.unmount()
+  expect(toasts.at(-1)).toBe('Auto keep warm on, but it needs the 60-minute cache: /route ttl 60.')
+})
+
+test('a command of yours that reaches the model re-arms auto keep warm', async ($, on) => {
+  const { clock, forks } = await warmSession($, on, [], { autoWarm: true, warmHours: 4 })
+  await clock.advance(54 * 60_000)
+  await route($, 'warm stop')
+  await $.command.run({ command: 'review', args: '', origin: { kind: 'composer' } } as unknown as Args<'command.run'>)
+  await $.turn.start({ text: '/review', turnId: 'b' })
+  await step($, 'b')
+  await complete($, 'b')
+  await clock.advance(54 * 60_000)
+  expect(forks).toHaveLength(2)
 })

@@ -65,6 +65,7 @@ Then restart or `/reload-plugins`. Settings carry over. See [CHANGELOG.md](CHANG
 | `/route handoffs` / `handoffs auto on\|off` | Open the Handoffs pane / save handoffs before the cache goes cold (default off) |
 | `/route away` | The ways to step away, priced for this session |
 | `/route warm [<n>h]` / `warm stop` | Keep the cache warm while away (default 4 h, at most 6; 60-minute cache only) |
+| `/route warm auto on\|off` | Start keep warm by itself when a session sits idle (all sessions; off by default) |
 | `/route unused` | What this repo leaves unused, and how to turn it off |
 | `/route guard refuse\|warn\|off` | What a send onto a cold cache does (default `refuse`) |
 | `/route ttl 5\|60` | Prompt-cache lifetime in minutes (default 60) |

@@ -19,7 +19,7 @@ import { ENGINE, asEffort, routeForSpawn } from './routing/routes'
 import { registerRouting, renderRoutesPane, routingBandHead, routingDecide, routingNoteApplied, routingOnSpawn, routingOnTurnStart, routingVerb } from './routing/feature'
 import { handoffsAfterPrompt, handoffsBand, handoffsOnFreshContext, handoffsOnOpen, handoffsOnSessionStart, handoffsOnTick, handoffsOnTurnComplete, handoffsOnTurnStart, handoffsOnUserPrompt, handoffsOnWrite, handoffsVerb, registerHandoffs, setAutoHandoff } from './handoffs/feature'
 import { bandView, warmLineView } from './ui/band'
-import { closeContextPane, contextBand, contextOnUserInput, contextNoteCommand, contextOnSessionStart, contextOnTick, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext, startWarmWithToast, stopWarm, warmBand } from './context/feature'
+import { closeContextPane, contextBand, contextOnUserInput, contextOnPersonSend, contextNoteCommand, contextOnSessionStart, contextOnTick, contextOnTurnStart, contextVerb, holdColdCommand, holdColdPrompt, registerContext, setShowNext, setAutoWarmWithToast, startWarmWithToast, stopWarm, warmBand } from './context/feature'
 import { COST_TABS, COST_TAB_LABEL, PANES, isTarget, paneOf } from './ui/kit'
 import type { Open, Target } from './ui/kit'
 import { closeCostPanes, costBand, costOnSessionStart, registerCost, registerCostFooter, setCostTab } from './cost/feature'
@@ -296,13 +296,15 @@ export const register: Register = on => {
       session.pendingPrompt = commandLabel(e.text)
       if (!e.text.trimStart().startsWith('/')) contextNoteCommand(undefined)
     }
-    if (USER_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) session.corrections = isCorrection(e.text) ? session.corrections + 1 : 0
+    const isPersonPrompt = USER_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')
+    if (isPersonPrompt) session.corrections = isCorrection(e.text) ? session.corrections + 1 : 0
     if (USER_ORIGINS.has(e.origin.kind) && commandLabel(e.text) !== '/route') await clearCard($)
     const out = await next(e)
     // Marked once the prompt is through: a hook further down may still drop it.
     if (resumeText !== undefined && out.drop === undefined) {
       await handoffsAfterPrompt($, resumeText)
     }
+    if (isPersonPrompt && out.drop === undefined) await contextOnPersonSend($)
     return out
   }).catch(($, e, next) => next(e))
 
@@ -314,7 +316,7 @@ export const register: Register = on => {
     const held = await holdColdCommand($, cfg, e, guardWhy(cfg))
     if (held !== undefined) return held
     session.pendingPrompt = `/${e.command}`
-    contextNoteCommand(e.command)
+    contextNoteCommand(e.command, USER_ORIGINS.has(e.origin.kind))
     const done = await next(e)
     if (e.command === 'clear') {
       session.boundary = undefined
@@ -423,6 +425,7 @@ export const register: Register = on => {
       setGuard: (mode: ColdGuard) => void setConfigAndRefresh($, c => ({ ...c, coldGuard: mode })),
       setTtl: minutes => void setConfigAndRefresh($, c => ({ ...c, cacheTtlMinutes: minutes })),
       setWarmHours: hours => void setConfigAndRefresh($, c => ({ ...c, warmHours: hours })),
+      setAutoWarm: isOn => void setAutoWarmWithToast($, isOn).catch(() => undefined),
       setWarm: isOn => void (isOn ? startWarmWithToast($) : stopWarm($)).catch(() => undefined),
       setKeepText: keep => void setKeepText($, keep),
       setLevels: (kind, band) => void setLevel($, kind, band),

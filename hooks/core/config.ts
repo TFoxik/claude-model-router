@@ -19,6 +19,7 @@ export const DEFAULT_CONFIG: RouterConfig = {
   autoHandoff: false,
   showNext: true,
   warmHours: 4,
+  autoWarm: false,
   levels: {
     cache: { warn: 80, bad: 50 },
     context: { warn: CONTEXT_WARN * 100, bad: CONTEXT_CRITICAL * 100 },
@@ -170,6 +171,7 @@ export function sanitizeConfig(stored: unknown): RouterConfig {
     autoHandoff: typeof s.autoHandoff === 'boolean' ? s.autoHandoff : DEFAULT_CONFIG.autoHandoff,
     showNext: typeof s.showNext === 'boolean' ? s.showNext : DEFAULT_CONFIG.showNext,
     warmHours: WARM_HOURS.includes(s.warmHours as WarmHours) ? (s.warmHours as WarmHours) : DEFAULT_CONFIG.warmHours,
+    autoWarm: typeof s.autoWarm === 'boolean' ? s.autoWarm : DEFAULT_CONFIG.autoWarm,
     levels: sanitizeLevels(s.levels),
   }
 }

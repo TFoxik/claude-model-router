@@ -23,6 +23,8 @@ export type RouterConfig = {
   showNext: boolean
   /** The longest a keep-warm run pings before it stops on its own. */
   warmHours: WarmHours
+  /** An idle session starts a keep-warm run by itself in the cache's last minutes. */
+  autoWarm: boolean
   /** Where the band's cache, context and plan-limit percentages turn amber and red. */
   levels: Levels
 }
@@ -36,6 +38,8 @@ export type LevelKind = keyof Levels
 export type WarmHours = 1 | 2 | 4 | 6
 /** A keep-warm run: when it started, when it stops at the latest, and what its pings cost so far. */
 export type WarmRun = { until: number; usd: number; pings: number }
+/** The person's last send that reached the model, and whether a keep-warm run has served the idle stretch after it. */
+export type LastSend = { at: number; hasRun: boolean }
 export type ColdGuard = 'refuse' | 'warn' | 'off'
 export type Scope = 'repo' | 'all'
 
@@ -144,6 +148,7 @@ declare module 'claude-code' {
       learnCard: LearnCard | null
       carried: Carried | null
       warmRun: WarmRun | null
+      lastSend: LastSend | null
       handoffs: Handoffs
       handoffScope: Scope
       handoffClosedShown: boolean
