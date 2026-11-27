@@ -74,6 +74,13 @@ test('commits and pull requests are boundaries; other git commands are not', () 
   expect(boundaryOf("echo 'gh pr create'")).toBeUndefined()
   expect(boundaryOf('git commit-tree HEAD^{tree}')).toBeUndefined()
   expect(boundaryOf('git commit -m "fix \\"quoted\\" bug" && git push')).toBe('commit')
+  expect(boundaryOf('git -- commit')).toBe('commit')
+})
+
+test('a long run of dashed flags does not make the commit check backtrack', () => {
+  const started = Date.now()
+  expect(boundaryOf(`git${' ---'.repeat(5000)} !`)).toBeUndefined()
+  expect(Date.now() - started).toBeLessThan(200)
 })
 
 const SKILL_STEP = 'write a handoff with /handoff, /clear, then resume from it'

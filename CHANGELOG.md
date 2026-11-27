@@ -1,5 +1,13 @@
 # Release notes
 
+## 1.11.1 — 2026-11-27
+
+Maintenance release: a fix for a hook that could hang.
+
+### 🐛 Bug fixes
+
+- **A command with a long run of dashed flags could freeze the hook** that spots commits. It now finishes at once.
+
 ## 1.11.0 — 2026-11-20
 
 Keep warm can now start by itself, so you don't have to remember it before a break.

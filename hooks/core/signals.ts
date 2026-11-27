@@ -56,7 +56,7 @@ export function boundaryOf(command: string): Boundary | undefined {
   // Quoted text is an argument, such as a commit message or an echo, never the command itself.
   const bare = command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''")
   if (/\bgh\s+pr\s+(create|merge)\b/.test(bare)) return 'pr'
-  if (/\bgit(?:\s+--?[\w-]+(?:=\S+|\s+[^\s-]\S*)?)*\s+commit(?![\w-])/.test(bare) && !/--dry-run/.test(bare)) return 'commit'
+  if (/\bgit(?:\s+-[\w-]+(?:=\S+|\s+[^\s-]\S*)?)*\s+commit(?![\w-])/.test(bare) && !/--dry-run/.test(bare)) return 'commit'
   return undefined
 }
 
